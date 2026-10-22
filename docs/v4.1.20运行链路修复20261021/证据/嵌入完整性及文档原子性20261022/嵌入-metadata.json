@@ -1,0 +1,10 @@
+{
+  "worktree": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/.claude/worktrees/great-heisenberg-8a6fa9",
+  "head": "04675e74ad678d3fba67773c971c3bb91fca7365",
+  "baseline_sha256": "60fbe64370d8ce4cdc442b831dc979d897ee9aa4a6a6a9056fdbeef21ceece4e",
+  "files": {
+    "backend/app/services/embedding_service.py": "8271382ea173cc6dd7acc4705aa64a71b8ec4248c392a9d94171066e24590f3a",
+    "backend/tests/unit/services/test_embedding_usage_recording.py": "cec8b89c8bb48988aa29e2cc2abd67651be71eed42d35dc02a7441d797f55099"
+  },
+  "note": "Red replay uses the HEAD service in memory and the current regression tests. The alias bridge only makes the old imported get_embedding_config see the existing MockTransport fixture."
+}

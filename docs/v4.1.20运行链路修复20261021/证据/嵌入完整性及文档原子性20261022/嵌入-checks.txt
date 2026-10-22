@@ -1,0 +1,5 @@
+command: ['backend/.venv/bin/ruff', 'check', '--no-cache', 'backend/app/services/embedding_service.py', 'backend/tests/unit/services/test_embedding_usage_recording.py']
+All checks passed!
+exit_code=0
+command: ['git', 'diff', '--check', '--', 'backend/app/services/embedding_service.py', 'backend/tests/unit/services/test_embedding_usage_recording.py']
+exit_code=0

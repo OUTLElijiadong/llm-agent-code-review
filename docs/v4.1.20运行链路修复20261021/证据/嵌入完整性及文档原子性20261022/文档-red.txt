@@ -1,0 +1,107 @@
+mode=red; worktree=/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/.claude/worktrees/great-heisenberg-8a6fa9; dotenv=blocked; network=blocked; database=isolated SQLite
+============================= test session starts ==============================
+platform darwin -- Python 3.11.16, pytest-9.1.1, pluggy-1.7.0 -- /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/.claude/worktrees/great-heisenberg-8a6fa9/backend/.venv/bin/python
+rootdir: /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/.claude/worktrees/great-heisenberg-8a6fa9/backend
+configfile: pyproject.toml
+plugins: cov-5.0.0, asyncio-1.4.0, anyio-4.14.2, platformdirs-4.13.5
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 17 items
+
+backend/tests/unit/services/test_embedding_usage_recording.py::test_remote_failure_rejects_new_knowledge_without_hash_chunks[kb] PASSED [  5%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_remote_failure_rejects_new_knowledge_without_hash_chunks[agent] FAILED [ 11%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_remote_failure_rejects_new_knowledge_without_hash_chunks[agent_strict] PASSED [ 17%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_agent_embedding_validation_precedes_document_persistence[vectors0-api:embedding] FAILED [ 23%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_agent_embedding_validation_precedes_document_persistence[None-api:embedding] FAILED [ 29%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_agent_embedding_validation_precedes_document_persistence[vectors2-api:embedding] FAILED [ 35%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_agent_embedding_validation_precedes_document_persistence[vectors3-api:embedding] FAILED [ 41%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_agent_embedding_validation_precedes_document_persistence[vectors4-api:embedding] FAILED [ 47%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_agent_embedding_validation_precedes_document_persistence[vectors5-api:embedding] FAILED [ 52%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_agent_embedding_validation_precedes_document_persistence[vectors6-api:embedding] FAILED [ 58%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_agent_embedding_validation_precedes_document_persistence[vectors7-None] FAILED [ 64%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_agent_document_and_chunks_are_visible_in_the_same_commit FAILED [ 70%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_agent_chunk_write_failure_does_not_commit_empty_document FAILED [ 76%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_agent_embedding_success_preserves_approval_policy[low-1.0-active] PASSED [ 82%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_agent_embedding_success_preserves_approval_policy[high-1.0-pending_approval] PASSED [ 88%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_agent_embedding_success_preserves_approval_policy[low-0.2-pending_approval] PASSED [ 94%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_agent_private_source_is_rejected_before_embedding_or_persistence PASSED [100%]
+
+=================================== FAILURES ===================================
+_____ test_remote_failure_rejects_new_knowledge_without_hash_chunks[agent] _____
+backend/tests/unit/services/test_embedding_usage_recording.py:343: in test_remote_failure_rejects_new_knowledge_without_hash_chunks
+    assert ledger_db.query(doc_type).count() == document_count
+E   AssertionError: assert 2 == 1
+E    +  where 2 = count()
+E    +    where count = <sqlalchemy.orm.query.Query object at 0x10b404110>.count
+E    +      where <sqlalchemy.orm.query.Query object at 0x10b404110> = query(<class 'app.models.agent_governance.AgentKnowledgeDoc'>)
+E    +        where query = <sqlalchemy.orm.session.Session object at 0x109761290>.query
+----------------------------- Captured stderr call -----------------------------
+2026-10-22 14:13:39.701 | WARNING  | app.services.embedding_service:embed_texts:206 - [embedding] API 调用失败,未生成替代向量: HTTPStatusError
+_ test_agent_embedding_validation_precedes_document_persistence[vectors0-api:embedding] _
+backend/tests/unit/services/test_embedding_usage_recording.py:449: in test_agent_embedding_validation_precedes_document_persistence
+    with pytest.raises(RuntimeError, match="嵌入"):
+E   Failed: DID NOT RAISE RuntimeError
+_ test_agent_embedding_validation_precedes_document_persistence[None-api:embedding] _
+backend/tests/unit/services/test_embedding_usage_recording.py:450: in test_agent_embedding_validation_precedes_document_persistence
+    agent_knowledge_service.add_document(
+backend/app/services/agent_knowledge_service.py:159: in add_document
+    vec = vectors[seq] if seq < len(vectors) else []
+                                ^^^^^^^^^^^^
+E   TypeError: object of type 'NoneType' has no len()
+_ test_agent_embedding_validation_precedes_document_persistence[vectors2-api:embedding] _
+backend/tests/unit/services/test_embedding_usage_recording.py:449: in test_agent_embedding_validation_precedes_document_persistence
+    with pytest.raises(RuntimeError, match="嵌入"):
+E   Failed: DID NOT RAISE RuntimeError
+_ test_agent_embedding_validation_precedes_document_persistence[vectors3-api:embedding] _
+backend/tests/unit/services/test_embedding_usage_recording.py:449: in test_agent_embedding_validation_precedes_document_persistence
+    with pytest.raises(RuntimeError, match="嵌入"):
+E   Failed: DID NOT RAISE RuntimeError
+_ test_agent_embedding_validation_precedes_document_persistence[vectors4-api:embedding] _
+backend/tests/unit/services/test_embedding_usage_recording.py:449: in test_agent_embedding_validation_precedes_document_persistence
+    with pytest.raises(RuntimeError, match="嵌入"):
+E   Failed: DID NOT RAISE RuntimeError
+_ test_agent_embedding_validation_precedes_document_persistence[vectors5-api:embedding] _
+backend/tests/unit/services/test_embedding_usage_recording.py:449: in test_agent_embedding_validation_precedes_document_persistence
+    with pytest.raises(RuntimeError, match="嵌入"):
+E   Failed: DID NOT RAISE RuntimeError
+_ test_agent_embedding_validation_precedes_document_persistence[vectors6-api:embedding] _
+backend/tests/unit/services/test_embedding_usage_recording.py:449: in test_agent_embedding_validation_precedes_document_persistence
+    with pytest.raises(RuntimeError, match="嵌入"):
+E   Failed: DID NOT RAISE RuntimeError
+_ test_agent_embedding_validation_precedes_document_persistence[vectors7-None] _
+backend/tests/unit/services/test_embedding_usage_recording.py:449: in test_agent_embedding_validation_precedes_document_persistence
+    with pytest.raises(RuntimeError, match="嵌入"):
+E   Failed: DID NOT RAISE RuntimeError
+________ test_agent_document_and_chunks_are_visible_in_the_same_commit _________
+backend/tests/unit/services/test_embedding_usage_recording.py:484: in test_agent_document_and_chunks_are_visible_in_the_same_commit
+    assert snapshots == [(1, 2)]
+E   AssertionError: assert [(1, 0), (1, 2)] == [(1, 2)]
+E
+E     At index 0 diff: (1, 0) != (1, 2)
+E     Left contains one more item: (1, 2)
+E
+E     Full diff:
+E       [
+E     +     (...
+E
+E     ...Full output truncated (8 lines hidden), use '-vv' to show
+________ test_agent_chunk_write_failure_does_not_commit_empty_document _________
+backend/tests/unit/services/test_embedding_usage_recording.py:510: in test_agent_chunk_write_failure_does_not_commit_empty_document
+    assert ledger_db.query(AgentKnowledgeDoc).count() == 0
+E   AssertionError: assert 1 == 0
+E    +  where 1 = count()
+E    +    where count = <sqlalchemy.orm.query.Query object at 0x10b430790>.count
+E    +      where <sqlalchemy.orm.query.Query object at 0x10b430790> = query(<class 'app.models.agent_governance.AgentKnowledgeDoc'>)
+E    +        where query = <sqlalchemy.orm.session.Session object at 0x10b75cf50>.query
+=========================== short test summary info ============================
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_remote_failure_rejects_new_knowledge_without_hash_chunks[agent]
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_agent_embedding_validation_precedes_document_persistence[vectors0-api:embedding]
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_agent_embedding_validation_precedes_document_persistence[None-api:embedding]
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_agent_embedding_validation_precedes_document_persistence[vectors2-api:embedding]
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_agent_embedding_validation_precedes_document_persistence[vectors3-api:embedding]
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_agent_embedding_validation_precedes_document_persistence[vectors4-api:embedding]
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_agent_embedding_validation_precedes_document_persistence[vectors5-api:embedding]
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_agent_embedding_validation_precedes_document_persistence[vectors6-api:embedding]
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_agent_embedding_validation_precedes_document_persistence[vectors7-None]
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_agent_document_and_chunks_are_visible_in_the_same_commit
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_agent_chunk_write_failure_does_not_commit_empty_document
+======================== 11 failed, 6 passed in 10.90s =========================

@@ -120,12 +120,12 @@ def add_document(
         if run is None:
             raise ForbiddenError("私人知识来源不属于当前账号", code=40300)
     pieces = chunk_text(content)
-    strict_vectors = None
-    if require_api_embedding:
-        # 操作手册替换必须先确认真实向量完整；失败时不创建空文档或替换旧手册。
+    if pieces or require_api_embedding:
+        # 先完成嵌入和完整性校验，失败时不创建空文档；手册额外要求真实远端向量。
         vectors, tag = embedding_service.embed_texts(db, pieces, user_id=user_id)
         if (
-            not pieces or not isinstance(tag, str) or not tag.startswith("api:")
+            not pieces or not isinstance(tag, str) or not tag
+            or (require_api_embedding and not tag.startswith("api:"))
             or not isinstance(vectors, (list, tuple)) or len(vectors) != len(pieces)
             or not vectors or not isinstance(vectors[0], (list, tuple)) or not vectors[0]
             or any(
@@ -135,8 +135,9 @@ def add_document(
                 for vector in vectors
             )
         ):
-            raise RuntimeError("操作手册真实嵌入不可用或不完整，保留原手册，请恢复嵌入服务后重试")
-        strict_vectors = (vectors, tag)
+            if require_api_embedding:
+                raise RuntimeError("操作手册真实嵌入不可用或不完整，保留原手册，请恢复嵌入服务后重试")
+            raise RuntimeError("知识嵌入不可用或不完整，未创建文档，请恢复嵌入服务后重试")
     status = "active" if risk_level in ("low", "medium") and confidence >= 0.6 else "pending_approval"
     doc = AgentKnowledgeDoc(
         agent_code=agent_code,
@@ -150,13 +151,12 @@ def add_document(
         chunk_count=0,
     )
     db.add(doc)
-    db.commit()
-    db.refresh(doc)
+    # 仅取得文档主键，文档与全部切片在下方同一事务提交。
+    db.flush()
 
     if pieces:
-        vectors, tag = strict_vectors or embedding_service.embed_texts(db, pieces, user_id=user_id)
         for seq, piece in enumerate(pieces):
-            vec = vectors[seq] if seq < len(vectors) else []
+            vec = vectors[seq]
             db.add(AgentKnowledgeChunk(
                 doc_id=doc.id,
                 agent_code=agent_code,

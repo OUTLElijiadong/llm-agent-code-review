@@ -21,11 +21,11 @@ repair_succeeds = True
         repaired = json.dumps({"issues": [{"title": "缺少权限校验", "severity": "高"}]})
         calls = []
         logs = []
-    
+
         def call_raw(_agent, *_args, **kwargs):
             calls.append(kwargs)
             return (repaired if repair_succeeds and len(calls) == 2 else mixed), {}
-    
+
         monkeypatch.setattr(module, "_call_raw_for_task", call_raw)
         monkeypatch.setattr(module.DeepSeekAgent, "log_deferred", staticmethod(lambda *_a, **kw: logs.append(kw)))
         if repair_succeeds:
@@ -33,7 +33,7 @@ repair_succeeds = True
             assert len(issues) == 1
 >           assert [log["status"] for log in logs] == ["failed", "success"]
 E           AssertionError: assert ['success'] == ['failed', 'success']
-E             
+E
 E             At index 0 diff: 'success' != 'failed'
 E             Right contains one more item: 'success'
 E             Use -v to get more diff
@@ -51,11 +51,11 @@ repair_succeeds = False
         repaired = json.dumps({"issues": [{"title": "缺少权限校验", "severity": "高"}]})
         calls = []
         logs = []
-    
+
         def call_raw(_agent, *_args, **kwargs):
             calls.append(kwargs)
             return (repaired if repair_succeeds and len(calls) == 2 else mixed), {}
-    
+
         monkeypatch.setattr(module, "_call_raw_for_task", call_raw)
         monkeypatch.setattr(module.DeepSeekAgent, "log_deferred", staticmethod(lambda *_a, **kw: logs.append(kw)))
         if repair_succeeds:
@@ -89,23 +89,23 @@ monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10c07eb50>
         """真实供应商 JSON 异常类型也进入圆桌修复，且最多修复一次。"""
         from app.ai.deepseek_agent import DeepSeekJsonOutputError
         calls = []
-    
+
         def call_raw(_agent, *_args, **kwargs):
             calls.append(kwargs)
             if len(calls) == 1:
                 raise DeepSeekJsonOutputError("AI 返回非合法 JSON")
             return '{"issues":[]}', {}
-    
+
         monkeypatch.setattr(module, "_call_raw_for_task", call_raw)
         monkeypatch.setattr(module.DeepSeekAgent, "log_deferred", staticmethod(lambda *_a, **_kw: None))
 >       assert module._extract_issues([_turn(1)], "x=1", "python", "provider.py", RecordingAgent(), object(), 1, 2, 3) == []
                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-tests/unit/test_discussion_orchestrator_coverage.py:3444: 
-_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/unit/test_discussion_orchestrator_coverage.py:3444:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 app/ai/discussion_orchestrator.py:3170: in _extract_issues
     run_batch(agent_turns, code)
-_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
 group = [DiscussionTurn(turn_id=1, agent_code='security', agent_name='安全代理', role='agent', content='发现问题', action='speak', stance='neutral', reply_to=None, round_index=0, seq=0, timestamp='2026-10-22T05:18:03.064578+00:00')]
 code_view = 'x=1', windowed = False
@@ -124,7 +124,7 @@ code_view = 'x=1', windowed = False
         ]
         fence = chr(96) * 3
         scope = "代码片段（行号是源文件绝对行号）" if windowed else "完整代码"
-    
+
         def prompt_for(projected_history: str) -> str:
             return (
                 f"## 审查文件: {file_name}({language}) · {scope}\n"
@@ -133,7 +133,7 @@ code_view = 'x=1', windowed = False
                 f"本批目标来源 ID：{', '.join(target_sources)}。"
                 "请结合后续反驳，只抽取本批目标发言中最终成立的问题为 JSON。"
             )
-    
+
         user_prompt = prompt_for(history)
         budget_error = _roundtable_input_budget_error(
             system, user_prompt, max_output_tokens=budgets[-1],
@@ -222,7 +222,7 @@ monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10c0dc910>
         saved = db.get(ReviewTask, task.id)
 >       assert saved.status == "failed"
 E       AssertionError: assert 'success' == 'failed'
-E         
+E
 E         - failed
 E         + success
 

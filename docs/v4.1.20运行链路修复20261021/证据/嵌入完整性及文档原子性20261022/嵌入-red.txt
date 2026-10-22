@@ -1,0 +1,265 @@
+mode=red; worktree=/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/.claude/worktrees/great-heisenberg-8a6fa9; dotenv=blocked; network=blocked; database=isolated SQLite
+============================= test session starts ==============================
+platform darwin -- Python 3.11.16, pytest-9.1.1, pluggy-1.7.0 -- /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/.claude/worktrees/great-heisenberg-8a6fa9/backend/.venv/bin/python
+rootdir: /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/.claude/worktrees/great-heisenberg-8a6fa9/backend
+configfile: pyproject.toml
+plugins: cov-5.0.0, asyncio-1.4.0, anyio-4.14.2, platformdirs-4.13.5
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 22 items
+
+backend/tests/unit/services/test_embedding_usage_recording.py::test_reembed_exhausted_remote_failure_preserves_both_domains[http] FAILED [  4%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_reembed_exhausted_remote_failure_preserves_both_domains[timeout] FAILED [  9%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_reembed_exhausted_remote_failure_preserves_both_domains[incomplete] FAILED [ 13%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_reembed_failed_batch_continues_and_can_be_recovered FAILED [ 18%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_remote_failure_rejects_new_knowledge_without_hash_chunks[kb] FAILED [ 22%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_remote_failure_rejects_new_knowledge_without_hash_chunks[agent] FAILED [ 27%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_remote_failure_rejects_new_knowledge_without_hash_chunks[agent_strict] FAILED [ 31%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data0] FAILED [ 36%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data1] FAILED [ 40%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data2] FAILED [ 45%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data3] FAILED [ 50%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data4] FAILED [ 54%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data5] FAILED [ 59%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data6] FAILED [ 63%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data7] FAILED [ 68%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data8] FAILED [ 72%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data9] FAILED [ 77%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_reembed_incomplete_batch_never_partially_overwrites FAILED [ 81%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_remote_embedding_dimensions_must_match_across_http_batches FAILED [ 86%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_reembed_includes_unembedded_chunks_in_both_domains FAILED [ 90%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_disabled_configured_remote_preserves_vectors_and_rejects_new_data[kb] FAILED [ 95%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_disabled_configured_remote_preserves_vectors_and_rejects_new_data[agent] FAILED [100%]
+
+=================================== FAILURES ===================================
+______ test_reembed_exhausted_remote_failure_preserves_both_domains[http] ______
+backend/tests/unit/services/test_embedding_usage_recording.py:288: in test_reembed_exhausted_remote_failure_preserves_both_domains
+    assert [(chunk.embedding, chunk.embed_model) for chunk in chunks] == snapshots
+E   AssertionError: assert [('[0.0, 0.0,...llback:hash')] == [('[0.25, -0....i:old-model')]
+E
+E     At index 0 diff: ('[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.7071067811865475, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0...
+E
+E     ...Full output truncated (53 lines hidden), use '-vv' to show
+----------------------------- Captured stderr call -----------------------------
+2026-10-22 13:59:59.254 | WARNING  | app.services.embedding_service:embed_texts:182 - [embedding] API 调用失败,降级为本地向量: HTTPStatusError
+2026-10-22 13:59:59.255 | WARNING  | app.services.embedding_service:_reembed_model:269 - [embedding.reembed] kb_chunks 批次第 1 次失败, 重试 (last_id=1)
+2026-10-22 13:59:59.262 | WARNING  | app.services.embedding_service:embed_texts:182 - [embedding] API 调用失败,降级为本地向量: HTTPStatusError
+2026-10-22 13:59:59.263 | WARNING  | app.services.embedding_service:_reembed_model:269 - [embedding.reembed] kb_chunks 批次第 2 次失败, 重试 (last_id=1)
+2026-10-22 13:59:59.287 | WARNING  | app.services.embedding_service:embed_texts:182 - [embedding] API 调用失败,降级为本地向量: HTTPStatusError
+2026-10-22 13:59:59.289 | WARNING  | app.services.embedding_service:_reembed_model:269 - [embedding.reembed] kb_chunks 批次第 3 次失败, 重试 (last_id=1)
+2026-10-22 13:59:59.289 | WARNING  | app.services.embedding_service:_reembed_model:274 - [embedding.reembed] kb_chunks 批次多次失败已降级哈希 (last_id=1)
+2026-10-22 13:59:59.289 | WARNING  | app.services.embedding_service:_reembed_model:278 - [embedding.reembed] kb_chunks 批次被嵌入端点拒绝, 已降级哈希 (last_id=1)
+2026-10-22 13:59:59.301 | INFO     | app.services.embedding_service:_reembed_model:284 - [embedding.reembed] kb_chunks 重建至 id=1 (累计 1)
+2026-10-22 13:59:59.336 | WARNING  | app.services.embedding_service:embed_texts:182 - [embedding] API 调用失败,降级为本地向量: HTTPStatusError
+2026-10-22 13:59:59.337 | WARNING  | app.services.embedding_service:_reembed_model:269 - [embedding.reembed] agent_chunks 批次第 1 次失败, 重试 (last_id=1)
+2026-10-22 13:59:59.368 | WARNING  | app.services.embedding_service:embed_texts:182 - [embedding] API 调用失败,降级为本地向量: HTTPStatusError
+2026-10-22 13:59:59.368 | WARNING  | app.services.embedding_service:_reembed_model:269 - [embedding.reembed] agent_chunks 批次第 2 次失败, 重试 (last_id=1)
+2026-10-22 13:59:59.380 | WARNING  | app.services.embedding_service:embed_texts:182 - [embedding] API 调用失败,降级为本地向量: HTTPStatusError
+2026-10-22 13:59:59.380 | WARNING  | app.services.embedding_service:_reembed_model:269 - [embedding.reembed] agent_chunks 批次第 3 次失败, 重试 (last_id=1)
+2026-10-22 13:59:59.381 | WARNING  | app.services.embedding_service:_reembed_model:274 - [embedding.reembed] agent_chunks 批次多次失败已降级哈希 (last_id=1)
+2026-10-22 13:59:59.381 | WARNING  | app.services.embedding_service:_reembed_model:278 - [embedding.reembed] agent_chunks 批次被嵌入端点拒绝, 已降级哈希 (last_id=1)
+2026-10-22 13:59:59.383 | INFO     | app.services.embedding_service:_reembed_model:284 - [embedding.reembed] agent_chunks 重建至 id=1 (累计 1)
+____ test_reembed_exhausted_remote_failure_preserves_both_domains[timeout] _____
+backend/tests/unit/services/test_embedding_usage_recording.py:288: in test_reembed_exhausted_remote_failure_preserves_both_domains
+    assert [(chunk.embedding, chunk.embed_model) for chunk in chunks] == snapshots
+E   AssertionError: assert [('[0.0, 0.0,...llback:hash')] == [('[0.25, -0....i:old-model')]
+E
+E     At index 0 diff: ('[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.7071067811865475, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0...
+E
+E     ...Full output truncated (53 lines hidden), use '-vv' to show
+----------------------------- Captured stderr call -----------------------------
+2026-10-22 14:00:00.005 | WARNING  | app.services.embedding_service:embed_texts:182 - [embedding] API 调用失败,降级为本地向量: ReadTimeout
+2026-10-22 14:00:00.005 | WARNING  | app.services.embedding_service:_reembed_model:269 - [embedding.reembed] kb_chunks 批次第 1 次失败, 重试 (last_id=1)
+2026-10-22 14:00:00.010 | WARNING  | app.services.embedding_service:embed_texts:182 - [embedding] API 调用失败,降级为本地向量: ReadTimeout
+2026-10-22 14:00:00.010 | WARNING  | app.services.embedding_service:_reembed_model:269 - [embedding.reembed] kb_chunks 批次第 2 次失败, 重试 (last_id=1)
+2026-10-22 14:00:00.013 | WARNING  | app.services.embedding_service:embed_texts:182 - [embedding] API 调用失败,降级为本地向量: ReadTimeout
+2026-10-22 14:00:00.013 | WARNING  | app.services.embedding_service:_reembed_model:269 - [embedding.reembed] kb_chunks 批次第 3 次失败, 重试 (last_id=1)
+2026-10-22 14:00:00.013 | WARNING  | app.services.embedding_service:_reembed_model:274 - [embedding.reembed] kb_chunks 批次多次失败已降级哈希 (last_id=1)
+2026-10-22 14:00:00.013 | WARNING  | app.services.embedding_service:_reembed_model:278 - [embedding.reembed] kb_chunks 批次被嵌入端点拒绝, 已降级哈希 (last_id=1)
+2026-10-22 14:00:00.015 | INFO     | app.services.embedding_service:_reembed_model:284 - [embedding.reembed] kb_chunks 重建至 id=1 (累计 1)
+2026-10-22 14:00:00.020 | WARNING  | app.services.embedding_service:embed_texts:182 - [embedding] API 调用失败,降级为本地向量: ReadTimeout
+2026-10-22 14:00:00.020 | WARNING  | app.services.embedding_service:_reembed_model:269 - [embedding.reembed] agent_chunks 批次第 1 次失败, 重试 (last_id=1)
+2026-10-22 14:00:00.023 | WARNING  | app.services.embedding_service:embed_texts:182 - [embedding] API 调用失败,降级为本地向量: ReadTimeout
+2026-10-22 14:00:00.023 | WARNING  | app.services.embedding_service:_reembed_model:269 - [embedding.reembed] agent_chunks 批次第 2 次失败, 重试 (last_id=1)
+2026-10-22 14:00:00.026 | WARNING  | app.services.embedding_service:embed_texts:182 - [embedding] API 调用失败,降级为本地向量: ReadTimeout
+2026-10-22 14:00:00.026 | WARNING  | app.services.embedding_service:_reembed_model:269 - [embedding.reembed] agent_chunks 批次第 3 次失败, 重试 (last_id=1)
+2026-10-22 14:00:00.027 | WARNING  | app.services.embedding_service:_reembed_model:274 - [embedding.reembed] agent_chunks 批次多次失败已降级哈希 (last_id=1)
+2026-10-22 14:00:00.027 | WARNING  | app.services.embedding_service:_reembed_model:278 - [embedding.reembed] agent_chunks 批次被嵌入端点拒绝, 已降级哈希 (last_id=1)
+2026-10-22 14:00:00.029 | INFO     | app.services.embedding_service:_reembed_model:284 - [embedding.reembed] agent_chunks 重建至 id=1 (累计 1)
+___ test_reembed_exhausted_remote_failure_preserves_both_domains[incomplete] ___
+backend/tests/unit/services/test_embedding_usage_recording.py:289: in test_reembed_exhausted_remote_failure_preserves_both_domains
+    assert stats == {"kb_chunks": 0, "agent_chunks": 0, "failed_batches": 2}
+E   AssertionError: assert {'kb_chunks':...d_batches': 0} == {'kb_chunks':...d_batches': 2}
+E
+E     Differing items:
+E     {'agent_chunks': 1} != {'agent_chunks': 0}
+E     {'failed_batches': 0} != {'failed_batches': 2}
+E     {'kb_chunks': 1} != {'kb_chunks': 0}
+E
+E     Full diff:...
+E
+E     ...Full output truncated (14 lines hidden), use '-vv' to show
+----------------------------- Captured stderr call -----------------------------
+2026-10-22 14:00:00.553 | INFO     | app.services.embedding_service:_reembed_model:284 - [embedding.reembed] kb_chunks 重建至 id=1 (累计 1)
+2026-10-22 14:00:00.560 | INFO     | app.services.embedding_service:_reembed_model:284 - [embedding.reembed] agent_chunks 重建至 id=1 (累计 1)
+___________ test_reembed_failed_batch_continues_and_can_be_recovered ___________
+backend/tests/unit/services/test_embedding_usage_recording.py:304: in test_reembed_failed_batch_continues_and_can_be_recovered
+    assert stats == {"kb_chunks": 1, "agent_chunks": 1, "failed_batches": 1}
+E   AssertionError: assert {'kb_chunks':...d_batches': 1} == {'kb_chunks':...d_batches': 1}
+E
+E     Omitting 2 identical items, use -vv to show
+E     Differing items:
+E     {'kb_chunks': 2} != {'kb_chunks': 1}
+E
+E     Full diff:
+E       {...
+E
+E     ...Full output truncated (7 lines hidden), use '-vv' to show
+----------------------------- Captured stderr call -----------------------------
+2026-10-22 14:00:01.167 | WARNING  | app.services.embedding_service:embed_texts:182 - [embedding] API 调用失败,降级为本地向量: HTTPStatusError
+2026-10-22 14:00:01.167 | WARNING  | app.services.embedding_service:_reembed_model:269 - [embedding.reembed] kb_chunks 批次第 1 次失败, 重试 (last_id=1)
+2026-10-22 14:00:01.181 | WARNING  | app.services.embedding_service:embed_texts:182 - [embedding] API 调用失败,降级为本地向量: HTTPStatusError
+2026-10-22 14:00:01.181 | WARNING  | app.services.embedding_service:_reembed_model:269 - [embedding.reembed] kb_chunks 批次第 2 次失败, 重试 (last_id=1)
+2026-10-22 14:00:01.191 | WARNING  | app.services.embedding_service:embed_texts:182 - [embedding] API 调用失败,降级为本地向量: HTTPStatusError
+2026-10-22 14:00:01.191 | WARNING  | app.services.embedding_service:_reembed_model:269 - [embedding.reembed] kb_chunks 批次第 3 次失败, 重试 (last_id=1)
+2026-10-22 14:00:01.192 | WARNING  | app.services.embedding_service:_reembed_model:274 - [embedding.reembed] kb_chunks 批次多次失败已降级哈希 (last_id=1)
+2026-10-22 14:00:01.192 | WARNING  | app.services.embedding_service:_reembed_model:278 - [embedding.reembed] kb_chunks 批次被嵌入端点拒绝, 已降级哈希 (last_id=1)
+2026-10-22 14:00:01.201 | INFO     | app.services.embedding_service:_reembed_model:284 - [embedding.reembed] kb_chunks 重建至 id=1 (累计 1)
+2026-10-22 14:00:01.209 | INFO     | app.services.embedding_service:_reembed_model:284 - [embedding.reembed] kb_chunks 重建至 id=2 (累计 2)
+2026-10-22 14:00:01.222 | INFO     | app.services.embedding_service:_reembed_model:284 - [embedding.reembed] agent_chunks 重建至 id=1 (累计 1)
+______ test_remote_failure_rejects_new_knowledge_without_hash_chunks[kb] _______
+backend/tests/unit/services/test_embedding_usage_recording.py:329: in test_remote_failure_rejects_new_knowledge_without_hash_chunks
+    with pytest.raises(ExternalServiceError, match="远端嵌入失败") as error:
+E   Failed: DID NOT RAISE ExternalServiceError
+----------------------------- Captured stderr call -----------------------------
+2026-10-22 14:00:02.038 | WARNING  | app.services.embedding_service:embed_texts:182 - [embedding] API 调用失败,降级为本地向量: HTTPStatusError
+_____ test_remote_failure_rejects_new_knowledge_without_hash_chunks[agent] _____
+backend/tests/unit/services/test_embedding_usage_recording.py:329: in test_remote_failure_rejects_new_knowledge_without_hash_chunks
+    with pytest.raises(ExternalServiceError, match="远端嵌入失败") as error:
+E   Failed: DID NOT RAISE ExternalServiceError
+----------------------------- Captured stderr call -----------------------------
+2026-10-22 14:00:02.634 | WARNING  | app.services.embedding_service:embed_texts:182 - [embedding] API 调用失败,降级为本地向量: HTTPStatusError
+_ test_remote_failure_rejects_new_knowledge_without_hash_chunks[agent_strict] __
+backend/tests/unit/services/test_embedding_usage_recording.py:333: in test_remote_failure_rejects_new_knowledge_without_hash_chunks
+    agent_knowledge_service.add_document(
+backend/app/services/agent_knowledge_service.py:138: in add_document
+    raise RuntimeError("操作手册真实嵌入不可用或不完整，保留原手册，请恢复嵌入服务后重试")
+E   RuntimeError: 操作手册真实嵌入不可用或不完整，保留原手册，请恢复嵌入服务后重试
+----------------------------- Captured stderr call -----------------------------
+2026-10-22 14:00:03.295 | WARNING  | app.services.embedding_service:embed_texts:182 - [embedding] API 调用失败,降级为本地向量: HTTPStatusError
+___ test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data0] ___
+backend/tests/unit/services/test_embedding_usage_recording.py:362: in test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing
+    with pytest.raises(ExternalServiceError, match="远端嵌入失败"):
+E   Failed: DID NOT RAISE ExternalServiceError
+___ test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data1] ___
+backend/tests/unit/services/test_embedding_usage_recording.py:362: in test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing
+    with pytest.raises(ExternalServiceError, match="远端嵌入失败"):
+E   Failed: DID NOT RAISE ExternalServiceError
+___ test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data2] ___
+backend/tests/unit/services/test_embedding_usage_recording.py:362: in test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing
+    with pytest.raises(ExternalServiceError, match="远端嵌入失败"):
+E   Failed: DID NOT RAISE ExternalServiceError
+___ test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data3] ___
+backend/tests/unit/services/test_embedding_usage_recording.py:362: in test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing
+    with pytest.raises(ExternalServiceError, match="远端嵌入失败"):
+E   Failed: DID NOT RAISE ExternalServiceError
+___ test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data4] ___
+backend/tests/unit/services/test_embedding_usage_recording.py:362: in test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing
+    with pytest.raises(ExternalServiceError, match="远端嵌入失败"):
+E   Failed: DID NOT RAISE ExternalServiceError
+___ test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data5] ___
+backend/tests/unit/services/test_embedding_usage_recording.py:362: in test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing
+    with pytest.raises(ExternalServiceError, match="远端嵌入失败"):
+E   Failed: DID NOT RAISE ExternalServiceError
+___ test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data6] ___
+backend/tests/unit/services/test_embedding_usage_recording.py:362: in test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing
+    with pytest.raises(ExternalServiceError, match="远端嵌入失败"):
+E   Failed: DID NOT RAISE ExternalServiceError
+___ test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data7] ___
+backend/tests/unit/services/test_embedding_usage_recording.py:362: in test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing
+    with pytest.raises(ExternalServiceError, match="远端嵌入失败"):
+E   Failed: DID NOT RAISE ExternalServiceError
+___ test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data8] ___
+backend/tests/unit/services/test_embedding_usage_recording.py:362: in test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing
+    with pytest.raises(ExternalServiceError, match="远端嵌入失败"):
+E   Failed: DID NOT RAISE ExternalServiceError
+___ test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data9] ___
+backend/tests/unit/services/test_embedding_usage_recording.py:362: in test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing
+    with pytest.raises(ExternalServiceError, match="远端嵌入失败"):
+E   Failed: DID NOT RAISE ExternalServiceError
+___________ test_reembed_incomplete_batch_never_partially_overwrites ___________
+backend/tests/unit/services/test_embedding_usage_recording.py:378: in test_reembed_incomplete_batch_never_partially_overwrites
+    assert [(chunk.embedding, chunk.embed_model) for chunk in chunks] == snapshots
+E   AssertionError: assert [('[0.6, 0.8]...i:old-model')] == [('[0.25, -0....i:old-model')]
+E
+E     At index 0 diff: ('[0.6, 0.8]', 'api:embedding-model') != ('[0.25, -0.75]', 'api:old-model')
+E
+E     Full diff:
+E       [
+E           (
+E     -         '[0.25, -0.75]',...
+E
+E     ...Full output truncated (27 lines hidden), use '-vv' to show
+----------------------------- Captured stderr call -----------------------------
+2026-10-22 14:00:12.694 | INFO     | app.services.embedding_service:_reembed_model:284 - [embedding.reembed] kb_chunks 重建至 id=2 (累计 2)
+2026-10-22 14:00:12.720 | INFO     | app.services.embedding_service:_reembed_model:284 - [embedding.reembed] agent_chunks 重建至 id=2 (累计 2)
+_______ test_remote_embedding_dimensions_must_match_across_http_batches ________
+backend/tests/unit/services/test_embedding_usage_recording.py:388: in test_remote_embedding_dimensions_must_match_across_http_batches
+    with pytest.raises(ExternalServiceError, match="远端嵌入失败"):
+E   Failed: DID NOT RAISE ExternalServiceError
+___________ test_reembed_includes_unembedded_chunks_in_both_domains ____________
+backend/tests/unit/services/test_embedding_usage_recording.py:399: in test_reembed_includes_unembedded_chunks_in_both_domains
+    assert stats == {"kb_chunks": 1, "agent_chunks": 1, "failed_batches": 0}
+E   AssertionError: assert {'kb_chunks':...d_batches': 0} == {'kb_chunks':...d_batches': 0}
+E
+E     Omitting 1 identical items, use -vv to show
+E     Differing items:
+E     {'agent_chunks': 0} != {'agent_chunks': 1}
+E     {'kb_chunks': 0} != {'kb_chunks': 1}
+E
+E     Full diff:...
+E
+E     ...Full output truncated (11 lines hidden), use '-vv' to show
+__ test_disabled_configured_remote_preserves_vectors_and_rejects_new_data[kb] __
+backend/tests/unit/services/test_embedding_usage_recording.py:415: in test_disabled_configured_remote_preserves_vectors_and_rejects_new_data
+    assert (chunk.embedding, chunk.embed_model) == snapshot
+E   AssertionError: assert ('[0.0, 0.0, ...allback:hash') == ('[0.25, -0.7...pi:old-model')
+E
+E     At index 0 diff: '[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.7071067811865475, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0....
+E
+E     ...Full output truncated (27 lines hidden), use '-vv' to show
+----------------------------- Captured stderr call -----------------------------
+2026-10-22 14:00:16.184 | INFO     | app.services.embedding_service:_reembed_model:284 - [embedding.reembed] kb_chunks 重建至 id=1 (累计 1)
+_ test_disabled_configured_remote_preserves_vectors_and_rejects_new_data[agent] _
+backend/tests/unit/services/test_embedding_usage_recording.py:415: in test_disabled_configured_remote_preserves_vectors_and_rejects_new_data
+    assert (chunk.embedding, chunk.embed_model) == snapshot
+E   AssertionError: assert ('[0.0, 0.0, ...allback:hash') == ('[0.25, -0.7...pi:old-model')
+E
+E     At index 0 diff: '[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.7071067811865475, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0....
+E
+E     ...Full output truncated (27 lines hidden), use '-vv' to show
+----------------------------- Captured stderr call -----------------------------
+2026-10-22 14:00:16.787 | INFO     | app.services.embedding_service:_reembed_model:284 - [embedding.reembed] agent_chunks 重建至 id=1 (累计 1)
+=========================== short test summary info ============================
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_reembed_exhausted_remote_failure_preserves_both_domains[http]
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_reembed_exhausted_remote_failure_preserves_both_domains[timeout]
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_reembed_exhausted_remote_failure_preserves_both_domains[incomplete]
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_reembed_failed_batch_continues_and_can_be_recovered
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_remote_failure_rejects_new_knowledge_without_hash_chunks[kb]
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_remote_failure_rejects_new_knowledge_without_hash_chunks[agent]
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_remote_failure_rejects_new_knowledge_without_hash_chunks[agent_strict]
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data0]
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data1]
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data2]
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data3]
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data4]
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data5]
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data6]
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data7]
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data8]
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data9]
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_reembed_incomplete_batch_never_partially_overwrites
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_remote_embedding_dimensions_must_match_across_http_batches
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_reembed_includes_unembedded_chunks_in_both_domains
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_disabled_configured_remote_preserves_vectors_and_rejects_new_data[kb]
+FAILED backend/tests/unit/services/test_embedding_usage_recording.py::test_disabled_configured_remote_preserves_vectors_and_rejects_new_data[agent]
+============================= 22 failed in 19.82s ==============================

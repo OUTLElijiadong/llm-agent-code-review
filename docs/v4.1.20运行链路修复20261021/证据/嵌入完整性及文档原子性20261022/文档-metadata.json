@@ -1,0 +1,15 @@
+{
+  "head": "d5774d385294097691d92db230fa3f4b1336e497",
+  "worktree": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/.claude/worktrees/great-heisenberg-8a6fa9",
+  "before_sha256": {
+    "backend/app/services/agent_knowledge_service.py": "0cf68943c3965dbd75707beed0fcb272b7adc9449eec4e3e2f15fb46e18e1ef3",
+    "backend/tests/unit/services/test_embedding_usage_recording.py": "cec8b89c8bb48988aa29e2cc2abd67651be71eed42d35dc02a7441d797f55099"
+  },
+  "embedding_service_sha256": "8271382ea173cc6dd7acc4705aa64a71b8ec4248c392a9d94171066e24590f3a",
+  "after_sha256": {
+    "backend/app/services/agent_knowledge_service.py": "dd6932ebce12c684eff48c90c9f09d09bf9ac774a0bfdc38f5596e64892a1589",
+    "backend/tests/unit/services/test_embedding_usage_recording.py": "93cf8124451ac5392697ff243f138ceb73946fe6e7f0bb41395350634a4df8f2"
+  },
+  "red_result": "11 failed, 6 passed in 10.90s; run before modifying add_document",
+  "green_result": "89 passed, 2 warnings in 37.38s; original 75 plus 14 new cases"
+}

@@ -3,8 +3,8 @@
 
 设计目标(见需求决策):
 - 可配置:管理员可在系统设置里填 OpenAI 兼容的 /embeddings 端点+模型+Key
-- 无 Key 自动降级:未配置或调用失败时,回退到本地确定性哈希向量(纯词袋,
-  中文按字+二元组、英文按单词),保证全流程可跑通,语义较弱但永不阻塞交付。
+- 远端模式失败时明确报错,禁止静默替换为哈希向量;重嵌失败保留原向量与模型。
+- 未配置远端时使用本地确定性哈希向量;已有远端配置但被停用时明确报错。
 
 检索侧务必用与入库侧「同一方法」嵌入 query;不同维度的向量在 cosine 中按
 长度不匹配直接跳过,避免历史数据与配置切换造成崩溃。
@@ -20,9 +20,9 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.exceptions import ExternalServiceError
 from app.services import system_config_service
 from app.services.ai_usage_context import UsageAccountingError, record_usage_attempt
-from app.services.system_config_service import get_embedding_config
 from app.utils.api_resolver import validate_ai_base_url
 from app.utils.public_http import pin_public_http_url
 
@@ -33,7 +33,7 @@ FALLBACK_TAG = "fallback:hash"
 
 
 # ──────────────────────────────────────────────────────────
-# 本地降级:确定性哈希词袋向量
+# 本地模式:确定性哈希词袋向量
 # ──────────────────────────────────────────────────────────
 def _tokenize(text: str) -> List[str]:
     text = text.lower()
@@ -60,6 +60,21 @@ def _l2_normalize(vec: List[float]) -> List[float]:
     if norm == 0:
         return vec
     return [v / norm for v in vec]
+
+
+def _validate_vectors(vectors, count: int, dimension: int = 0) -> None:
+    """拒绝缺失、不同维度或非有限数值,避免不完整响应覆盖存量向量。"""
+    if not isinstance(vectors, list) or len(vectors) != count or not vectors:
+        raise ValueError("嵌入向量数量与输入不符")
+    for vector in vectors:
+        if not isinstance(vector, list) or not vector:
+            raise ValueError("嵌入向量为空或格式错误")
+        dimension = dimension or len(vector)
+        if len(vector) != dimension or any(
+            not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value)
+            for value in vector
+        ):
+            raise ValueError("嵌入向量维度或数值无效")
 
 
 # ──────────────────────────────────────────────────────────
@@ -105,15 +120,24 @@ def _api_embed(
                 resp = client.post(request_url, headers=headers, json={
                     "model": cfg["model"], "input": chunk,
                 }, extensions=extensions)
-                # 非 2xx 也可能报告真实消耗，先保存 usage 再沿用失败降级。
+                # 非 2xx 也可能报告真实消耗，仍记录 usage 并向调用方报告失败。
                 try:
                     body = resp.json()
                 except (ValueError, TypeError):
                     pass
                 resp.raise_for_status()
-                # 按 index 排序,保证与输入顺序一致
-                items = sorted(body["data"], key=lambda d: d.get("index", 0))
-                out.extend([_l2_normalize([float(x) for x in it["embedding"]]) for it in items])
+                items = body.get("data") if isinstance(body, dict) else None
+                if not isinstance(items, list) or any(
+                    not isinstance(item, dict) or type(item.get("index")) is not int for item in items
+                ):
+                    raise ValueError("嵌入响应缺少有效索引")
+                # 索引必须恰好覆盖输入,不能靠默认索引或 zip 掩盖缺失/重复结果。
+                if sorted(item["index"] for item in items) != list(range(len(chunk))):
+                    raise ValueError("嵌入响应索引与输入不符")
+                items = sorted(items, key=lambda item: item["index"])
+                vectors = [item.get("embedding") for item in items]
+                _validate_vectors(vectors, len(chunk), len(out[0]) if out else 0)
+                out.extend([_l2_normalize([float(value) for value in vector]) for vector in vectors])
             except BaseException as exc:
                 error = type(exc).__name__
                 raise
@@ -165,7 +189,7 @@ def embed_texts(
 
     Returns:
         (vectors, model_tag):
-        - 优先用配置的 embedding API;失败/未配置则用本地哈希向量
+        - 已配置远端时使用 embedding API,失败或停用抛出 ExternalServiceError;未配置时使用本地哈希
         - model_tag 形如 "api:text-embedding-3-small" 或 "fallback:hash"
     """
     if not texts:
@@ -178,9 +202,15 @@ def embed_texts(
             return vecs, f"api:{cfg['model']}"
         except UsageAccountingError:
             raise
-        except Exception as exc:  # noqa: BLE001 — 上游失败保留已有哈希降级
-            logger.warning(f"[embedding] API 调用失败,降级为本地向量: {type(exc).__name__}")
+        except Exception as exc:  # noqa: BLE001 — 脱敏披露上游失败,不生成替代向量
+            logger.warning(f"[embedding] API 调用失败,未生成替代向量: {type(exc).__name__}")
+            raise ExternalServiceError(
+                f"远端嵌入失败（{type(exc).__name__}），未生成替代向量，请恢复嵌入服务后重试"
+            ) from None
 
+    # 配置解析会因端点安全校验失败将 enabled 置为 False,不能误判为本地模式。
+    if cfg.get("base_url") or cfg.get("api_key"):
+        raise ExternalServiceError("远端嵌入已停用或配置不可用，未生成替代向量，请检查嵌入配置后重试")
     dim = settings.embedding_dim
     return [_hash_embed(t, dim) for t in texts], FALLBACK_TAG
 
@@ -225,7 +255,7 @@ def _reembed_model(
     """按 id 游标分批重建单域切片向量并即时提交。
 
     批同时受条数与字节预算约束: 大切片(如长代码段)按字节提前切批,
-    避免一次请求超过嵌入端点负载上限(413)导致整批降级。
+    避免一次请求超过嵌入端点负载上限(413);失败批保留原向量。
     """
     last_id = 0
     while True:
@@ -234,7 +264,7 @@ def _reembed_model(
         query = query.filter((model.embed_model.is_(None)) | (model.embed_model != "local:profile-context"))
         if expected_tag:
             # 增量模式: 只重建标签与当前配置不符的行(瞬态失败重跑快速收敛)
-            query = query.filter(model.embed_model != expected_tag)
+            query = query.filter((model.embed_model.is_(None)) | (model.embed_model != expected_tag))
         remaining = query.order_by(model.id.asc()).limit(batch_size).all()
         if not remaining:
             break
@@ -256,26 +286,30 @@ def _reembed_model(
         remote_on = is_remote_enabled(db)
         vectors = None
         tag = ""
-        # 嵌入端点高负载下存在瞬态超时, 失败批重试后再降级
+        # 瞬态超时有限重试;整批校验通过后才改 ORM 对象,耗尽则原样保留。
         for attempt in range(3):
             try:
                 vectors, tag = embed_texts(db, pieces, user_id=user_id)
-                if not remote_on or tag != FALLBACK_TAG:
-                    break
+                _validate_vectors(vectors, len(rows))
+                if not isinstance(tag, str) or not tag or (
+                    remote_on and (not tag.startswith("api:") or (expected_tag and tag != expected_tag))
+                ):
+                    raise ValueError("重嵌模型与远端配置不符")
+                break
             except UsageAccountingError:
                 raise
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 — 保留本批数据,继续其他批次与知识域
                 vectors = None
-            logger.warning(f"[embedding.reembed] {label} 批次第 {attempt + 1} 次失败, 重试 (last_id={last_id})")
-            time.sleep(2)
-        if vectors is None or (remote_on and tag == FALLBACK_TAG):
-            vectors = [_hash_embed(p, settings.embedding_dim) for p in pieces]
-            tag = FALLBACK_TAG
-            logger.warning(f"[embedding.reembed] {label} 批次多次失败已降级哈希 (last_id={last_id})")
-        if remote_on and tag == FALLBACK_TAG:
-            # 远端已启用却拿到哈希向量 = embed_texts 内部静默降级(如 413), 显式计数披露
+                logger.warning(
+                    f"[embedding.reembed] {label} 批次第 {attempt + 1} 次失败: "
+                    f"{type(exc).__name__} (last_id={last_id})"
+                )
+                if attempt < 2:
+                    time.sleep(2)
+        if vectors is None:
             stats["failed_batches"] += 1
-            logger.warning(f"[embedding.reembed] {label} 批次被嵌入端点拒绝, 已降级哈希 (last_id={last_id})")
+            logger.warning(f"[embedding.reembed] {label} 批次失败,已保留原向量与模型 (last_id={last_id})")
+            continue
         for row, vec in zip(rows, vectors):
             row.embedding = json.dumps(vec)
             row.embed_model = tag
@@ -288,15 +322,14 @@ def reembed_all_stores(db: Session, batch_size: int = 64, *, user_id: Optional[i
     """按当前嵌入配置重建两域存量切片向量(个人 KB + Agent 知识库)。
 
     切换嵌入模型/端点后, 存量向量维度不一致会在检索中被判不可比(cosine=-1),
-    该入口供管理员一键重建; 幂等全量重嵌, 单批失败降级哈希并计数不中断。
+    该入口供管理员一键重建;单批失败保留原向量与模型并计数,继续其余批次。
     """
     from app.models.agent_governance import AgentKnowledgeChunk
     from app.models.knowledge_chunk import KnowledgeChunk
 
     stats = {"kb_chunks": 0, "agent_chunks": 0, "failed_batches": 0}
-    expected_tag = ""
-    if is_remote_enabled(db):
-        expected_tag = f"api:{get_embedding_config(db)['model']}"
+    cfg = system_config_service.get_embedding_config(db)
+    expected_tag = f"api:{cfg['model']}" if cfg.get("enabled") else ""
     _reembed_model(db, KnowledgeChunk, "kb_chunks", stats, batch_size, expected_tag, user_id=user_id)
     _reembed_model(db, AgentKnowledgeChunk, "agent_chunks", stats, batch_size, expected_tag, user_id=user_id)
     return stats

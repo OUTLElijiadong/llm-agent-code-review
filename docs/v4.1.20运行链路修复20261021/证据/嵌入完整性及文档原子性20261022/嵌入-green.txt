@@ -1,0 +1,96 @@
+mode=green; worktree=/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/.claude/worktrees/great-heisenberg-8a6fa9; dotenv=blocked; network=blocked; database=isolated SQLite
+============================= test session starts ==============================
+platform darwin -- Python 3.11.16, pytest-9.1.1, pluggy-1.7.0 -- /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/.claude/worktrees/great-heisenberg-8a6fa9/backend/.venv/bin/python
+rootdir: /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/.claude/worktrees/great-heisenberg-8a6fa9/backend
+configfile: pyproject.toml
+plugins: cov-5.0.0, asyncio-1.4.0, anyio-4.14.2, platformdirs-4.13.5
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 75 items
+
+backend/tests/unit/services/test_embedding_service.py::test_private_url_detection PASSED [  1%]
+backend/tests/unit/services/test_embedding_service.py::test_api_embed_private_direct PASSED [  2%]
+backend/tests/unit/services/test_embedding_service.py::test_reembed_all_stores_rebuilds_both_domains PASSED [  4%]
+backend/tests/unit/services/test_embedding_service.py::test_update_embedding_config_private_endpoint_gate PASSED [  5%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_embedding_each_batch_records_provider_usage_without_text_or_vectors PASSED [  6%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_embedding_failure_keeps_reported_usage_and_raises[action0-3-HTTPStatusError] PASSED [  8%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_embedding_failure_keeps_reported_usage_and_raises[action1-5-ValueError] PASSED [  9%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_embedding_failure_keeps_reported_usage_and_raises[action2-None-ReadTimeout] PASSED [ 10%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_embedding_preflight_disabled_and_empty_inputs_do_not_create_model_calls PASSED [ 12%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_embedding_unknown_owner_stays_null_and_trusted_context_is_used PASSED [ 13%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_personal_knowledge_actual_embedding_uses_service_owner PASSED [ 14%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_embedding_accounting_failure_does_not_fallback_or_reembed_retry PASSED [ 16%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_reembed_real_retry_is_one_row_per_http_and_uses_admin_owner PASSED [ 17%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_agent_knowledge_and_capability_ranking_preserve_trusted_root PASSED [ 18%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_embedding_no_usage_stays_unknown_and_untrusted_model_key_is_redacted PASSED [ 20%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_reembed_exhausted_remote_failure_preserves_both_domains[http] PASSED [ 21%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_reembed_exhausted_remote_failure_preserves_both_domains[timeout] PASSED [ 22%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_reembed_exhausted_remote_failure_preserves_both_domains[incomplete] PASSED [ 24%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_reembed_failed_batch_continues_and_can_be_recovered PASSED [ 25%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_remote_failure_rejects_new_knowledge_without_hash_chunks[kb] PASSED [ 26%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_remote_failure_rejects_new_knowledge_without_hash_chunks[agent] PASSED [ 28%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_remote_failure_rejects_new_knowledge_without_hash_chunks[agent_strict] PASSED [ 29%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data0] PASSED [ 30%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data1] PASSED [ 32%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data2] PASSED [ 33%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data3] PASSED [ 34%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data4] PASSED [ 36%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data5] PASSED [ 37%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data6] PASSED [ 38%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data7] PASSED [ 40%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data8] PASSED [ 41%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_invalid_remote_vectors_fail_instead_of_succeeding_or_hashing[data9] PASSED [ 42%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_reembed_incomplete_batch_never_partially_overwrites PASSED [ 44%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_remote_embedding_dimensions_must_match_across_http_batches PASSED [ 45%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_reembed_includes_unembedded_chunks_in_both_domains PASSED [ 46%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_disabled_configured_remote_preserves_vectors_and_rejects_new_data[kb] PASSED [ 48%]
+backend/tests/unit/services/test_embedding_usage_recording.py::test_disabled_configured_remote_preserves_vectors_and_rejects_new_data[agent] PASSED [ 49%]
+backend/tests/unit/scripts/test_seed_agent_playbooks_selection.py::test_targeted_role_playbook_selection PASSED [ 50%]
+backend/tests/unit/scripts/test_seed_agent_playbooks_selection.py::test_targeted_seed_does_not_delete_unrelated_knowledge PASSED [ 52%]
+backend/tests/unit/scripts/test_seed_agent_playbooks_selection.py::test_embedding_failure_keeps_old_playbook PASSED [ 53%]
+backend/tests/unit/scripts/test_seed_agent_playbooks_selection.py::test_strict_playbook_rejects_degraded_vectors_without_replacing_old[vectors0-fallback:hash] PASSED [ 54%]
+backend/tests/unit/scripts/test_seed_agent_playbooks_selection.py::test_strict_playbook_rejects_degraded_vectors_without_replacing_old[vectors1-api:embedding] PASSED [ 56%]
+backend/tests/unit/scripts/test_seed_agent_playbooks_selection.py::test_strict_playbook_rejects_degraded_vectors_without_replacing_old[None-api:embedding] PASSED [ 57%]
+backend/tests/unit/scripts/test_seed_agent_playbooks_selection.py::test_strict_playbook_rejects_degraded_vectors_without_replacing_old[vectors3-api:embedding] PASSED [ 58%]
+backend/tests/unit/scripts/test_seed_agent_playbooks_selection.py::test_strict_playbook_rejects_degraded_vectors_without_replacing_old[vectors4-api:embedding] PASSED [ 60%]
+backend/tests/unit/scripts/test_seed_agent_playbooks_selection.py::test_strict_playbook_rejects_degraded_vectors_without_replacing_old[vectors5-None] PASSED [ 61%]
+backend/tests/unit/scripts/test_seed_agent_playbooks_selection.py::test_strict_playbook_rejects_degraded_vectors_without_replacing_old[vectors6-api:embedding] PASSED [ 62%]
+backend/tests/unit/scripts/test_seed_agent_playbooks_selection.py::test_strict_playbook_persists_only_complete_api_vectors PASSED [ 64%]
+backend/tests/unit/api/test_personalization_resilience.py::test_avatar_header_only_is_not_decodable PASSED [ 65%]
+backend/tests/unit/api/test_personalization_resilience.py::test_avatar_dimensions_and_decoding PASSED [ 66%]
+backend/tests/unit/api/test_personalization_resilience.py::test_profile_read_does_not_create PASSED [ 68%]
+backend/tests/unit/api/test_personalization_resilience.py::test_profile_update_keeps_other_fields_and_marks_atomically PASSED [ 69%]
+backend/tests/unit/api/test_personalization_resilience.py::test_custom_asset_permission_is_not_reviewer PASSED [ 70%]
+backend/tests/unit/api/test_personalization_resilience.py::test_private_snapshot_is_local_and_user_scoped PASSED [ 72%]
+backend/tests/unit/api/test_personalization_resilience.py::test_snapshot_transaction_rolls_back_profile_on_failure PASSED [ 73%]
+backend/tests/unit/api/test_personalization_resilience.py::test_profile_context_is_not_sent_to_bulk_embedding PASSED [ 74%]
+backend/tests/unit/api/test_personalization_resilience.py::test_data_images_reject_bad_base64_and_truncated_bytes PASSED [ 76%]
+backend/tests/unit/api/test_personalization_resilience.py::test_every_studio_route_enforces_role_before_custom_permission PASSED [ 77%]
+backend/tests/unit/api/test_personalization_resilience.py::test_background_learning_is_throttled_and_respects_opt_out PASSED [ 78%]
+backend/tests/unit/services/test_knowledge_retrieve_relevance.py::test_fallback_retrieval_drops_unrelated_documents PASSED [ 80%]
+backend/tests/unit/services/test_knowledge_retrieve_relevance.py::test_unrelated_query_returns_nothing PASSED [ 81%]
+backend/tests/unit/services/test_private_agent_knowledge.py::test_recall_old_private_notes_requires_exact_account[owner] PASSED [ 82%]
+backend/tests/unit/services/test_private_agent_knowledge.py::test_recall_old_private_notes_requires_exact_account[peer] PASSED [ 84%]
+backend/tests/unit/services/test_private_agent_knowledge.py::test_recall_old_private_notes_requires_exact_account[super_admin] PASSED [ 85%]
+backend/tests/unit/services/test_private_agent_knowledge.py::test_governance_list_cannot_bypass_private_notes[owner] PASSED [ 86%]
+backend/tests/unit/services/test_private_agent_knowledge.py::test_governance_list_cannot_bypass_private_notes[peer] PASSED [ 88%]
+backend/tests/unit/services/test_private_agent_knowledge.py::test_governance_list_cannot_bypass_private_notes[super_admin] PASSED [ 89%]
+backend/tests/unit/services/test_private_agent_knowledge.py::test_anonymous_service_access_sees_only_shared_documents PASSED [ 90%]
+backend/tests/unit/services/test_private_agent_knowledge.py::test_activation_cannot_disclose_or_mutate_foreign_private_doc[private-peer] PASSED [ 92%]
+backend/tests/unit/services/test_private_agent_knowledge.py::test_activation_cannot_disclose_or_mutate_foreign_private_doc[private-super_admin] PASSED [ 93%]
+backend/tests/unit/services/test_private_agent_knowledge.py::test_activation_cannot_disclose_or_mutate_foreign_private_doc[orphan-peer] PASSED [ 94%]
+backend/tests/unit/services/test_private_agent_knowledge.py::test_activation_cannot_disclose_or_mutate_foreign_private_doc[orphan-super_admin] PASSED [ 96%]
+backend/tests/unit/services/test_private_agent_knowledge.py::test_owner_and_shared_activation_continue_to_work PASSED [ 97%]
+backend/tests/unit/services/test_private_agent_knowledge.py::test_reserved_private_source_cannot_be_forged_by_other_account PASSED [ 98%]
+backend/tests/unit/services/test_private_agent_knowledge.py::test_new_note_is_personal_and_replayed_call_replaces_only_itself PASSED [100%]
+
+=============================== warnings summary ===============================
+backend/.venv/lib/python3.11/site-packages/passlib/utils/__init__.py:854
+  /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/.claude/worktrees/great-heisenberg-8a6fa9/backend/.venv/lib/python3.11/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+    from crypt import crypt as _crypt
+
+tests/unit/api/test_personalization_resilience.py::test_every_studio_route_enforces_role_before_custom_permission
+  /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/.claude/worktrees/great-heisenberg-8a6fa9/backend/.venv/lib/python3.11/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 75 passed, 2 warnings in 13.03s ========================
