@@ -25,6 +25,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 
+from app.ai.cvss import CVSS_STANDARD_URL
 from app.ai.scoring import score_risk_level
 from app.services.report_exporter import (
     conflict_status_label,
@@ -425,6 +426,7 @@ def _build_score_breakdown(doc: Any, statistics: Dict[str, Any]) -> None:
             ("字段", "值"),
             ("评分策略", "cvss-weighted-v1 · 平台综合评分（非 CVSS 官方综合分）"),
             ("基础分来源", f"{breakdown.get('cvss_standard') or 'CVSS 3.1（FIRST）'}；70/30 为平台工程规则"),
+            ("规范引用", f"FIRST CVSS v3.1 规范：{CVSS_STANDARD_URL}"),
             (
                 "CVSS 安全分",
                 f"{cvss_score if cvss_score is not None else '未应用（回退）'}"

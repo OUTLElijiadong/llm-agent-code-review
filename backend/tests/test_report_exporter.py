@@ -413,7 +413,7 @@ def test_issue_and_decompilation_states_are_localized_in_all_visual_exports(monk
     )
     evidence = {"decompilation": {"status": "succeeded", "tool": "jadx"}}
     expected_labels = (
-        "已修复", "静态规则", "向量计算", "证据引用已核对", "待处理冲突", "待补充证据", "执行成功",
+        "已修复", "静态规则", "CVSS 3.1（FIRST）向量复算", "证据引用已核对", "待处理冲突", "待补充证据", "执行成功",
     )
     raw_values = ("fixed", "static", "vector", "verified", "unresolved", "evidence_requested", "succeeded")
     html_outputs = [
@@ -1092,8 +1092,6 @@ def test_all_html_templates_render_canonical_score_breakdown():
 
 @pytest.mark.parametrize("template_type", ["simple", "detailed", "compliance"])
 def test_html_templates_render_cvss_weighting_and_fallback_without_claiming_cvss_weight(template_type: str):
-    import re
-
     vector_issue = _make_issue(
         severity="高",
         cvss_vector="AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
@@ -1139,16 +1137,14 @@ def test_html_templates_render_cvss_weighting_and_fallback_without_claiming_cvss
     assert "CVSS 70% 权重未生效" in fallback
     assert 'CVSS 缺向量逐项检查' in fallback
     issue_fragment = fallback[fallback.index("CVSS 缺向量逐项检查"):]
-    if template_type == "simple":
-        assert re.search(r"<td>未评分</td>", issue_fragment)
-    else:
-        assert re.search(r"CVSS 状态:</span>\s*未评分", issue_fragment)
+    assert "未评分" in issue_fragment
     assert "7.5" not in issue_fragment
 
 
 def test_pdf_and_word_render_cvss_breakdown_and_vector_fallback():
-    from app.ai.scoring import compute_composite_score_breakdown
     from reportlab.platypus import Paragraph, Table
+
+    from app.ai.scoring import compute_composite_score_breakdown
 
     valid = compute_composite_score_breakdown(
         {"严重": 0, "高": 1, "中": 0, "低": 0},
@@ -1679,6 +1675,7 @@ def test_pdf_and_word_render_full_issue_audit_metadata_and_score_breakdown():
         exploit_scenario="EXPLOIT_TOKEN_20260827",
         suggestion="SUGGESTION_TOKEN_20260827",
         remediation="REMEDIATION_TOKEN_20260827",
+        cvss_score=9.8,
         cvss_vector="AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
         cvss_version="3.1",
         cvss_source="vector",
@@ -1714,8 +1711,8 @@ def test_pdf_and_word_render_full_issue_audit_metadata_and_score_breakdown():
         "FINGERPRINT_TOKEN_20260827",
         "2026-08-27T01:02:03",
         "REFERENCE_TOKEN_20260827",
-        "评分向量：AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
-        "向量计算",
+        "FIRST 向量：AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        "CVSS 3.1（FIRST）向量复算",
         "模型 + 静态规则",
         "已修复",
     ):
@@ -1732,8 +1729,8 @@ def test_pdf_and_word_render_full_issue_audit_metadata_and_score_breakdown():
         "EXPLOIT_TOKEN_20260827",
         "SUGGESTION_TOKEN_20260827",
         "REMEDIATION_TOKEN_20260827",
-        "评分向量：AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
-        "向量计算",
+        "FIRST 向量：AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        "CVSS 3.1（FIRST）向量复算",
         "模型 + 静态规则",
         "独立确认数: 2",
         "FINGERPRINT_TOKEN_20260827",

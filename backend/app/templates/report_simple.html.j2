@@ -94,6 +94,7 @@
         {% set cvss = breakdown.components.cvss %}
         {% set quality = breakdown.components.quality %}
         <tr><th>评分策略</th><td><code>{{ breakdown.policy_version }}</code> · 平台综合评分（非 CVSS 官方综合分）</td></tr>
+        <tr><th>规范引用</th><td><a href="https://www.first.org/cvss/v3.1/specification-document" target="_blank" rel="noopener noreferrer">FIRST CVSS v3.1 规范</a></td></tr>
         <tr><th>CVSS 安全分</th><td>{{ cvss.score if cvss.score is not none else "未应用（回退）" }}{% if cvss.score is not none %}/100{% endif %} · 权重 {{ (cvss.weight * 100)|round|int }}% · 最高基础分 {{ cvss.max_base_score if cvss.max_base_score is not none else "-" }}</td></tr>
         <tr><th>规则质量分</th><td>{{ quality.score }}/100 · 权重 {{ (quality.weight * 100)|round|int }}%</td></tr>
         <tr><th>向量覆盖</th><td>{{ cvss.scored_findings }} 项已评分；{{ cvss.unscored_findings }} 项未评分（{{ breakdown.cvss_status }}）</td></tr>

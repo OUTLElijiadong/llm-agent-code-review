@@ -116,12 +116,22 @@ def test_revocation_after_dispatch_blocks_before_api(db, actor, monkeypatch):
     assert called == []
 
 
-def test_high_risk_plan_requires_bound_current_account_confirmation(db, actor):
-    with pytest.raises(agent_team_service.AgentTeamAccessError, match="确认"):
-        claimed_team(db, actor, capability="forum.posts.delete", params={"post_id": 71})
-    created, _ = claimed_team(db, actor, capability="forum.posts.delete", params={"post_id": 71}, confirmed=True)
-    row = db.query(AgentTeamEvent).filter_by(team_id=created["team_id"], event_type="supervisor.plan_reviewed").one()
-    assert json.loads(row.detail_json)["confirmed_by_user_id"] == actor.id
+@pytest.mark.parametrize("confirmed", [False, True])
+def test_high_risk_creation_does_not_authorize_execution(db, actor, monkeypatch, confirmed):
+    calls = []
+    monkeypatch.setattr(
+        site_agent_service.admin_capability_service, "execute_api", lambda *_a, **_k: calls.append(True),
+    )
+    created, claim = claimed_team(
+        db, actor, capability="forum.posts.delete", params={"post_id": 71}, confirmed=confirmed,
+    )
+    row = db.query(AgentTeamEvent).filter_by(
+        team_id=created["team_id"], event_type="supervisor.plan_reviewed",
+    ).one()
+    assert json.loads(row.detail_json)["confirmed_by_user_id"] is None
+    result = run(db, actor, created, claim)
+    assert result["status"] == "blocked"
+    assert calls == []
 
 
 def test_failed_or_unknown_write_is_not_replayed(db, actor, monkeypatch):

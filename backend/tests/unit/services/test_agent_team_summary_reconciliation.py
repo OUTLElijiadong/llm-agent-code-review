@@ -537,7 +537,22 @@ def test_site_verifier_records_the_actual_readback_call_identity(db, request, mo
         return {"capability": spec.code, "status_code": 200, "data": data}
 
     monkeypatch.setattr(site_agent_service.admin_capability_service, "execute_api", api)
-    created, claim = claimed_team(db, current_user, capability=capability, params=params, confirmed=True)
+    created, claim = claimed_team(db, current_user, capability=capability, params=params)
+    if capability == "forum.posts.delete":
+        # This readback test starts after explicit execution consent, not plan creation.
+        reviewed = db.query(agent_team_service.AgentTeamEvent).filter_by(
+            team_id=created["team_id"], event_type="supervisor.plan_reviewed",
+        ).one()
+        detail = agent_team_service._unjson(reviewed.detail_json, {})
+        db.add(agent_team_service.AgentTeamEvent(
+            team_id=created["team_id"], user_id=current_user.id,
+            event_type="supervisor.retry_reauthorized", trace_id=reviewed.trace_id,
+            actor_address=f"user:{current_user.id}", detail_json=agent_team_service._json({
+                "confirmed_by_user_id": current_user.id,
+                "authorized_high_risk_fingerprints": detail["authorized_high_risk_fingerprints"],
+            }),
+        ))
+        db.commit()
     worker = run(db, current_user, created, claim)
     assert worker["status"] == "completed"
     agent_team_service.complete_task(db, created["team_id"], claim["task_id"],

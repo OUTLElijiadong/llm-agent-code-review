@@ -76,7 +76,7 @@ def compute_composite_score_breakdown(
     from collections.abc import Mapping
     from decimal import ROUND_HALF_UP, Decimal
 
-    from app.ai.cvss import CVSS_VERSION, calculate_cvss_score
+    from app.ai.cvss import CVSS_STANDARD, CVSS_STANDARD_URL, CVSS_VERSION, calculate_cvss_score
 
     legacy = compute_score_breakdown(severity_count)
     quality = legacy["score"] if quality_score is None else quality_score
@@ -105,6 +105,8 @@ def compute_composite_score_breakdown(
     result = {
         **legacy,
         "policy_version": CVSS_SCORING_VERSION,
+        "cvss_standard": CVSS_STANDARD,
+        "cvss_standard_url": CVSS_STANDARD_URL,
         "legacy_rule": dict(legacy),
         "components": {
             "cvss": cvss,

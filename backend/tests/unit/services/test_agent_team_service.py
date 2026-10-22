@@ -17,6 +17,7 @@ from app.models.code_file import CodeFile
 from app.models.custom_agent import CustomAgent, CustomAgentRelease, CustomAgentVersion
 from app.models.project import Project
 from app.models.project_source_revision import ProjectSourceRevision
+from app.models.rbac import Permission, Role, RolePermission, UserRole
 from app.models.user import User
 from app.schemas.agent_team import AgentTeamCreateIn
 from app.services import agent_mesh_service, agent_responses_service, agent_team_service, sandbox_service
@@ -122,8 +123,13 @@ def test_escalated_plan_can_be_created_without_granting_execution_authorization(
 def test_unclassified_plan_can_be_created_without_granting_execution_authorization(db):
     from app.services import agent_supervisor_service
 
-    user = User(username="unclassified-owner", password="x", role="user", status=1)
-    db.add(user)
+    user = User(username="unclassified-owner", password="x", role="reviewer", status=1)
+    role = Role(name="审查员", code="reviewer", status="active", is_builtin=1)
+    permission = Permission(code="security:scan", name="security:scan", module="security", type="api")
+    db.add_all([user, role, permission])
+    db.flush()
+    db.add(UserRole(user_id=user.id, role_id=role.id))
+    db.add(RolePermission(role_id=role.id, permission_id=permission.id))
     db.commit()
     payload = _payload(members=[
         {"member_key": "reader", "display_name": "审查 Agent", "address": "agent:security_sentinel",

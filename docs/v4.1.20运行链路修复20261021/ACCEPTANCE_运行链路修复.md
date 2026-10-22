@@ -107,3 +107,22 @@
 - 普通问答集成测试改为仅替换模型调用，保留真实临时成员 handler、调度、DB 持久结果、同轮团队读回和完成守卫。最终通过状态以本次候选完整 CI 为准。
 - 修正 Sentinel/full 与圆桌终态四档严重度计数遇到未分级发现时的 KeyError，拒分原因统一为 ungraded_findings；报告补充 FIRST 归属与 CVSS 向量。
 - 本地后端全 app Ruff、diff 检查、锁定依赖漏洞审计通过。此次集成候选尚待完整 CI 和生产 all 发布；生产核验仍为 4.1.21 / af9c8d61。
+
+
+## 2026-10-23 最终补齐
+
+- 报告导出、CVSS 综合评分及 Sentinel 三文件联合回归：147 passed；日志 /tmp/prism-cvss-final-integration.log。保留无向量不得展示模型裸分的检查。
+- 报告详情页全文件复测：49 passed；日志 /tmp/prism-cvss-reportdetail-rerun.log。先前1000项分页用例超时，原配置复跑通过，未放宽断言。
+- CVSS 元数据带 FIRST 规范引用；详情页和 HTML 显示规范链接，PDF/Word 包含完整可读 URL。70/30 是平台规则，非 FIRST 官方综合公式。
+- 建队与执行授权四项集成回归：4 passed；日志 /tmp/prism-team-autocreate-final.log。未分类测试账号补齐真实 RBAC 夹具，未扩大生产权限。
+- Luna 只读最终复核未发现可证实 P0/P1；报告 /tmp/prism-final-integration-review.md。
+- 本节仅为候选本地结果。精确 SHA 全量 CI、备份恢复、生产发布和真实点击仍需分别验证。
+
+### 最终建队契约与依赖门禁补齐
+
+- 旧候选 740281dd 的全量 CI：后端 8599 通过、13 失败；前端被依赖审计阻断，未进入测试。该 SHA 未部署。失败按原日志逐一复现，未关闭门禁。
+- 导出 FIRST 元数据、未分类成员真实 RBAC 夹具及旧建队确认契约已修正；四个完整文件合计 136 passed，2 warnings，日志 /tmp/prism-creation-contract-final.log。
+- 独立复核 /tmp/prism-creation-test-review.md 未发现 P0/P1；删除读回 fixture 显式设置执行期授权前置条件，创建事件不授予执行权。按复核建议将 fixture actor 与真实 user actor 对齐。
+- DOMPurify 与 Vitest 补丁升级用于消除 CI 审计阻断；最终版本和审计结果以后续精确提交 CI 为准。
+
+前端依赖最终本地审计：DOMPurify 3.4.17、Vitest / coverage-v8 4.1.12，官方 npm registry audit 为 0 漏洞；npm ci dry-run、npm ls 均退出 0。日志 /tmp/prism-frontend-audit-after.json、/tmp/prism-frontend-lock-ci-dry-run.log。构建与全量测试仍交最终 SHA CI 验证。
