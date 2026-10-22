@@ -30,14 +30,18 @@ def test_non_list_issues_is_contract_error_not_clean_result() -> None:
         parse(json.dumps({"summary": "ok", "score": 100, "issues": _valid_issue()}))
 
 
-def test_mixed_valid_and_invalid_items_keep_valid_with_diagnostics() -> None:
+def test_mixed_items_preserve_ungraded_findings_with_diagnostics() -> None:
     result = parse(json.dumps({
         "summary": "partial",
         "score": 70,
         "issues": [_valid_issue(), "bad", {}, {"severity": "unknown", "title": "bad"}],
     }))
 
-    assert len(result.issues) == 1
+    assert [(issue.title, issue.severity) for issue in result.issues] == [
+        ("命令注入", "高"),
+        ("bad", "未分级"),
+    ]
+    # 枚举错误仍是诊断，但不能把真实发现丢掉或伪装成中危后参与评分。
     assert result.input_issue_count == 4
     assert result.invalid_issue_count == 3
     assert {item.code for item in result.diagnostics} == {
