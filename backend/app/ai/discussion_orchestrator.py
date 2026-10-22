@@ -49,7 +49,12 @@ from app.agents.events import (
 )
 from app.agents.metagpt import build_discussion_environment, make_discussion_message
 from app.agents.metagpt.environment import Environment
-from app.ai.deepseek_agent import DeepSeekAgent, DeepSeekOutputTruncatedError, _clamp_max_tokens
+from app.ai.deepseek_agent import (
+    DeepSeekAgent,
+    DeepSeekJsonOutputError,
+    DeepSeekOutputTruncatedError,
+    _clamp_max_tokens,
+)
 from app.ai.multi_agent import ReviewAgentProfile
 from app.ai.result_parser import Issue, normalize_severity
 from app.ai.result_parser import parse as parse_issues
@@ -3108,23 +3113,39 @@ def _extract_issues(
             except DeepSeekOutputTruncatedError as exc:
                 last_truncation = exc
                 continue
+            except DeepSeekJsonOutputError as exc:
+                # 底层已记录供应商重试失败；圆桌仍可用同一证据做一次格式修复。
+                parse_error: Exception | None = exc
+                meta = None
             except Exception as exc:
                 raise RuntimeError(
                     f"结构化问题抽取失败：已完成 {completed_batches}/{planned_batches} 批；{exc}"
                 ) from exc
-
-            try:
-                parsed = parse_issues(raw).issues
-            except Exception as exc:
+            else:
+                parse_error = None
                 try:
-                    DeepSeekAgent.log_deferred(
-                        db, task_id=task_id, user_id=user_id, file_id=file_id,
-                        chunk_index=chunk_index, meta=meta, status="failed",
-                    )
-                except Exception as log_exc:
-                    logger.debug(f"[Discussion] 补写无效 JSON 抽取日志失败: {log_exc}")
+                    result = parse_issues(raw)
+                    if result.invalid_issue_count or result.diagnostics:
+                        details = "; ".join(
+                            f"{item.index}:{item.code}" for item in result.diagnostics[:8]
+                        )
+                        raise ValueError(
+                            f"AI 返回 {result.invalid_issue_count} 个无效条目；"
+                            f"本批问题集未完整解析（{details}）"
+                        )
+                    parsed = result.issues
+                except Exception as exc:
+                    parse_error = exc
+                    try:
+                        DeepSeekAgent.log_deferred(
+                            db, task_id=task_id, user_id=user_id, file_id=file_id,
+                            chunk_index=chunk_index, meta=meta, status="failed",
+                        )
+                    except Exception as log_exc:
+                        logger.debug(f"[Discussion] 补写无效 JSON 抽取日志失败: {log_exc}")
+            if parse_error is not None:
                 if repair_attempted:
-                    raise RuntimeError(f"结构化问题解析失败：修复重试后仍返回无效 JSON：{exc}") from exc
+                    raise RuntimeError(f"结构化问题解析失败：修复重试后仍返回无效 JSON：{parse_error}") from parse_error
                 repair_attempted = True
                 user_prompt += (
                     "\n\n上一次输出无法按既定结构解析。请只修复 JSON 语法和字段类型，"

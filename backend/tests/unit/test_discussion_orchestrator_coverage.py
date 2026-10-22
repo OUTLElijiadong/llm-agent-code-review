@@ -3401,3 +3401,73 @@ async def test_start_discussion_handles_missing_session_and_setup_failures(
     assert session.report_task_id == 0
     assert len(session.turns) == 1
     assert "database unavailable" in session.turns[0].content
+
+
+@pytest.mark.parametrize("repair_succeeds", [True, False])
+def test_extract_issues_never_silently_discards_invalid_findings(monkeypatch, repair_succeeds):
+    """混合有效/无效条目必须修复整批；失败不得得到可评分的问题集。"""
+    mixed = json.dumps({"issues": [{"title": "缺少权限校验", "severity": "高"}, None]})
+    repaired = json.dumps({"issues": [{"title": "缺少权限校验", "severity": "高"}]})
+    calls = []
+    logs = []
+
+    def call_raw(_agent, *_args, **kwargs):
+        calls.append(kwargs)
+        return (repaired if repair_succeeds and len(calls) == 2 else mixed), {}
+
+    monkeypatch.setattr(module, "_call_raw_for_task", call_raw)
+    monkeypatch.setattr(module.DeepSeekAgent, "log_deferred", staticmethod(lambda *_a, **kw: logs.append(kw)))
+    if repair_succeeds:
+        issues = module._extract_issues([_turn(1)], "x=1", "python", "mixed.py", RecordingAgent(), object(), 1, 2, 3)
+        assert len(issues) == 1
+        assert [log["status"] for log in logs] == ["failed", "success"]
+    else:
+        with pytest.raises(RuntimeError, match="无效条目"):
+            module._extract_issues([_turn(1)], "x=1", "python", "mixed.py", RecordingAgent(), object(), 1, 2, 3)
+        assert all(log["status"] == "failed" for log in logs)
+    assert len(calls) == 2
+
+
+def test_extract_issues_repairs_provider_json_error_after_provider_retries(monkeypatch):
+    """真实供应商 JSON 异常类型也进入圆桌修复，且最多修复一次。"""
+    from app.ai.deepseek_agent import DeepSeekJsonOutputError
+    calls = []
+
+    def call_raw(_agent, *_args, **kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise DeepSeekJsonOutputError("AI 返回非合法 JSON")
+        return '{"issues":[]}', {}
+
+    monkeypatch.setattr(module, "_call_raw_for_task", call_raw)
+    monkeypatch.setattr(module.DeepSeekAgent, "log_deferred", staticmethod(lambda *_a, **_kw: None))
+    assert module._extract_issues([_turn(1)], "x=1", "python", "provider.py", RecordingAgent(), object(), 1, 2, 3) == []
+    assert len(calls) == 2
+    assert "上一次输出无法按既定结构解析" in calls[-1]["user_prompt"]
+
+
+def test_finalize_mixed_invalid_findings_has_no_complete_coverage_or_score(db, monkeypatch):
+    task = ReviewTask(
+        user_id=4, project_id=5, task_name="混合无效抽取", review_type="discuss",
+        status="running", total_files=1, processed_files=0,
+    )
+    _seed_execution_actor(db, task.user_id, task.project_id)
+    db.add(task)
+    db.commit()
+    monkeypatch.setattr(module, "SessionLocal", lambda: db)
+    monkeypatch.setattr(
+        module, "_call_raw_for_task",
+        lambda *_a, **_kw: ('{"issues":[{"title":"真实发现","severity":"高"},null]}', {}),
+    )
+    monkeypatch.setattr(module.DeepSeekAgent, "log_deferred", staticmethod(lambda *_a, **_kw: None))
+    module._finalize_review(
+        task_id=task.id, user_id=4, file_id=6, file_name="mixed.py", all_turns=[_turn(1)],
+        code="x=1", language="python", deferred_logs=[], agent=RecordingAgent(), stopped=False,
+    )
+    saved = db.get(ReviewTask, task.id)
+    assert saved.status == "failed"
+    assert saved.coverage["coverage_status"] == "failed"
+    assert saved.coverage["verification_status"] == "failed"
+    assert saved.coverage["score_available"] is False
+    assert saved.score_version is None
+    assert db.query(ReviewIssue).filter_by(task_id=task.id).count() == 0
