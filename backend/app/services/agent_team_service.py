@@ -1680,9 +1680,9 @@ def create_team_from_xiaoling(
     from app.core.site_request_context import trusted_request_origin
     from app.services import agent_supervisor_service
 
-    # 在 _create_team 内的刷新/提交前固定认证版本；模型 input 不能提供该值。
-    browser_token_version = int(user.token_version or 0)
     has_browser_tasks = any(task.input.get("operation") == "operate_current_page" for task in payload.tasks)
+    # 仅页面团队需要认证版本；在 _create_team 刷新/提交前固定，模型 input 不能提供该值。
+    browser_token_version = int(user.token_version or 0) if has_browser_tasks else None
     validate_task_member_references(payload)
     review = agent_supervisor_service.review_agent_team_plan(payload.model_dump(mode="json"))
     if review["needs_confirmation"]:
@@ -1731,6 +1731,8 @@ def create_team_from_xiaoling(
         })
     db.commit()
     db.refresh(team)
+    # 首次返回与后续查询统一使用数据库持久值，避免内存默认时间保留额外时区。
+    db.refresh(plan_event)
     result = _team_out(db, team, include_events=True)
     audit_service.log(
         db,
