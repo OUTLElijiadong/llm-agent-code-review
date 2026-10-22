@@ -1747,8 +1747,8 @@ class PrismToolExecutor:
             )
 
         if call.name == "create_agent_team":
-            # 缺失合同是可修正的参数错误，审批不能赋予一个未定义动作可执行语义。
-            # 在风险审批前校验；合法高风险合同仍走下面的指纹绑定审批。
+            # 团队组建只持久化计划；真实高风险执行仍由 dispatcher 的任务指纹门禁控制。
+            # 缺失合同是可修正的参数错误，不能靠创建团队绕过站点业务合同校验。
             from app.services.site_agent_service import resolve_site_input
 
             member_addresses = {
@@ -1759,7 +1759,7 @@ class PrismToolExecutor:
                 task_input = task.get("input") or {}
                 if address != "agent:site_operator" and not (
                     address.startswith("temporary:")
-                    and task_input.get("operation") in {"execute_capability", "verify_results"}
+                    and task_input.get("operation") in {"execute_capability", "verify_results", "operate_current_page"}
                 ):
                     continue
                 try:
@@ -1771,7 +1771,8 @@ class PrismToolExecutor:
                         "先查当前账号能力清单，再绑定 input={operation:'execute_capability',"
                         "scope:'user或admin',capability:'已登记能力',params:{业务参数}}；"
                         "核验任务用 operation:'verify_results' 并依赖实际执行任务。"
-                        "纯页面跳转使用已核实路由的 PRISM_NAVIGATE，不能伪造站点业务能力。",
+                        "真实页面操作绑定 input={operation:'operate_current_page',action:'inspect',args:{}}，"
+                        "max_attempts:1，并由 reporter 汇总；后续控件动作使用最新观察的 control_handle。",
                     )
             team_supervision = agent_supervisor_service.review_agent_team_plan(call.arguments)
             remote_targets = []
@@ -1782,44 +1783,6 @@ class PrismToolExecutor:
                     remote_targets.append(target.strip())
             if remote_targets and not team_supervision["needs_confirmation"]:
                 raise InvalidRunStateError("监督器未将远程目标归类为需确认，已阻断不一致决策")
-            if team_supervision["needs_confirmation"] and not approved:
-                unique_targets = list(dict.fromkeys(remote_targets))
-                return self._approval(
-                    call,
-                    danger=True,
-                    operation="创建高风险或未分类 Agent 团队",
-                    impact=(
-                        "监督子 Agent 发现团队包含需确认的任务。请同时核对全部成员、任务和外部目标；"
-                        "确认仅授权此计划摘要绑定的团队。"
-                    ),
-                    preview={
-                        "risk_level": team_supervision["risk_level"],
-                        "tasks": team_supervision["tasks"],
-                        "remote_targets": [_redact_event_value(item) for item in unique_targets],
-                        "method": "GET" if unique_targets else None,
-                        "plan_sha256": team_supervision["plan_sha256"],
-                    },
-                    request_extra={"supervisor_plan_sha256": team_supervision["plan_sha256"]},
-                )
-            if team_supervision["needs_confirmation"]:
-                approval_request = self._approval_request(call)
-                if approval_request.get("supervisor_plan_sha256") != team_supervision["plan_sha256"]:
-                    raise InvalidRunStateError("当前审批未绑定此版本的 Agent 团队计划")
-                self._mark_approval(call, approve=True)
-            if remote_targets:
-                # 审批先验证原始模型参数与计划摘要，再注入服务端外部目标授权标记。
-                authorized_arguments = copy.deepcopy(call.arguments)
-                for task in authorized_arguments.get("tasks", []):
-                    task_input = task.get("input") if isinstance(task, dict) else None
-                    if isinstance(task_input, dict) and str(task_input.get("remote_target_url") or "").strip():
-                        task_input["remote_target_authorized"] = True
-                call = ToolCall(
-                    call_id=call.call_id,
-                    name=call.name,
-                    arguments=authorized_arguments,
-                    raw_arguments=call.raw_arguments,
-                    parse_error=call.parse_error,
-                )
 
         if call.name in self._skill_bindings:
             if not approved:
@@ -1976,22 +1939,31 @@ class PrismToolExecutor:
             )
         agent_context = self._agent_context()
         if team_supervision is not None:
+            # A plan digest is a consistency check, never an execution authorization.
             agent_context.extra["supervisor_plan_sha256"] = team_supervision["plan_sha256"]
-            agent_context.extra["supervisor_confirmed_by"] = int(self._user.id) if approved and \
-                team_supervision["needs_confirmation"] else None
         if call.name == "retry_agent_team" and call.arguments.get("supervisor_plan_sha256"):
             agent_context.extra["supervisor_user_confirmed"] = bool(approved)
-        return await self._execute_once(
-            call,
-            lambda: self._agent_result(
-                call,
-                self._orch.invoke_tool(
-                    call.name,
-                    call.arguments,
-                    agent_context,
-                ),
-            ),
-        )
+        async def invoke_team_tool():
+            result = self._agent_result(call, self._orch.invoke_tool(call.name, call.arguments, agent_context))
+            if (call.name == "create_agent_team" and result.status == "success"
+                    and any(task.get("input", {}).get("operation") == "operate_current_page"
+                            for task in call.arguments.get("tasks", []))):
+                # Browser claims belong to this live Responses run. Keep it open while the
+                # scheduler executes, so the frontend can recover queued actions after refresh.
+                from app.services.team_browser_service import wait_for_browser_team
+
+                state = await wait_for_browser_team(self._db, self._user, result.output["team_id"])
+                if state["status"] == "completed":
+                    return ToolExecutionResult.success(state)
+                return ToolExecutionResult(
+                    status="error", output=state,
+                    error=(f"页面团队 {state.get('team_id', state.get('id'))} 已进入 {state['status']}，"
+                           "请按账本核验未完成部分"),
+                    failure_kind="timeout" if state["status"] == "expired" else state["status"],
+                )
+            return result
+
+        return await self._execute_once(call, invoke_team_tool)
 
     async def _record_supervisor_review(self, call: ToolCall, review: Mapping[str, Any]) -> None:
         """私有审计监督结论；只保存分类元数据，不把对话或工具正文复制到日志。"""
@@ -4776,7 +4748,13 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
         "精确选择；临时 Agent 仅当前账号与当前团队有效。页面操作工具会自动创建页面执行子 Agent 和独立核验节点；"
         "提交排队不等于完成，必须等待团队实际回执。多个独立工作可加入同一团队并行，"
         "独立任务之间不设依赖，由小菱检查任务覆盖和证据后汇总。\n"
-        "页面缺少已登记业务工具时才用 operate_current_page：先 inspect，再按最新 control_handle 精确操作。"
+        "真实页面操作由 agent:site_operator 团队成员执行，input={operation:'operate_current_page',"
+        "action:'inspect',args:{}}，每个页面任务 max_attempts:1；必须保留主运行，等待该团队终态。"
+        "先创建 inspect 团队，get_agent_team 读取 observation.controls，再为最新 control_handle 创建 click 等动作团队。"
+        "navigate 的 args={route:已核实本站路由}；scroll 的 args={direction:'up或down'}；"
+        "click 的 args={control_handle}，fill/select 加 value，check 加 checked。"
+        "每个团队仅一个页面动作工作节点，汇总节点用 agent:reporter；不要用 verify_results 验证页面观察。"
+        "页面观察仅 client_observed，业务写入仍须独立业务回读，不能用 API 查询替代用户明确要求的点击。"
         "不得把浏览器点击或 client_observed 观察当作业务成功；填写或提交后必须独立读回业务结果。"
         "页面不在线、账号变化、快照过期或回执不确定时停止；不能重复点击可能已写入的按钮。"
         "密码、API 密钥和文件选择只能由本人在安全页面完成，不要索要这些秘密用于页面工具。"

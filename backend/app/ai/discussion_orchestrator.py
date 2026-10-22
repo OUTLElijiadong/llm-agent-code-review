@@ -2594,9 +2594,13 @@ def _finalize_review(
 
         # 3) 统计 + 收尾任务
         sev_count = {"严重": 0, "高": 0, "中": 0, "低": 0}
+        ungraded_count = 0
         for r in issue_rows:
             severity = normalize_severity(r.severity)
-            sev_count[severity] += 1
+            if severity in sev_count:
+                sev_count[severity] += 1
+            else:
+                ungraded_count += 1
 
         # 共识小结作为任务 summary(由编排器直接传入主持人汇总文本)
         complete = (
@@ -2616,18 +2620,30 @@ def _finalize_review(
         task.high_issues = sev_count["高"]
         task.medium_issues = sev_count["中"]
         task.low_issues = sev_count["低"]
+        score_available = scored and ungraded_count == 0
         score_breakdown = (
             compute_composite_score_breakdown(sev_count, issue_rows)
-            if scored else None
+            if score_available else None
         )
+        if scored and ungraded_count:
+            score_breakdown = {
+                "score": None,
+                "risk_level": "未评估",
+                "score_source": "unavailable",
+                "score_unavailable_reason": "ungraded_findings",
+                "ungraded_issue_count": ungraded_count,
+            }
         scope = "complete" if complete else "partial"
         # score 列非空：不出分时写 0 占位，并以 score_version=None 标识非规则分。
-        task.score = int(score_breakdown["score"]) if score_breakdown else 0
-        task.score_version = score_breakdown["version"] if score_breakdown else None
-        task.score_breakdown = {**score_breakdown, "score_scope": scope} if scored else None
-        metrics["score_available"] = scored
-        metrics["score_scope"] = scope if scored else None
-        if not scored:
+        task.score = int(score_breakdown["score"]) if score_available and score_breakdown else 0
+        task.score_version = score_breakdown["version"] if score_available and score_breakdown else None
+        task.score_breakdown = {**score_breakdown, "score_scope": scope} if score_breakdown else None
+        metrics["score_available"] = score_available
+        metrics["score_scope"] = scope if score_available else None
+        if scored and ungraded_count:
+            metrics["score_unavailable_reason"] = "ungraded_findings"
+            metrics["ungraded_issue_count"] = ungraded_count
+        elif not scored:
             metrics["score_unavailable_reason"] = "主持人接管后未抽取结构化问题，没有可计分的问题集"
         task.summary = consensus or "圆桌讨论已完成。"
         task.error_message = None if complete else (

@@ -665,13 +665,16 @@ def _validate_task_scope(db: Session, user: User, task_input: Any, address: str)
 
     raw = task_input.input
     if address == "agent:site_operator" or (
-        address.startswith("temporary:") and raw.get("operation") in {"execute_capability", "verify_results"}
+        address.startswith("temporary:")
+        and raw.get("operation") in {"execute_capability", "verify_results", "operate_current_page"}
     ):
         from app.services.site_agent_service import resolve_site_input
         try:
             spec, _ = resolve_site_input(raw)
         except ValueError as exc:
             raise AgentTeamValidationError(str(exc)) from exc
+        if raw.get("operation") == "operate_current_page" and task_input.max_attempts != 1:
+            raise AgentTeamValidationError("页面动作只能尝试一次，需重新观察后再派发新任务")
         if spec is None and not task_input.depends_on:
             raise AgentTeamValidationError("站点核验必须依赖当前团队的执行任务")
         if spec is not None and raw.get("scope") == "admin" and not _is_admin(db, user):
@@ -1641,14 +1644,7 @@ def create_team_from_xiaoling(
 
     validate_task_member_references(payload)
     review = agent_supervisor_service.review_agent_team_plan(payload.model_dump(mode="json"))
-    if review["needs_confirmation"]:
-        if (
-            not supervisor_plan_sha256
-            or supervisor_plan_sha256 != review["plan_sha256"]
-            or supervisor_confirmed_by != int(user.id)
-        ):
-            raise AgentTeamAccessError("监督子 Agent 要求当前账号确认该高风险或未分类团队任务")
-    elif supervisor_plan_sha256 and supervisor_plan_sha256 != review["plan_sha256"]:
+    if supervisor_plan_sha256 and supervisor_plan_sha256 != review["plan_sha256"]:
         raise AgentTeamAccessError("监督子 Agent 计划摘要与团队任务不匹配")
     try:
         result = _create_team(db, user, payload)
@@ -1674,7 +1670,8 @@ def create_team_from_xiaoling(
             "risk_level": review["risk_level"],
             "plan_sha256": review["plan_sha256"],
             "tasks": review["tasks"],
-            "confirmed_by_user_id": int(user.id) if review["needs_confirmation"] else None,
+            # 创建只记录监督结论和拟授权指纹。实际确认必须由独立执行期流程记账。
+            "confirmed_by_user_id": None,
             "authorized_high_risk_fingerprints": authorized_fingerprints,
             # 仅服务端可信来源；不得从model/task input赋值或送入模型上下文。
             "site_request_origin": trusted_request_origin(),
@@ -3393,6 +3390,7 @@ def cancel_team(
     team_id: int,
     *,
     reason: str = "用户取消",
+    reason_code: str = "user_cancelled",
     deliver_terminal_notification: bool = True,
 ) -> dict[str, Any]:
     team = _team_or_raise(db, user, team_id, lock=True)
@@ -3401,7 +3399,7 @@ def cancel_team(
         team.status = "cancelled"
         team.completed_at = team.completed_at or _now()
         now = _now()
-        team.error_json = _json({"reason": "user_cancelled", "detail": str(reason or "")[:300]})
+        team.error_json = _json({"reason": reason_code, "detail": str(reason or "")[:300]})
         tasks = db.query(AgentTeamTask).filter(AgentTeamTask.team_id == team.id).all()
         for task in tasks:
             if task.status in _TERMINAL_TASK:
@@ -3447,7 +3445,7 @@ def cancel_team(
             db, team, now=now, deliver_to_session=deliver_terminal_notification,
         )
         db.commit()
-        _cleanup_team_runtime_resources(db, team, reason="user_cancelled")
+        _cleanup_team_runtime_resources(db, team, reason=reason_code)
     return _team_out(db, team, include_events=True)
 
 

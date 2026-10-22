@@ -816,7 +816,11 @@ _SOURCE_LABELS = {
     "llm+regex": "模型 + 正则规则",
     "regex+llm": "正则规则 + 模型",
 }
-_CVSS_SOURCE_LABELS = {"vector": "向量计算", "model": "模型评估", "unavailable": "不可用"}
+_CVSS_SOURCE_LABELS = {
+    "vector": "CVSS 3.1（FIRST）向量复算",
+    "model": "模型评估（非官方 CVSS 评分）",
+    "unavailable": "不可用",
+}
 
 
 def _mapped_report_value(value: Any, labels: Dict[str, str], *, unknown: str = "状态未识别") -> str:

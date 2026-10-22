@@ -48,6 +48,10 @@ def resolve_site_input(value: Mapping[str, Any]):
     if not isinstance(value, Mapping):
         raise ValueError("站点任务 input 必须是 JSON object")
     operation = value.get("operation")
+    if operation == "operate_current_page":
+        from app.services.team_browser_service import browser_contract
+
+        return browser_contract(value), dict(value["args"])
     allowed = {"operation"} if operation == "verify_results" else {"operation", "scope", "capability", "params"}
     unknown = {str(key) for key in value if not str(key).startswith("_")} - allowed
     if unknown:
@@ -289,6 +293,10 @@ async def execute_site_task(db: Session, user: User, *, team_id: int, task_id: i
     """所有身份、input、确认与回执都从持久任务取值；调用参数只有租约。"""
     try:
         actor, team, task, member, raw = _live_task(db, user, team_id, task_id, lease_token)
+        if raw.get("operation") == "operate_current_page":
+            from app.services.team_browser_service import execute_browser_task
+
+            return await execute_browser_task(db, actor, team, task, member, raw, lease_token)
         spec, params = resolve_site_input(raw)
         if spec is None:
             return await _verify_dependencies(db, actor, team, task, lease_token)

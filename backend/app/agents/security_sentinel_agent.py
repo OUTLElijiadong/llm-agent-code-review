@@ -3401,7 +3401,9 @@ class SecuritySentinelAgent(BaseAgent):
         except (TypeError, ValueError):
             return default
 
-    def _compute_risk_score(self, findings: List[dict]) -> int:
+    def _compute_risk_score(self, findings: List[dict]) -> Optional[int]:
+        if any(normalize_severity(f.get("severity")) not in _ALLOWED_SEVERITY for f in findings):
+            return None
         counts = self._severity_counts(findings)
         return int(compute_composite_score_breakdown(counts, findings)["score"])
 
@@ -3409,7 +3411,8 @@ class SecuritySentinelAgent(BaseAgent):
         out = {"严重": 0, "高": 0, "中": 0, "低": 0}
         for f in findings:
             sev = normalize_severity(f.get("severity"))
-            out[sev] += 1
+            if sev in out:
+                out[sev] += 1
         return out
 
     def _compute_compliance(self, findings: List[dict]) -> dict:
@@ -3852,18 +3855,12 @@ def _normalized_dict_to_finding(normalized: dict) -> "Finding":
     )
 
 
-def _compute_security_score(findings: list) -> int:
-    """根据安全问题列表计算安全评分(0-100,越高越安全)
-
-    Args:
-        findings: Finding 列表
-
-    Returns:
-        int: 安全评分 0-100
-    """
-    deduct = {"严重": 15, "高": 8, "中": 3, "低": 1}
-    total_deduct = 0
-    for f in findings:
-        sev = getattr(f, "severity", "中")
-        total_deduct += deduct.get(sev, 3)
-    return max(0, 100 - total_deduct)
+def _compute_security_score(findings: list) -> Optional[int]:
+    """使用共享评分策略；存在未分级发现时不输出综合分。"""
+    counts = {severity: 0 for severity in _ALLOWED_SEVERITY}
+    for finding in findings:
+        severity = normalize_severity(getattr(finding, "severity", None))
+        if severity not in counts:
+            return None
+        counts[severity] += 1
+    return int(compute_composite_score_breakdown(counts, findings)["score"])

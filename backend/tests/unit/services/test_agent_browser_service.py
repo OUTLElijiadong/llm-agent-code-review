@@ -7,7 +7,7 @@ from datetime import timedelta
 import httpx
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -27,8 +27,17 @@ from app.services import agent_browser_service as service
 from app.services.agent_supervisor_service import review_response_tool
 
 
-@pytest.mark.parametrize("route", ["/admin/embedding", "/admin/mcp-workers", "/admin/llm",
-    "/admin/platform?section=embedding", "/admin/platform?section=mcp-workers", "/admin/platform?section=llm"])
+@pytest.mark.parametrize(
+    "route",
+    [
+        "/admin/embedding",
+        "/admin/mcp-workers",
+        "/admin/llm",
+        "/admin/platform?section=embedding",
+        "/admin/platform?section=mcp-workers",
+        "/admin/platform?section=llm",
+    ],
+)
 def test_super_admin_routes_reject_regular_admin(db, owner, monkeypatch, route):
     monkeypatch.setattr(service.rbac_service, "is_admin_user", lambda *_args: True)
     monkeypatch.setattr(service.rbac_service, "is_super_admin_user", lambda *_args: False)
@@ -37,8 +46,17 @@ def test_super_admin_routes_reject_regular_admin(db, owner, monkeypatch, route):
         service.authorize_route(db, owner, route)
 
 
-@pytest.mark.parametrize("route", ["/admin/embedding", "/admin/mcp-workers", "/admin/llm",
-    "/admin/platform?section=embedding", "/admin/platform?section=mcp-workers", "/admin/platform?section=llm"])
+@pytest.mark.parametrize(
+    "route",
+    [
+        "/admin/embedding",
+        "/admin/mcp-workers",
+        "/admin/llm",
+        "/admin/platform?section=embedding",
+        "/admin/platform?section=mcp-workers",
+        "/admin/platform?section=llm",
+    ],
+)
 def test_super_admin_routes_allow_verified_super_admin(db, owner, monkeypatch, route):
     monkeypatch.setattr(service.rbac_service, "is_admin_user", lambda *_args: True)
     monkeypatch.setattr(service.rbac_service, "is_super_admin_user", lambda *_args: True)
@@ -465,7 +483,9 @@ def test_live_tool_metadata_survives_public_filter_without_unregistered_page_inj
 @pytest.mark.asyncio
 @pytest.mark.parametrize("surface", ["user", "admin"])
 @pytest.mark.parametrize("terminal_status", ["completed", "cancelled", "failed"])
-async def test_pending_run_creation_window_uses_real_checkpoint_id_and_keeps_owner_binding(db, owner, surface, terminal_status):
+async def test_pending_run_creation_window_uses_real_checkpoint_id_and_keeps_owner_binding(
+    db, owner, surface, terminal_status
+):
     """客户端 run/created 早于 create 提交；404 不应通过伪造 run 或放宽归属修复。"""
     from app.models.agent_mesh import AgentMeshConversation
     from app.services.agent_responses_service import DatabaseCheckpointStore
@@ -527,7 +547,11 @@ async def test_pending_run_creation_window_uses_real_checkpoint_id_and_keeps_own
         assert restored.run_id == run_id
         assert restored.last_response["id"] == "resp_upstream_response"
         confirmed = (await client.get("/api/agent-responses/session", params=params, headers=headers)).json()["data"]
-        assert (confirmed["surface"], confirmed["session_id"], confirmed["run"]["run_id"]) == (surface, session_key, run_id)
+        assert (confirmed["surface"], confirmed["session_id"], confirmed["run"]["run_id"]) == (
+            surface,
+            session_key,
+            run_id,
+        )
         available = await client.get("/api/agent-browser/pending", params=params, headers=headers)
         assert available.status_code == 200 and available.json()["data"] == {"actions": []}
         for invalid in [
@@ -550,20 +574,40 @@ async def test_pending_run_creation_window_uses_real_checkpoint_id_and_keeps_own
             # 暂停工具的数据库轮询，避免测试自身并发使用非线程安全的 Session。
             await ack_delivered.wait()
 
-        execution = asyncio.create_task(service.request_action(
-            db, owner, run_id=run_id, session_key=session_key, surface=surface,
-            call_id="confirmed-browser-action", action="inspect", args={}, event_sink=wait_for_browser_receipt,
-        ))
+        execution = asyncio.create_task(
+            service.request_action(
+                db,
+                owner,
+                run_id=run_id,
+                session_key=session_key,
+                surface=surface,
+                call_id="confirmed-browser-action",
+                action="inspect",
+                args={},
+                event_sink=wait_for_browser_receipt,
+            )
+        )
         try:
             await asyncio.sleep(0)
-            recovered = (await client.get("/api/agent-browser/pending", params=params, headers=headers)).json()["data"]["actions"][0]
+            recovered = (await client.get("/api/agent-browser/pending", params=params, headers=headers)).json()["data"][
+                "actions"
+            ][0]
             action_path = f"/api/agent-browser/actions/{recovered['action_id']}"
             context = {"session_id": session_key, "surface": surface, "client_nonce": recovered["client_nonce"]}
             claimed = await client.post(action_path + "/claim", json=context, headers=headers)
             assert claimed.status_code == 200
-            receipt = {**context, **claimed.json()["data"], "outcome": "completed", "observation": {
-                "snapshot_id": recovered["observation_snapshot_id"], "route": "/forum", "title": "论坛", "controls": [], "messages": [],
-            }}
+            receipt = {
+                **context,
+                **claimed.json()["data"],
+                "outcome": "completed",
+                "observation": {
+                    "snapshot_id": recovered["observation_snapshot_id"],
+                    "route": "/forum",
+                    "title": "论坛",
+                    "controls": [],
+                    "messages": [],
+                },
+            }
             receipt.pop("action_id")
             delivered = await client.post(action_path + "/ack", json=receipt, headers=headers)
             assert delivered.status_code == 200 and delivered.json()["data"]["server_verified"] is False
@@ -595,12 +639,113 @@ def test_audit_reviewer_still_requires_permission_and_admin_keeps_access(db, own
 
 
 def test_agent_studio_legacy_route_uses_real_redirect_page_permissions(db, owner, monkeypatch):
-    monkeypatch.setattr(service.rbac_service, "check_permission", lambda _db, _id, permission: permission == "agent:view")
+    monkeypatch.setattr(
+        service.rbac_service, "check_permission", lambda _db, _id, permission: permission == "agent:view"
+    )
     assert service.authorize_route(db, owner, "/agent-studio") == "/agent-studio"
 
 
 def test_report_template_permission_does_not_bypass_admin_surface(db, owner, monkeypatch):
     monkeypatch.setattr(service.rbac_service, "is_admin_user", lambda *_args: False)
-    monkeypatch.setattr(service.rbac_service, "check_permission", lambda _db, _id, permission: permission == "report:template_manage")
+    monkeypatch.setattr(
+        service.rbac_service, "check_permission", lambda _db, _id, permission: permission == "report:template_manage"
+    )
     with pytest.raises(ForbiddenError):
         service.authorize_route(db, owner, "/report/templates")
+
+
+@pytest.mark.parametrize("operation", ["dispatch", "claim", "ack"])
+def test_stop_winning_parent_lock_prevents_page_action_commit(db, owner, operation):
+    """Inject a stop just before the locking read, after any earlier unlocked check."""
+    nonce, claim_token = "n" * 32, "c" * 32
+    row = AgentBrowserAction(
+        request_id="parent-lock-stop-race",
+        input_sha256="f" * 64,
+        user_id=owner.id,
+        token_version=int(owner.token_version or 0),
+        run_id="browser-run",
+        session_key="browser-session",
+        surface="user",
+        call_id="stop-race",
+        action="inspect",
+        status="executing" if operation == "ack" else "queued",
+        arguments_json="{}",
+        observation_snapshot_id="a" * 32,
+        nonce_sha256=service._hash(nonce),
+        claim_sha256=service._hash(claim_token),
+        expires_at=service._now() + timedelta(seconds=60),
+    )
+    if operation != "dispatch":
+        db.add(row)
+        db.commit()
+    lock_reads = []
+
+    def stop_before_lock(state):
+        statement = state.statement
+        if (
+            not state.is_select
+            or getattr(statement, "_for_update_arg", None) is None
+            or not any(table.name == AgentResponseRun.__tablename__ for table in statement.get_final_froms())
+        ):
+            return
+        lock_reads.append(True)
+        # Simulate the stop transaction having won the lock. Use Core to leave
+        # the ORM identity map stale so the locking read must refresh it.
+        state.session.connection().execute(
+            AgentResponseRun.__table__.update()
+            .where(AgentResponseRun.run_id == "browser-run")
+            .values(checkpoint_json='{"stop_requested":true}')
+        )
+
+    event.listen(db, "do_orm_execute", stop_before_lock)
+    try:
+        with pytest.raises(ConflictError, match="已停止"):
+            if operation == "dispatch":
+
+                def unexpected_dispatch(required):
+                    credential = service.claim_action(
+                        db,
+                        owner,
+                        required["action_id"],
+                        session_key="browser-session",
+                        surface="user",
+                        nonce=required["client_nonce"],
+                    )
+                    service.acknowledge_action(db, owner, required["action_id"], ack(required, credential))
+
+                asyncio.run(
+                    service.request_action(
+                        db,
+                        owner,
+                        run_id="browser-run",
+                        session_key="browser-session",
+                        surface="user",
+                        call_id="stop-race",
+                        action="inspect",
+                        args={},
+                        event_sink=unexpected_dispatch,
+                    )
+                )
+            elif operation == "claim":
+                service.claim_action(db, owner, row.id, session_key="browser-session", surface="user", nonce=nonce)
+            else:
+                service.acknowledge_action(
+                    db,
+                    owner,
+                    row.id,
+                    ack(
+                        {
+                            "client_nonce": nonce,
+                            "observation_snapshot_id": "a" * 32,
+                        },
+                        {"claim_token": claim_token},
+                    ),
+                )
+    finally:
+        event.remove(db, "do_orm_execute", stop_before_lock)
+    assert lock_reads, "claim, ACK and dispatch must serialize with the stop writer on the parent run"
+    saved = db.query(AgentBrowserAction).populate_existing().all()
+    if operation == "dispatch":
+        assert not saved
+    else:
+        assert saved[0].status == ("indeterminate" if operation == "ack" else "cancelled")

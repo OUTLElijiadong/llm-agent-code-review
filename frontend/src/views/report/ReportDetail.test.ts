@@ -124,6 +124,10 @@ describe('ReportDetail 报告口径', () => {
     expect(details.text()).toContain('0 项已评分，1 项未评分')
     expect(details.text()).toContain('CVSS 70% 权重未生效')
     expect(details.text()).toContain('非 CVSS 官方综合分')
+    expect(details.get('[data-testid="cvss-first-specification"]').attributes('href'))
+      .toBe('https://www.first.org/cvss/v3.1/specification-document')
+    expect(wrapper.get('[data-testid="report-issue-item-7"]').text())
+      .toContain('AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H')
     wrapper.unmount()
   })
 

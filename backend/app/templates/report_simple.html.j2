@@ -170,7 +170,7 @@
           <td>{{ issue.issue_type or "-" }}</td>
           <td>{{ issue.status_label }}</td>
           <td>{{ issue.title or issue.description[:40] }}</td>
-          <td>{% if issue.cvss_vector and issue.cvss_score is not none %}已评分 {{ issue.cvss_score }}{% else %}未评分{% endif %}</td>
+          <td>{% if issue.cvss_vector and issue.cvss_score is not none %}CVSS 3.1（FIRST）{{ issue.cvss_score }} · <code>{{ issue.cvss_vector }}</code>{% else %}CVSS 3.1（FIRST）未评分{% endif %}</td>
           <td>{{ issue.file_name or "-" }}</td>
           <td>{{ issue.line_number or "-" }}</td>
         </tr>

@@ -1345,7 +1345,7 @@ def _handle(
                 reason,
                 errors=[{"code": "no_execution_contract"}],
             )
-        if payload.get("operation") in {"execute_capability", "verify_results"}:
+        if payload.get("operation") in {"execute_capability", "verify_results", "operate_current_page"}:
             import asyncio
 
             from app.services.site_agent_service import execute_site_task

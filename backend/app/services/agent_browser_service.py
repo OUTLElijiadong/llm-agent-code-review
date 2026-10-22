@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationError
 from app.core.permission_codes import PermissionCode
 from app.models.agent_browser_action import AgentBrowserAction
-from app.models.agent_response_run import AgentResponseRun
+from app.models.agent_response_run import AgentResponseRun, response_run_stop_requested
 from app.models.user import User
 from app.schemas.agent_browser import BrowserAckIn
 from app.services import rbac_service
@@ -101,9 +101,7 @@ _ROUTES = (
         (),
     ),
 )
-_SUPER_ADMIN_ROUTES = frozenset(
-    {"/admin/security-center", "/admin/embedding", "/admin/mcp-workers", "/admin/llm"}
-)
+_SUPER_ADMIN_ROUTES = frozenset({"/admin/security-center", "/admin/embedding", "/admin/mcp-workers", "/admin/llm"})
 _SUPER_ADMIN_PLATFORM_SECTIONS = frozenset({"embedding", "mcp-workers", "llm"})
 
 
@@ -155,7 +153,14 @@ def authorize_route(db: Session, user: User, route: str) -> str:
 
 
 def _owner_run(
-    db: Session, user: User, *, run_id: str, session_key: str, surface: str, expected_token_version: int | None = None
+    db: Session,
+    user: User,
+    *,
+    run_id: str,
+    session_key: str,
+    surface: str,
+    expected_token_version: int | None = None,
+    lock: bool = False,
 ) -> AgentResponseRun:
     if not re.fullmatch(r"[A-Za-z0-9_-]{8,128}", session_key or ""):
         raise ValidationError("页面操作必须绑定有效的当前会话")
@@ -167,15 +172,25 @@ def _owner_run(
         raise ForbiddenError("页面动作的登录凭据已变更，请重新发起")
     if surface not in {"user", "admin"} or (surface == "admin" and not rbac_service.is_admin_user(db, actor.id)):
         raise ForbiddenError("当前账号没有该会话权限")
-    run = (
+    query = (
         db.query(AgentResponseRun)
         .filter_by(run_id=run_id, user_id=actor.id, session_key=session_key, surface=surface)
         .populate_existing()
-        .first()
     )
+    # 与停止写事务共用父运行行锁，锁取得后必须刷新并重验停止意图。
+    run = (query.with_for_update() if lock else query).first()
     if run is None:
         raise NotFoundError("页面操作运行不存在")
-    if run.status not in _ACTIVE:
+    if run.status not in _ACTIVE or response_run_stop_requested(run):
+        # 停止意图先于最终状态落盘；同一运行的动作立即失效，已认领的动作不重放。
+        for previous, terminal in (("queued", "cancelled"), ("executing", "indeterminate")):
+            db.query(AgentBrowserAction).filter_by(
+                user_id=actor.id, run_id=run_id, session_key=session_key, surface=surface, status=previous
+            ).update(
+                {"status": terminal, "error": "所属运行已停止，页面动作不会继续或重放"},
+                synchronize_session=False,
+            )
+        db.commit()
         raise ConflictError("小菱运行已停止，不能继续页面操作")
     return run
 
@@ -189,10 +204,41 @@ def _owner_action(db: Session, user: User, action_id: int, session_key: str, sur
     )
     if row is None:
         raise NotFoundError("页面操作不存在")
+    # 所有页面事务统一 team -> task -> parent run -> action 写入锁序。
+    _active_team_action(db, row)
     _owner_run(
-        db, user, run_id=row.run_id, session_key=session_key, surface=surface, expected_token_version=row.token_version
+        db,
+        user,
+        run_id=row.run_id,
+        session_key=session_key,
+        surface=surface,
+        expected_token_version=row.token_version,
+        lock=True,
     )
     return row
+
+
+def _active_team_action(db: Session, row: AgentBrowserAction) -> None:
+    """Team-origin claims/ACKs also require the same still-live task attempt."""
+    if not row.call_id.startswith("team-browser:"):
+        return
+    from app.services.team_browser_service import require_browser_action_lease
+
+    try:
+        require_browser_action_lease(db, row)
+    except ConflictError:
+        # 已认领动作可能产生过副作用，只记为不确定，不能重放或伪称完成。
+        db.query(AgentBrowserAction).filter_by(id=row.id, status="queued").update(
+            {"status": "cancelled", "error": "团队租约已失效，页面动作已取消"},
+            synchronize_session=False,
+        )
+        db.query(AgentBrowserAction).filter_by(id=row.id, status="executing").update(
+            {"status": "indeterminate", "error": "团队租约已失效，页面执行结果未确认且不会重放"},
+            synchronize_session=False,
+        )
+        db.commit()
+        db.refresh(row)
+        raise
 
 
 def _resolve_arguments(
@@ -290,14 +336,15 @@ def _signed_required(row: AgentBrowserAction, nonce: str) -> dict[str, Any]:
     }
 
 
-def _expire(db: Session, row: AgentBrowserAction) -> None:
+def _expire(db: Session, row: AgentBrowserAction, *, commit: bool = True) -> None:
     if row.status in {"queued", "executing"} and row.expires_at <= _now():
         # 认领后可能已经写入，绝不自动重排为 queued。
         status = "indeterminate" if row.status == "executing" else "failed"
         db.query(AgentBrowserAction).filter_by(id=row.id, status=row.status).update(
             {"status": status, "error": "浏览器未按时交回观察；不会重放可能已执行的操作"}, synchronize_session=False
         )
-        db.commit()
+        if commit:
+            db.commit()
         db.refresh(row)
 
 
@@ -353,8 +400,22 @@ async def request_action(
         if row.status not in {"queued", "executing"}:
             return _result(row)
     else:
-        # 锁住当前 run，使同一会话每次只有一个未确认动作。
-        db.query(AgentResponseRun).filter_by(id=run.id).with_for_update().first()
+        # 团队动作先锁租约，再锁父运行；等待期间停止可能已抢先提交。
+        if call_id.startswith("team-browser:"):
+            from app.services.team_browser_service import require_browser_action_lease
+
+            require_browser_action_lease(
+                db,
+                AgentBrowserAction(
+                    call_id=call_id,
+                    user_id=user.id,
+                    run_id=run_id,
+                    session_key=session_key,
+                    surface=surface,
+                    action=action,
+                ),
+            )
+        run = _owner_run(db, user, run_id=run_id, session_key=session_key, surface=surface, lock=True)
         active = (
             db.query(AgentBrowserAction)
             .filter_by(user_id=user.id, run_id=run_id)
@@ -362,7 +423,7 @@ async def request_action(
             .first()
         )
         if active is not None:
-            _expire(db, active)
+            _expire(db, active, commit=False)
             if active.status in {"queued", "executing"}:
                 raise ConflictError("上一页面动作尚未交回观察，不能并行猜测下一步")
         resolved = _resolve_arguments(db, user, run, action, args)
@@ -397,6 +458,7 @@ async def request_action(
         db.commit()
         db.refresh(row)
         try:
+            _active_team_action(db, row)
             _owner_run(
                 db,
                 user,
@@ -404,9 +466,12 @@ async def request_action(
                 session_key=session_key,
                 surface=surface,
                 expected_token_version=row.token_version,
+                lock=True,
             )
         except (ForbiddenError, ConflictError):
-            db.query(AgentBrowserAction).filter_by(id=row.id, status=row.status).update(
+            db.query(AgentBrowserAction).filter_by(id=row.id, status=row.status).filter(
+                AgentBrowserAction.status.in_(("queued", "executing"))
+            ).update(
                 {
                     "status": "indeterminate" if row.status == "executing" else "cancelled",
                     "error": "运行或账号权限已变更，停止页面动作，不重放可能已执行的操作",
@@ -417,7 +482,11 @@ async def request_action(
             raise
         _expire(db, row)
         if row.status not in {"queued", "executing"}:
-            return _result(row)
+            result = _result(row)
+            db.commit()
+            return result
+        # 绝不跨轮询 sleep 持有团队/父运行行锁，停止事务可立即竞争。
+        db.commit()
 
 
 def pending_actions(db: Session, user: User, *, run_id: str, session_key: str, surface: str) -> dict[str, Any]:
@@ -431,6 +500,19 @@ def pending_actions(db: Session, user: User, *, run_id: str, session_key: str, s
     actions = []
     for row in rows:
         if row.token_version != int(user.token_version or 0):
+            continue
+        try:
+            _active_team_action(db, row)
+            _owner_run(
+                db,
+                user,
+                run_id=run_id,
+                session_key=session_key,
+                surface=surface,
+                expected_token_version=row.token_version,
+                lock=True,
+            )
+        except ConflictError:
             continue
         _expire(db, row)
         if row.status == "queued":
@@ -455,6 +537,7 @@ def pending_actions(db: Session, user: User, *, run_id: str, session_key: str, s
                     "status": "executing",
                 }
             )
+    db.commit()
     return {"actions": actions}
 
 

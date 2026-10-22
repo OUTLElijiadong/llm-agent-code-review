@@ -1110,6 +1110,8 @@ def test_html_templates_render_cvss_weighting_and_fallback_without_claiming_cvss
     )
     html = export_to_html(task, [vector_issue], "", None, load_builtin_template(template_type))
     assert "CVSS 安全分" in html
+    assert "FIRST CVSS v3.1 规范" in html
+    assert "https://www.first.org/cvss/v3.1/specification-document" in html
     assert "权重 70%" in html
     assert "规则质量分" in html and "权重 30%" in html
     assert "1 项已评分；0 项未评分" in html
@@ -1186,6 +1188,7 @@ def test_pdf_and_word_render_cvss_breakdown_and_vector_fallback():
             collect_flowable_text(element)
         pdf_text = "\n".join(pdf_visible_text)
         assert expected_weight in pdf_text
+        assert "https://www.first.org/cvss/v3.1/specification-document" in pdf_text
         assert expected_coverage in pdf_text
         assert "非 CVSS 官方综合分" in pdf_text
 
@@ -1196,6 +1199,7 @@ def test_pdf_and_word_render_cvss_breakdown_and_vector_fallback():
             cell.text for table in document.tables for row in table.rows for cell in row.cells
         )
         assert expected_weight in word_text
+        assert "https://www.first.org/cvss/v3.1/specification-document" in word_text
         assert expected_coverage in word_text
         assert "非 CVSS 官方综合分" in word_text
         if breakdown["cvss_status"] == "unavailable":

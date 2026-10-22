@@ -69,3 +69,41 @@
 - 沙箱领域导出有已评分发现但评分分项未保存向量列表时，明确说明缺少明细；不再错误显示“无有效向量”，也不反推或伪造向量。
 - 本地相关两个测试文件合计 96 passed、1 warning（91.63 秒）。日志：`/tmp/prism-final-cvss-integration.log`。
 - Luna 独立复核撤回圆桌初始 `task_id=0` 所致误报，确认正式编排、结算、报告和导出链路。此处仅为源码和定向回归结果，最终生产验收另记。
+
+## 2026-10-23 页面团队桥补充
+
+新增真实页面团队入口和租约代次校验；Luna 复核指出父运行停止与团队完成的交叉状态，已用两项红测试复现，补丁改为先核父运行。31项页面桥回归及星图适配回归正在执行，结果待补。
+
+上一轮101项中98通过、3失败，失败均为新增 ACK 夹具 snapshot_id 使用非十六进制字符；修正夹具后这3项单独通过（`/tmp/prism-browser-ack-fixed.log`）。不将夹具错误计为产品根因，也不把修正前整组称为通过。
+
+
+## 2026-10-23 停止意图与创建确认追加核验
+
+- 页面父run保持running但stop_requested=true：补丁前4项失败，证据 `/tmp/prism-browser-stop-red.log`；补丁后8项通过（包括派发前停止和动作返回后停止），证据 `/tmp/prism-browser-stop-green.log`。活动动作被取消或记不确定，不重放，已完成账本保留。
+- 108项页面桥/旧browser/stream联合回归全部通过（447.46秒），证据 `/tmp/prism-browser-stop-final.log`。
+- Luna发现创建高风险或未分类团队仍在Responses和service层强制确认，报告 `/tmp/prism-luna-team-creation-qa-audit.md`；已作为当前发布阻断实施修复，不将已存在普通问答片段测试冒充整链完成。
+- 当前网页仍显示4.1.21/af9c8d61；上述新补丁未发布，尚不能确认生产已修复。
+
+- 星图组件8项定向Vitest、文件级ESLint通过；前端全量类型检查需最终CI补验，不能以长时间无输出记为通过。
+- 发布前只读复核确认生产4.1.21/af9c8d61、tracked clean、无pending；可用磁盘25G（87%）、可用内存3.0GiB，最近24小时未检出内核OOM。最近定时备份成功，当前仅核验文件存在，正式发布仍须备份与隔离恢复门禁。
+
+
+## 2026-10-23 页面停止及租约锁边界补充
+
+- 父运行停止标记使用 locking current read；页面动作统一 team → task → parent 的锁序，轮询不得跨 sleep 持锁。
+- 原停止边界三入口注入交错测试已通过：`/tmp/prism-parent-stop-lock-green-valid.log`，3 passed。联合回归 `/tmp/prism-browser-stop-lock-regression-valid.log`，111 passed。
+- 独立复核发现等待 parent 锁期间任务租约可自然过期。新增时钟推进测试覆盖 dispatch/claim/ACK，修复前 `/tmp/prism-browser-parent-wait-expiry-red.log` 有效复现 3 失败；修复后 `/tmp/prism-browser-parent-wait-expiry-green.log` 3 passed。
+- 测试为 SQLite Session 注入交错，不冒充真实双连接 MySQL 锁等待证据。最终补丁联合回归及独立复核正在收集。
+- 星图空挂载到 forming/真实团队的 ResizeObserver 生命周期测试：9 passed；容器消失和卸载时断开，旧回调不覆盖新布局。
+- `vue-tsc --noEmit` 已通过；评分后续变更仍须最终 CI 重新验证。
+- 本次只读生产基线仍为 4.1.21 / af9c8d6169eb1909cbb5c629c64487872857514a，候选 4.1.22 尚未部署。
+
+- 最终页面动作联合回归 `/tmp/prism-browser-parent-wait-regression.log`：114 passed。Luna 独立复核 `/tmp/prism-browser-parent-wait-final-review.md` 未发现新 P0/P1；本机未确认专用隔离 MySQL，不将用途未知的 3307 实例用于测试。
+
+
+## 2026-10-23 最终集成候选
+
+- 创建高风险或未分类团队的 Responses/service 两层确认已移除；创建不写入当前账号已确认标记，也不注入远程执行授权。成员实际执行继续核验权限、合同和任务指纹。
+- 普通问答集成测试改为仅替换模型调用，保留真实临时成员 handler、调度、DB 持久结果、同轮团队读回和完成守卫。最终通过状态以本次候选完整 CI 为准。
+- 修正 Sentinel/full 与圆桌终态四档严重度计数遇到未分级发现时的 KeyError，拒分原因统一为 ungraded_findings；报告补充 FIRST 归属与 CVSS 向量。
+- 本地后端全 app Ruff、diff 检查、锁定依赖漏洞审计通过。此次集成候选尚待完整 CI 和生产 all 发布；生产核验仍为 4.1.21 / af9c8d61。

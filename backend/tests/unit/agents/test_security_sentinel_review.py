@@ -149,6 +149,22 @@ class TestScanFileForReview:
         # 无 findings 时评分应为 100
         assert result.data["score"] == 100
 
+    def test_ungraded_finding_is_unavailable_instead_of_raising_or_scoring(self, agent):
+        finding = {
+            "severity": "未分级",
+            "cvss_vector": None,
+            "cvss_score": 9.8,
+        }
+
+        assert agent._compute_risk_score([finding]) is None
+
+    def test_standalone_security_scorer_refuses_ungraded_finding(self):
+        from types import SimpleNamespace
+
+        from app.agents.security_sentinel_agent import _compute_security_score
+
+        assert _compute_security_score([SimpleNamespace(severity="未分级")]) is None
+
     def test_multiple_findings_score_deduction(self, agent, ctx, monkeypatch):
         """多个 findings 应正确扣减安全评分"""
         mock_result = AgentResult(

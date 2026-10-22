@@ -97,3 +97,18 @@ HTTP JSON模式在完整响应处使用同一解码器。完整但不可解析�
 纯导航识别保留完整否定分句与后续肯定业务分句的边界；缺失站点执行合同在团队监督审批前通过既有解析器拒绝，模型可修正参数，审批不能授权未定义动作。合法高风险合同仍经指纹审批。
 
 未知严重度保留为未分级，并使评分不可用；圆桌主提示词、领域报告导出与新评分明细使用同一 CVSS 策略。导出每条发现时以合法向量复算基础分，不能相信与向量不符的裸分。
+
+## 2026-10-23 页面团队桥收尾
+
+`agent:site_operator` 复用现有 `operate_current_page` 动作账本，真实租约绑定父 Responses 运行；动作 `call_id` 记录团队、任务、attempt 与完整租约 SHA-256。claim、ACK、pending 和 worker 等待都按 team→task 锁序读取当前租约；cleanup 或换代后，queued 动作取消，executing 动作记为不确定且不重放。控件交互继续校验当前账号的同任务指纹审批。
+
+创建页面团队后父工具等待最新终态，使用已有有界等待设置；每轮结束 MySQL 快照。先核验父运行身份和停止状态，再返回团队终态。父运行停止但团队已完成时保留账本并返回冲突，不复活父运行；仍活动的团队在取消、超时和读取故障时按既有收尾函数终止。页面观察维持 client_observed、server_verified=false，业务写入须独立回读。
+
+
+## 父运行停止意图的页面动作门禁
+
+页面 bridge 在 run 状态终止或 checkpoint.stop_requested=true 时统一拒绝派发、pending、claim、ACK。只收敛同账号、run、session、surface 的活动动作：queued→cancelled，executing→indeterminate，已完成账本保留。团队动作租约核验同时检查父运行身份、会话、surface 与停止意图；dispatcher 发出前检查、返回后重新读取父运行，防止晚到客户端观察伪报完成。
+
+## 团队创建与风险执行分离
+
+创建入口仅承担计划校验、成员/账号边界与持久化。监督分类保留为审计和调度依据；创建回执不授予任务执行权。调度器在每个任务的实际执行前核验当前任务指纹授权，未满足时保留blocked与具体原因。普通问答走temporary answer_question实际成员链。

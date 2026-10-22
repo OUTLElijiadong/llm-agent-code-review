@@ -239,7 +239,7 @@ def task_fingerprint(task: Mapping[str, Any], address: str) -> str:
     if (
         address == "agent:site_operator"
         or address.startswith("temporary:")
-        or raw_input.get("operation") in {"execute_capability", "verify_results"}
+        or raw_input.get("operation") in {"execute_capability", "verify_results", "operate_current_page"}
     ):
         payload["operation"] = raw_input.get("operation")
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
@@ -274,7 +274,9 @@ def _review_team_task(
     )
     if has_external_target:
         return SupervisionReview(ESCALATE, HIGH, "任务包含外部目标，等待当前账号确认", True, "external_target")
-    if code == "site_operator" or (code == "temporary" and operation in {"execute_capability", "verify_results"}):
+    if code == "site_operator" or (
+        code == "temporary" and operation in {"execute_capability", "verify_results", "operate_current_page"}
+    ):
         if operation == "verify_results":
             return SupervisionReview(ALLOW, LOW, "只读核验本团队持久执行回执", False, "site_readback")
         try:
@@ -282,6 +284,10 @@ def _review_team_task(
             spec, _ = resolve_site_input(task_input)
         except ValueError:
             return SupervisionReview(ESCALATE, HIGH, "站点操作未绑定合法业务契约", True, "unclassified_site_operation")
+        if operation == "operate_current_page":
+            if task_input["action"] in {"inspect", "navigate", "scroll"}:
+                return SupervisionReview(ALLOW, LOW, "当前团队的页面读取或站内导航", False, "browser_read")
+            return SupervisionReview(ESCALATE, HIGH, "当前账号确认绑定控件的页面交互", True, "browser_control")
         risk = declared_capability_risk(spec.risk)
         return review_action("site." + spec.code, spec.page, declared_risk=risk)
     if code in {"operations", "incident_responder"}:
@@ -367,8 +373,9 @@ def review_response_tool(tool_name: str, arguments: Mapping[str, Any]) -> dict[s
         team_review = review_agent_team_plan(arguments)
         review = SupervisionReview(
             team_review["decision"], team_review["risk_level"],
-            "团队计划通过监督复核" if not team_review["needs_confirmation"]
-            else "团队计划包含高风险或未分类任务，等待当前账号确认",
+            "团队计划通过监督复核；执行仍受任务级权限与合同门禁约束"
+            if not team_review["needs_confirmation"]
+            else "团队计划已记录；高风险或未分类任务须在执行前完成当前账号确认",
             bool(team_review["needs_confirmation"]), "team_plan",
         )
         extra = team_review

@@ -142,14 +142,14 @@ _CONTRACTS = (
         "site_operator", "站点执行子 Agent", "runtime_service",
         "按小菱绑定的页面业务契约执行当前账号操作，独立读回真实结果。",
         ("执行固定能力注册表中的明确任务", "核验当前团队持久回执和同目标结果"),
-        ("持有效团队租约执行 execute_capability", "通过 verify_results 只读核验依赖"),
+        ("持有效团队租约执行 execute_capability 或 operate_current_page", "通过 verify_results 只读核验业务依赖"),
         ("不得根据文本猜测写操作", "不得修改身份、方法、URL或绕过审批", "不得重放结果不确定的写调用"),
         (
             _skill(
                 "site.execute_capability",
                 "站点业务执行",
                 "复用真实业务API与权限",
-                "显式绑定scope、capability与params",
+                "业务绑定scope、capability与params；页面绑定operation:operate_current_page、action与args，max_attempts:1，先inspect再使用句柄",
             ),
             _skill(
                 "site.verify_results",
