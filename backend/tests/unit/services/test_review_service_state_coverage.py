@@ -446,7 +446,6 @@ def test_execute_review_success_normalizes_severity_and_emits_progress(monkeypat
     monkeypatch.setattr(review_service, "_review_one_file", lambda *args, **kwargs: issues)
     monkeypatch.setattr(review_service, "_safe_commit", lambda db, task_obj=None: commit_calls.append(task_obj))
     monkeypatch.setattr(review_service, "_emit_review_event", _capture_event)
-    monkeypatch.setattr(review_service, "compute_score", lambda counts: 77)
     monkeypatch.setattr(review_service, "_build_summary", lambda *args, **kwargs: "summary")
 
     review_service._execute_review(
@@ -466,7 +465,12 @@ def test_execute_review_success_normalizes_severity_and_emits_progress(monkeypat
     assert task.total_issues == 2
     assert task.severe_issues == 1
     assert task.medium_issues == 1
-    assert task.score == 77
+    assert task.score == 82
+    assert task.score_version == "severity-deduction-v1"
+    assert task.score_breakdown["policy_version"] == "cvss-weighted-v1"
+    assert task.score_breakdown["cvss_status"] == "unavailable"
+    assert task.score_breakdown["components"]["cvss"]["weight"] == 0
+    assert task.score_breakdown["components"]["cvss"]["unscored_findings"] == 2
     assert task.summary == "summary"
     assert task.duration_ms == 250
     assert len(commit_calls) == 3

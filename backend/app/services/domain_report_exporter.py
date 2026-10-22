@@ -185,17 +185,44 @@ def score_section_lines(
     audit_label: str = "",
     finding_count: int | None = None,
     severity_counts: dict[str, Any] | None = None,
+    score_breakdown: dict[str, Any] | None = None,
 ) -> list[str]:
     """导出正文统一的“评分与结论”：出分写明范围与依据，不出分写明原因，绝不用占位分。"""
     lines = ["## 评分与结论"]
+    is_cvss_policy = isinstance(score_breakdown, dict) and score_breakdown.get("policy_version") == "cvss-weighted-v1"
     if available and isinstance(score, (int, float)) and not isinstance(score, bool):
-        lines.append(f"评分：{int(score)} / 100")
+        label = (
+            str(score_breakdown.get("score_label") or "平台综合分（非 CVSS 官方综合分）")
+            if is_cvss_policy
+            else "评分"
+        )
+        lines.append(f"{label}：{int(score)} / 100")
         if scope_label:
             lines.append(f"评分范围：{scope_label}")
         if rule:
             lines.append(f"计分规则：{rule}")
         if audit_label:
             lines.append(f"复核状态：{audit_label}")
+        if is_cvss_policy:
+            components = score_breakdown.get("components") or {}
+            cvss = components.get("cvss") if isinstance(components, dict) else {}
+            cvss = cvss if isinstance(cvss, dict) else {}
+            vectors = score_breakdown.get("cvss_vectors")
+            vectors = vectors if isinstance(vectors, list) else []
+            standard = score_breakdown.get("cvss_standard") or "CVSS 3.1（FIRST）"
+            lines.append(f"CVSS 来源：{_value(standard)}")
+            lines.append(
+                "CVSS 向量：" + ("、".join(str(item) for item in vectors) if vectors else "无有效向量")
+            )
+            cvss_weight = cvss.get("weight", 0)
+            lines.append(f"CVSS 权重：{int(round(cvss_weight * 100))}%" if cvss_weight else "CVSS 权重：0%")
+            max_base_score = cvss.get("max_base_score")
+            if max_base_score is not None:
+                lines.append(f"CVSS 最高基础分：{_value(max_base_score)} / 10")
+            else:
+                lines.append("CVSS 最高基础分：未评估")
+            if score_breakdown.get("cvss_reason"):
+                lines.append(f"CVSS 说明：{_value(score_breakdown['cvss_reason'])}")
     else:
         lines.append("评分：未评估")
         lines.append(f"不出分原因：{reason or '缺少可计分的已测范围'}")
@@ -440,16 +467,27 @@ def build_remote_pentest_report_markdown(content: dict[str, Any]) -> str:
         )
     markdown = "\n".join(lines).strip() + "\n"
     score = content.get("score") if isinstance(content.get("score"), dict) else {}
-    markdown = insert_section_after_task_info(markdown, score_section_lines(
-        score.get("score"),
-        available=bool(score.get("available")),
-        scope_label=str(score.get("scope_label") or ""),
-        reason=str(score.get("reason") or "报告未保存评分"),
-        rule=str(score.get("rule") or ""),
-        audit_label=str(score.get("audit_label") or ""),
-        finding_count=len([item for item in findings if isinstance(item, dict) and item.get("status") != "refuted"]),
-        severity_counts=score.get("severity_counts") if isinstance(score.get("severity_counts"), dict) else None,
-    ))
+    markdown = insert_section_after_task_info(
+        markdown,
+        score_section_lines(
+            score.get("score"),
+            available=bool(score.get("available")),
+            scope_label=str(score.get("scope_label") or ""),
+            reason=str(score.get("reason") or "报告未保存评分"),
+            rule=str(score.get("rule") or ""),
+            audit_label=str(score.get("audit_label") or ""),
+            finding_count=sum(
+                1 for item in findings
+                if isinstance(item, dict) and item.get("status") == "config_confirmed"
+            ),
+            severity_counts=(
+                score.get("severity_counts")
+                if isinstance(score.get("severity_counts"), dict)
+                else None
+            ),
+            score_breakdown=score,
+        ),
+    )
     return clean_report_markdown(markdown)
 
 

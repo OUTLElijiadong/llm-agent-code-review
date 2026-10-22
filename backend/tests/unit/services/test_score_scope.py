@@ -57,7 +57,7 @@ def test_failed_placeholder_zero_is_not_treated_as_rejected_score() -> None:
     assert "仅代表已审范围" in audit["reason"]
 
 
-def test_remote_assessment_scores_observed_configuration_scope() -> None:
+def test_remote_assessment_scores_only_confirmed_configuration_observations() -> None:
     phases = [
         SimpleNamespace(phase_key="recon", status="success"),
         SimpleNamespace(phase_key="detect", status="success"),
@@ -69,7 +69,8 @@ def test_remote_assessment_scores_observed_configuration_scope() -> None:
     ]
     score = remote_pentest_service._remote_rule_score(phases, findings)
     assert score["available"] is True
-    assert score["score"] == 90
+    assert score["score"] == 100
+    assert score["severity_counts"] == {}
     assert score["scope"] == "partial"
 
 

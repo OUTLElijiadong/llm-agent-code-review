@@ -421,9 +421,16 @@ def _fail_pending_discussion(
 ) -> None:
     """启动/执行异常同时关闭会话与仍在运行的同账号报告。"""
     session = bus.get_session(session_id)
-    if session is None or getattr(session, "terminal_status", ""):
+    if session is None:
         return
-    status = getattr(session, "terminal_status", "") or status
+    terminal_status = getattr(session, "terminal_status", "")
+    if terminal_status in {"success", "cancelled"}:
+        return
+    # 编排器可能先持久化会话失败再退出。此时仍须收敛关联的 running 报告，
+    # 同时保留最早的失败原因；重复收尾不能生成一个永远运行的报告。
+    if terminal_status:
+        status = terminal_status
+        error = str(getattr(session, "terminal_error", "") or error)
     task_id = int(session.report_task_id or session.task_id or 0)
     if getattr(bus, "_persist", False) and task_id:
         from app.models.review_task import ReviewTask

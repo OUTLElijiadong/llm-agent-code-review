@@ -216,6 +216,36 @@ async def test_runner_return_without_report_completion_cannot_leave_fake_running
         assert db.get(RoundtableSession, session.session_id).status == "failed"
 
 
+@pytest.mark.parametrize("terminal", ["failed", "interrupted"])
+def test_terminal_failure_reconciles_report_once_and_preserves_original_error(runtime, terminal):
+    bus, maker = runtime
+    session, _ = prepare(bus)
+    with maker.begin() as db:
+        db.add(ReviewTask(id=84, user_id=7, project_id=9, review_type="discuss", status="running"))
+    bus.link_report_task(session.session_id, 84)
+    bus.publish_control(session.session_id, "done", {
+        "status": terminal, "task_id": 84, "error": "original failure",
+    })
+    bus.close_session(session.session_id)
+
+    ws._fail_pending_discussion(bus, session.session_id, "late failure")
+    with maker() as db:
+        task = db.get(ReviewTask, 84)
+        original_end_time = task.end_time
+        assert task.status == "failed"
+        assert task.error_message == "original failure"
+        assert task.coverage == {"stage": terminal, "score_available": False}
+        row = db.get(RoundtableSession, session.session_id)
+        assert row.progress["terminal_status"] == terminal
+        assert row.progress["terminal_error"] == "original failure"
+
+    ws._fail_pending_discussion(bus, session.session_id, "another late failure")
+    with maker() as db:
+        task = db.get(ReviewTask, 84)
+        assert task.error_message == "original failure"
+        assert task.end_time == original_end_time
+
+
 @pytest.mark.asyncio
 async def test_recovery_auth_rejection_cancels_linked_report_before_any_model(runtime, monkeypatch):
     bus, maker = runtime

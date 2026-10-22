@@ -2279,9 +2279,16 @@ def test_finalize_review_persists_issues_statistics_and_log_labels(
     assert saved_task.total_issues == 2
     assert saved_task.high_issues == 1
     assert saved_task.medium_issues == 1
-    assert saved_task.score == 89
-    assert saved_task.score_version == "severity-deduction-v1"
-    assert saved_task.score_breakdown["score"] == 89
+    assert saved_task.score == 40
+    assert saved_task.score_version == "cvss-weighted-v1"
+    assert saved_task.score_breakdown["score"] == 40
+    assert saved_task.score_breakdown["legacy_rule"]["score"] == 89
+    assert saved_task.score_breakdown["cvss_status"] == "partial"
+    assert saved_task.score_breakdown["components"]["cvss"] == {
+        "version": "3.1", "score": 19.0, "max_base_score": 8.1,
+        "scored_findings": 1, "unscored_findings": 1, "weight": 0.7,
+        "source": "validated_vector",
+    }
     assert saved_task.score_breakdown["counts"] == {"严重": 0, "高": 1, "中": 1, "低": 0}
     assert saved_task.summary == consensus
     assert saved_task.status == "success"
