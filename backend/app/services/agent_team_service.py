@@ -664,6 +664,8 @@ def _validate_task_scope(db: Session, user: User, task_input: Any, address: str)
     from app.services.project_member_service import require_scoped_project_execution
 
     raw = task_input.input
+    if raw.get("operation") == "operate_current_page" and address != "agent:site_operator":
+        raise AgentTeamValidationError("页面桥仅允许正式站点执行成员")
     if address == "agent:site_operator" or (
         address.startswith("temporary:") and raw.get("operation") in {"execute_capability", "verify_results"}
     ):
@@ -672,6 +674,12 @@ def _validate_task_scope(db: Session, user: User, task_input: Any, address: str)
             spec, _ = resolve_site_input(raw)
         except ValueError as exc:
             raise AgentTeamValidationError(str(exc)) from exc
+        if raw.get("operation") == "operate_current_page":
+            if address != "agent:site_operator":
+                raise AgentTeamValidationError("页面桥仅允许正式站点执行成员")
+            if task_input.max_attempts != 1:
+                raise AgentTeamValidationError("页面动作只能尝试一次，不得重放")
+            return
         if spec is None and not task_input.depends_on:
             raise AgentTeamValidationError("站点核验必须依赖当前团队的执行任务")
         if spec is not None and raw.get("scope") == "admin" and not _is_admin(db, user):
@@ -1059,11 +1067,37 @@ def _require_live_task_lease(
     return team, task, member
 
 
+def _has_browser_tasks(db: Session, team_id: int) -> bool:
+    """从持久任务判断页面团队；普通团队的结果可独立于父会话收尾。"""
+    inputs = db.query(AgentTeamTask.input_json).filter(AgentTeamTask.team_id == int(team_id)).all()
+    # 空对象不包含页面操作，租约轮询无需反复解析默认输入。
+    return any(
+        _unjson(row[0], {}).get("operation") == "operate_current_page"
+        for row in inputs if row[0] and row[0].strip() != "{}"
+    )
+
+
+def require_parent_run_not_stopped(db: Session, team: AgentTeam, *, lock: bool = False) -> None:
+    """停止意图与成员结果使用同一父运行行锁，避免停止后的新成功回执。"""
+    parent_ids = sorted({value for value in (team.root_agent_run_id, team.agent_run_id) if value})
+    for parent_id in parent_ids:
+        query = db.query(AgentResponseRun).filter(AgentResponseRun.id == parent_id).populate_existing()
+        parent = (query.with_for_update() if lock else query).first()
+        # 历史普通团队的归因可跨会话/surface；它们不是页面执行的授权凭据。
+        # 页面桥仍在创建与 _validate_team_binding 中严格核对直接父运行的会话。
+        if (parent is None or parent.user_id != team.user_id
+                or response_run_stop_requested(parent)):
+            raise AgentTeamLeaseError("父运行已停止或归属失效，任务结果未写入")
+
+
 def require_active_task_lease(
     db: Session, *, team_id: int, task_id: int, lease_token: str,
     owner_user_id: Optional[int] = None, lock: bool = False,
 ) -> tuple[AgentTeam, AgentTeamTask, AgentTeamMember]:
     """执行前重新读取持久化租约；不让已取消、过期或被接管的声明调用业务。"""
+    parent_team = db.get(AgentTeam, int(team_id), populate_existing=True)
+    if parent_team is not None and _has_browser_tasks(db, parent_team.id):
+        require_parent_run_not_stopped(db, parent_team, lock=lock)
     team_query = db.query(AgentTeam).filter(AgentTeam.id == int(team_id)).populate_existing()
     task_query = db.query(AgentTeamTask).filter(
         AgentTeamTask.id == int(task_id), AgentTeamTask.team_id == int(team_id),
@@ -1455,6 +1489,9 @@ def _create_team(db: Session, user: User, payload: AgentTeamCreateIn) -> dict[st
     # 小菱运行取消时，不允许并发工具调用在取消扫描之后再创建新的后台团队。
     # 行锁使团队创建与运行终态写入串行化；取消方随后按 root_agent_run_id 收尾。
     parent_run_id = current_attribution(int(user.id)).get("agent_run_id")
+    has_browser_tasks = any(item.input.get("operation") == "operate_current_page" for item in payload.tasks)
+    if has_browser_tasks and not parent_run_id:
+        raise AgentTeamValidationError("页面团队必须绑定已落库的当前小菱运行")
     if parent_run_id:
         parent_run = (
             db.query(AgentResponseRun)
@@ -1469,6 +1506,10 @@ def _create_team(db: Session, user: User, payload: AgentTeamCreateIn) -> dict[st
             or response_run_stop_requested(parent_run)
         ):
             raise AgentTeamValidationError("父级小菱运行已结束，不能再启动子 Agent 团队")
+        if has_browser_tasks and (
+            parent_run.surface != payload.surface or parent_run.session_key != payload.session_id
+        ):
+            raise AgentTeamValidationError("页面团队与父运行的会话或范围不匹配")
     queue_limit = int(getattr(settings, "agent_team_max_queue_length", 100))
     queued_count = (
         db.query(AgentTeamTask)
@@ -1639,6 +1680,9 @@ def create_team_from_xiaoling(
     from app.core.site_request_context import trusted_request_origin
     from app.services import agent_supervisor_service
 
+    # 在 _create_team 内的刷新/提交前固定认证版本；模型 input 不能提供该值。
+    browser_token_version = int(user.token_version or 0)
+    has_browser_tasks = any(task.input.get("operation") == "operate_current_page" for task in payload.tasks)
     validate_task_member_references(payload)
     review = agent_supervisor_service.review_agent_team_plan(payload.model_dump(mode="json"))
     if review["needs_confirmation"]:
@@ -1664,7 +1708,7 @@ def create_team_from_xiaoling(
         for item in review["tasks"]
         if item["risk_level"] in {agent_supervisor_service.HIGH, agent_supervisor_service.CRITICAL}
     ]
-    _event(
+    plan_event = _event(
         db,
         team,
         "supervisor.plan_reviewed",
@@ -1680,6 +1724,11 @@ def create_team_from_xiaoling(
             "site_request_origin": trusted_request_origin(),
         },
     )
+    if has_browser_tasks:
+        # _event 会脱敏 token 字段；只在服务端持久记录保留原始版本，公开投影仍脱敏。
+        plan_event.detail_json = _json({
+            **_unjson(plan_event.detail_json, {}), "browser_token_version": browser_token_version,
+        })
     db.commit()
     db.refresh(team)
     result = _team_out(db, team, include_events=True)
@@ -2951,6 +3000,9 @@ def complete_task(
     success: bool = True,
     error: str = "",
 ) -> dict[str, Any]:
+    parent_team = db.get(AgentTeam, int(team_id), populate_existing=True)
+    if parent_team is not None and _has_browser_tasks(db, parent_team.id):
+        require_parent_run_not_stopped(db, parent_team, lock=True)
     team = (
         db.query(AgentTeam).filter(AgentTeam.id == int(team_id)).populate_existing().with_for_update().first()
     )

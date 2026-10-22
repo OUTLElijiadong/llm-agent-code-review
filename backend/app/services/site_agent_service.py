@@ -9,8 +9,9 @@ from typing import Any, Mapping
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.exceptions import AppError, ValidationError
 from app.core.permission_codes import PermissionCode
-from app.models.agent_response_run import AgentToolExecution
+from app.models.agent_response_run import AgentResponseRun, AgentToolExecution
 from app.models.agent_team import AgentTeamEvent, AgentTeamTask
 from app.models.user import User
 from app.schemas.agent_team import AgentTeamCreateIn
@@ -48,12 +49,23 @@ def resolve_site_input(value: Mapping[str, Any]):
     if not isinstance(value, Mapping):
         raise ValueError("站点任务 input 必须是 JSON object")
     operation = value.get("operation")
-    allowed = {"operation"} if operation == "verify_results" else {"operation", "scope", "capability", "params"}
+    allowed = ({"operation"} if operation == "verify_results" else
+               {"operation", "action", "args"} if operation == "operate_current_page" else
+               {"operation", "scope", "capability", "params"})
     unknown = {str(key) for key in value if not str(key).startswith("_")} - allowed
     if unknown:
         raise ValueError("站点任务不接受参数：" + ", ".join(sorted(unknown)))
     if operation == "verify_results":
         return None, {}
+    if operation == "operate_current_page":
+        from app.services.agent_browser_service import validate_action_input
+        if set(value) != {"operation", "action", "args"}:
+            raise ValueError("页面任务只接受 operation、action、args")
+        try:
+            validate_action_input(value["action"], value["args"])
+        except ValidationError as exc:
+            raise ValueError("页面动作参数不符合已登记契约") from exc
+        return None, dict(value["args"])
     if operation != "execute_capability" or value.get("scope") not in {"user", "admin"}:
         raise ValueError("站点任务必须显式指定 execute_capability 和 user/admin scope")
     code = str(value.get("capability") or "")
@@ -198,6 +210,8 @@ def _live_task(db: Session, user: User, team_id: int, task_id: int, lease_token:
     if team.surface == "admin" and not rbac_service.is_admin_user(db, actor.id):
         raise ValueError("管理会话权限已撤销")
     raw = agent_team_service._unjson(task.input_json, {})
+    if agent_team_service._has_browser_tasks(db, team.id):
+        agent_supervisor_service.require_browser_team_session(db, team)
     return actor, team, task, member, raw
 
 
@@ -290,6 +304,8 @@ async def execute_site_task(db: Session, user: User, *, team_id: int, task_id: i
     try:
         actor, team, task, member, raw = _live_task(db, user, team_id, task_id, lease_token)
         spec, params = resolve_site_input(raw)
+        if raw.get("operation") == "operate_current_page":
+            return await _execute_browser_task(db, actor, team, task, member, raw, lease_token)
         if spec is None:
             return await _verify_dependencies(db, actor, team, task, lease_token)
         _authorize_actor(db, actor, team, raw, spec)
@@ -400,9 +416,87 @@ async def execute_site_task(db: Session, user: User, *, team_id: int, task_id: i
         row.error = None if result["status"] == "completed" else result["summary"]
         db.commit()
         return result
-    except (ValueError, TypeError) as exc:
+    except (AppError, ValueError, TypeError) as exc:
         db.rollback()
         return _result("blocked", str(exc))
+
+
+async def _execute_browser_task(db, actor, team, task, member, raw, lease_token):
+    from app.services import agent_browser_service, policy_engine, tool_gateway
+
+    # 模型只能指定动作；真实浏览器会话从创建团队时已提交的父运行取得。
+    parent = db.get(AgentResponseRun, team.agent_run_id or team.root_agent_run_id)
+    if (member.address != "agent:site_operator" or parent is None or parent.user_id != actor.id
+            or parent.session_key != team.session_key or parent.surface != team.surface):
+        raise ValueError("页面任务缺少匹配的持久父运行")
+    token_version = agent_supervisor_service.require_browser_team_session(db, team)
+    agent_browser_service._owner_run(
+        db, actor, run_id=parent.run_id, session_key=team.session_key, surface=team.surface,
+        expected_token_version=token_version,
+    )
+    review = agent_supervisor_service.review_team_task(
+        address=member.address, task_key=task.task_key, title=task.title,
+        instructions=task.instructions, task_input=raw,
+    )
+    policy = tool_gateway.authorize(
+        db, agent_code="site_operator", tool_code="operate_current_page", action="browser." + raw["action"],
+        resource="current_account", actor=actor, declared_risk=review.risk_level,
+        context={"surface": team.surface, "team_id": team.id, "task_id": task.id, "executor": member.address},
+    )
+    if policy.decision == policy_engine.DENY:
+        raise ValueError("页面执行已被策略阻断：" + policy.reason)
+    confirmed = _confirmed(db, team, task, member, raw)
+    if (review.needs_confirmation or policy.decision == policy_engine.ESCALATE
+            or policy.risk_level in {policy_engine.HIGH, policy_engine.CRITICAL}) and not confirmed:
+        raise ValueError("页面任务缺少当前账号对同一任务的确认")
+    request_id = hashlib.sha256(f"site:{actor.id}:{team.id}:{task.id}".encode()).hexdigest()
+    arguments = _json(raw)
+    row = db.query(AgentToolExecution).filter_by(request_id=request_id).first()
+    if row is not None:
+        if row.user_id != actor.id or row.arguments_json != arguments:
+            raise ValueError("页面任务与持久执行账本不匹配")
+        if row.status == "executing":
+            return _result("blocked", "页面调用已发出但结果未确认，禁止重放")
+        return json.loads(row.result_json)
+    row = AgentToolExecution(request_id=request_id, run_id=f"site-team-{team.id}", call_id=str(task.id),
+                             user_id=actor.id, tool_name="site_operate_current_page",
+                             arguments_json=arguments, status="executing")
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return _result("blocked", "同一页面任务正在执行，禁止重放")
+    try:
+        output = await agent_browser_service.request_action(
+            db, actor, run_id=parent.run_id, session_key=team.session_key, surface=team.surface,
+            call_id=f"site-team-{team.id}-task-{task.id}", action=raw["action"], args=raw["args"],
+            event_sink=None, approved=confirmed,
+            team_binding={"team_id": team.id, "task_id": task.id,
+                          "lease_sha256": hashlib.sha256(lease_token.encode()).hexdigest()},
+        )
+        _live_task(db, actor, team.id, task.id, lease_token)
+        agent_team_service.require_parent_run_not_stopped(db, team, lock=True)
+        agent_supervisor_service.require_browser_team_session(db, team, lock=True)
+        receipt = {"operation": "operate_current_page", "request_id": request_id,
+                   "verification_scope": "client_observed_only", "output": output}
+        result = _result(
+            "completed" if output.get("completed") is True else "blocked",
+            "已取得当前浏览器观察；未证明业务写入成功" if output.get("completed") is True
+            else "页面动作未完成，不重放可能已执行的操作", receipt=receipt,
+            evidence=[{"source": "client_observed", "action_id": output["action_id"], "server_verified": False}],
+        )
+    except (AppError, ValueError, TypeError) as exc:
+        db.rollback()
+        result = _result("blocked", str(exc))
+    if result["status"] == "completed":
+        agent_team_service.require_parent_run_not_stopped(db, team, lock=True)
+    row = db.query(AgentToolExecution).filter_by(request_id=request_id).one()
+    row.status = "success" if result["status"] == "completed" else "failed"
+    row.result_json = _json(result)
+    row.error = None if result["status"] == "completed" else result["summary"]
+    db.commit()
+    return result
 
 
 async def _verify_dependencies(db, actor, team, task, lease_token):
@@ -429,6 +523,24 @@ async def _verify_dependencies(db, actor, team, task, lease_token):
             return _result("blocked", "依赖回执与执行账本不一致")
         raw = agent_team_service._unjson(row.input_json, {})
         spec, params = resolve_site_input(raw)
+        if raw.get("operation") == "operate_current_page":
+            from app.models.agent_browser_action import AgentBrowserAction
+            from app.services import agent_browser_service
+            output = receipt.get("output", {})
+            action = db.get(AgentBrowserAction, output.get("action_id"))
+            parent = db.get(AgentResponseRun, team.agent_run_id or team.root_agent_run_id)
+            binding = json.loads(action.arguments_json).get("_team_binding", {}) if action else {}
+            if (action is None or parent is None or action.user_id != actor.id or action.run_id != parent.run_id
+                    or action.surface != team.surface or action.session_key != team.session_key
+                    or binding.get("team_id") != team.id or binding.get("task_id") != row.id
+                    or action.status != "completed" or agent_browser_service._result(action) != output):
+                return _result("blocked", "浏览器观察与持久页面回执不一致")
+            if agent_browser_service.action_requires_confirmation(raw["action"]):
+                return _result("blocked", "页面控件操作仅有客户端观察，必须另用业务接口独立核验", receipt=receipt)
+            _live_task(db, actor, team.id, task.id, lease_token)
+            receipts.append(receipt)
+            evidence.append({"source": "client_observed", "action_id": action.id, "server_verified": False})
+            continue
         _authorize_actor(db, actor, team, raw, spec)
         pair = _readback_spec(raw["scope"], spec, params, receipt["output"])
         verified = dict(receipt)
@@ -485,7 +597,13 @@ async def _verify_dependencies(db, actor, team, task, lease_token):
         )
         receipts.append(verified)
         evidence.append({"source": "site_persisted_execution", "task_id": row.id, "request_id": receipt["request_id"]})
-    final = _result("completed", "站点业务结果已独立核验", evidence=evidence)
+    if agent_team_service._has_browser_tasks(db, team.id):
+        agent_team_service.require_parent_run_not_stopped(db, team, lock=True)
+        agent_supervisor_service.require_browser_team_session(db, team, lock=True)
+    summary = ("已核对持久浏览器观察；仅 client_observed，未证明业务写入成功"
+               if any(item.get("operation") == "operate_current_page" for item in receipts)
+               else "站点业务结果已独立核验")
+    final = _result("completed", summary, evidence=evidence)
     final["result_receipts"] = receipts
     if len(receipts) == 1:
         final["result_receipt"] = receipts[0]

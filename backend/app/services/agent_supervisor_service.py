@@ -282,6 +282,10 @@ def _review_team_task(
             spec, _ = resolve_site_input(task_input)
         except ValueError:
             return SupervisionReview(ESCALATE, HIGH, "站点操作未绑定合法业务契约", True, "unclassified_site_operation")
+        if operation == "operate_current_page":
+            # 页面控件交互沿用原桥的确认口径，不按一般站点 API 风险降级。
+            review = review_response_tool("operate_current_page", task_input)
+            return SupervisionReview(**{key: review[key] for key in SupervisionReview.__dataclass_fields__})
         risk = declared_capability_risk(spec.risk)
         return review_action("site." + spec.code, spec.page, declared_risk=risk)
     if code in {"operations", "incident_responder"}:
@@ -501,3 +505,33 @@ def review_mcp_tool(
 
 def public_review(review: SupervisionReview) -> dict[str, Any]:
     return asdict(review)
+
+
+def require_browser_team_session(db, team, *, expected_token_version=None, lock=False) -> int:
+    """页面团队只认首次服务端监督事件中的认证版本；缺失时不从当前账号补绑。
+
+    lock=True 仅在调用方已按统一顺序锁住父运行后使用，登录轮换与动作/结果提交互斥。
+    普通团队不调用此门禁，其结果继续独立投递。
+    """
+    from app.core.exceptions import ConflictError, ForbiddenError
+    from app.models.agent_team import AgentTeamEvent
+    from app.models.user import User
+
+    event = (db.query(AgentTeamEvent).filter_by(
+        team_id=team.id, user_id=team.user_id, event_type="supervisor.plan_reviewed",
+        actor_address="agent:supervisor",
+    ).order_by(AgentTeamEvent.id.asc()).first())
+    try:
+        detail = json.loads(event.detail_json) if event else {}
+    except (TypeError, ValueError):
+        detail = {}
+    version = detail.get("browser_token_version") if isinstance(detail, Mapping) else None
+    if type(version) is not int or version < 0:
+        raise ConflictError("页面团队缺少创建时的登录凭据绑定，请重新发起")
+    if expected_token_version is not None and expected_token_version != version:
+        raise ConflictError("页面动作与团队创建时的登录凭据不匹配")
+    query = db.query(User).filter_by(id=team.user_id).populate_existing()
+    actor = (query.with_for_update() if lock else query).first()
+    if actor is None or actor.status != 1 or int(actor.token_version or 0) != version:
+        raise ForbiddenError("页面团队的登录凭据已变更，请重新发起")
+    return version

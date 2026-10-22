@@ -1044,7 +1044,15 @@ def list_agents(db: Session, user: User, surface: str = "") -> dict[str, Any]:
             item["team_input_contract"] = {"depends_on": "all_work_nodes", "role": "summarizer"}
         elif code == "site_operator":
             item["team_input_contract"] = {
-                "operation": ["execute_capability", "verify_results"],
+                "operation": ["execute_capability", "operate_current_page", "verify_results"],
+                "operate_current_page": {
+                    "required": ["action", "args"],
+                    "actions": ["inspect", "navigate", "scroll", "click", "fill", "select", "check"],
+                    "example": {"operation": "operate_current_page", "action": "inspect", "args": {}},
+                    "execution": "trusted_team_lease_and_persisted_parent_run_only", "max_attempts": 1,
+                    "confirmation": "click/fill/select/check require current_account_confirmation",
+                    "verification": "client_observed_only; business mutations require independent API readback",
+                },
                 "execute_capability": {"required": ["scope", "capability", "params"], "scope": ["user", "admin"],
                                        "execution": "trusted_team_lease_only", "mutation_max_attempts": 1},
                 "verify_results": {"depends_on": "site_execution_nodes",

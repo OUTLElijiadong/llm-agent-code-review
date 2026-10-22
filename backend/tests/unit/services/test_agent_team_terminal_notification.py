@@ -257,6 +257,52 @@ def test_terminal_receipt_from_cancelled_parent_stays_cancelled_without_starting
     ).count() == 0
 
 
+@pytest.mark.parametrize("stop_kind", ["cancelled", "stop-intent"])
+@pytest.mark.parametrize(
+    "scope_override",
+    [{}, {"tool_session_key": "legacy-other-session"}, {"parent_surface": "admin"}],
+    ids=["same-scope", "legacy-session", "legacy-surface"],
+)
+def test_stopped_parent_keeps_ordinary_team_results_without_resuming_session(db, scope_override, stop_kind):
+    owner, parent, _execution, created = _team_with_parent_call(
+        db, session_key="session-team-late-stop", parent_status="running", **scope_override,
+    )
+    claimed = agent_team_service.claim_next_task(db, created["team_id"], lease_seconds=60)
+    assert claimed is not None
+    if stop_kind == "cancelled":
+        parent.status = "cancelled"
+    else:
+        parent.checkpoint_json = json.dumps({"stop_requested": True})
+    db.commit()
+
+    # 父会话停止不抹掉普通团队的独立结果；团队自身的租约仍必须有效。
+    agent_team_service.require_active_task_lease(
+        db, team_id=created["team_id"], task_id=claimed["task_id"],
+        owner_user_id=owner.id, lease_token=claimed["lease_token"], lock=True,
+    )
+    for stage in range(2):
+        agent_team_service.complete_task(
+            db, created["team_id"], claimed["task_id"], lease_token=claimed["lease_token"],
+            result={"status": "completed", "summary": "保留已取得的独立业务结果"},
+        )
+        if stage == 0:
+            claimed = agent_team_service.claim_next_task(db, created["team_id"], lease_seconds=60)
+            assert claimed is not None
+    team = db.get(agent_team_service.AgentTeam, created["team_id"], populate_existing=True)
+    assert team.status == "completed"
+    results = db.query(AgentTeamTask).filter_by(team_id=team.id).all()
+    assert len(results) == 2 and all(task.status == "completed" for task in results)
+    assert all(json.loads(task.result_json)["status"] == "completed" for task in results)
+    receipt = db.query(AgentMeshMessage).filter(
+        AgentMeshMessage.agent_team_id == team.id,
+        AgentMeshMessage.context_json.contains('"team_terminal"'),
+    ).one()
+    context = json.loads(receipt.context_json)
+    assert receipt.status == "cancelled"
+    assert context["session_delivery"] is False
+    assert context["suppressed_after_parent_stop"] is True
+
+
 @pytest.mark.parametrize("parent_status", ["running", "waiting_approval", "waiting_input", "failed"])
 def test_partial_team_does_not_deliver_individual_success_before_terminal_state(db, parent_status):
     owner, run, _execution, created = _team_with_parent_call(

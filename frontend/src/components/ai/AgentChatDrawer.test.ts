@@ -2,7 +2,7 @@ import { siteBrowserApi, type SiteBrowserRequiredEvent } from '@/api/siteBrowser
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Plugin } from 'vue'
+import type { Component, Plugin } from 'vue'
 
 const streams = vi.hoisted(() => ({
   start: vi.fn(),
@@ -43,6 +43,9 @@ vi.mock('@/api/agentTeams', () => ({
 vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: messages }))
 
 import AgentChatDrawer from './AgentChatDrawer.vue'
+import App from '@/App.vue'
+import * as authApi from '@/api/auth'
+import * as rbacApi from '@/api/rbac'
 import { useAgentActivityStore } from '@/stores/agentActivity'
 import { useUserStore } from '@/stores/user'
 import {
@@ -54,9 +57,9 @@ import {
 } from '@/utils/agentChatSessions'
 import type { AgentTeamDetail, AgentTeamStatus } from '@/api/agentTeams'
 
-function mountDrawer(prefill?: string, extraPlugins: Plugin[] = [], autoSendPrefill = false): VueWrapper {
-  return mount(AgentChatDrawer, {
-    props: { visible: true, prefill, autoSendPrefill },
+function mountDrawer(prefill?: string, extraPlugins: Plugin[] = [], autoSendPrefill = false, host: Component = AgentChatDrawer): VueWrapper {
+  return mount(host, {
+    props: host === AgentChatDrawer ? { visible: true, prefill, autoSendPrefill } : {},
     global: {
       plugins: extraPlugins,
       stubs: {
@@ -68,6 +71,10 @@ function mountDrawer(prefill?: string, extraPlugins: Plugin[] = [], autoSendPref
         'el-input-number': true,
         'el-option': true,
         'el-select': true,
+        AdminCopilot: true,
+        GlobalDiscussionHost: true,
+        AgentActivityBorder: true,
+        VirtualCursor: true,
         AgentAvatar: true,
         AgentNavLink: { props: ['href', 'label', 'hint', 'prominent'], template: '<button class="agent-nav-link-stub">{{ label }}</button>' },
         Check: true,
@@ -482,6 +489,92 @@ it.each([true, false])('本地导航持久化：审查员权限=%s，空服务�
     expect(push).not.toHaveBeenCalled()
     expect(streams.start).not.toHaveBeenCalled()
   } finally { reopened.unmount(); push.mockRestore() }
+})
+
+it.each([
+  { allowed: true, timing: 'settled' }, { allowed: false, timing: 'settled' },
+  { allowed: true, timing: 'immediate' }, { allowed: false, timing: 'immediate' },
+  { allowed: true, timing: 'microtask' }, { allowed: false, timing: 'microtask' },
+  { allowed: true, timing: 'before-mount' }, { allowed: false, timing: 'before-mount' },
+  { allowed: true, timing: 'app' }, { allowed: false, timing: 'app' },
+])('首次刷新异步身份恢复：导航权限=$allowed，身份时序=$timing，保留本地结果且不误报或重放', async ({ allowed, timing }) => {
+  const { createRouter, createMemoryHistory } = await import('vue-router')
+  const router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/', component: {} },
+    { path: '/projects', component: {}, meta: { title: '项目管理' } },
+    { path: '/audit', component: {}, meta: { title: '操作审计', roles: ['reviewer'], permissions: ['audit:view'] } },
+  ] })
+  await router.push('/')
+  const profile = { id: 77, username: 'navigation-user', role: 'user', status: 1 }
+  const user = useUserStore()
+  user.token = 'navigation-token'
+  user.profile = profile
+  user.roles = ['user']
+  sessionApi.get.mockImplementation(async (surface, session_id) => ({ surface, session_id, run: null, messages: [], pending: null }))
+  const original = await mountReadyDrawer(undefined, [router])
+  await settleAll()
+  const prompt = allowed ? '打开项目管理' : '打开操作审计'
+  await original.get('.chat-input').setValue(prompt)
+  await original.get('.send-btn').trigger('click')
+  await settleAll()
+  const sessionId = (original.vm as any).sessionId as string
+  const key = agentChatStorageKey('user', profile.id)
+  const result = allowed ? '已打开「项目管理」。' : '当前账号没有权限'
+  expect(original.text()).toContain(result)
+  saveAgentChatSessions(key, [{ id: sessionId, title: prompt, createdAt: Date.now() }])
+  saveActiveAgentChatSession(key, sessionId)
+  // reload 不保证触发 Vue 卸载钩子；必须在卸载补写之前已有完整快照。
+  expect(loadAgentChatSnapshot(sessionId, key)?.messages.filter(message => message.localAction)).toHaveLength(2)
+  original.unmount()
+
+  // 页面刷新销毁 Pinia；仅 token 已恢复，profile 由异步请求稍后写入。
+  setActivePinia(createPinia())
+  const restoredUser = useUserStore()
+  restoredUser.token = 'navigation-token'
+  expect(restoredUser.profile).toBeNull()
+  if (timing === 'before-mount') {
+    restoredUser.profile = profile
+    restoredUser.roles = ['user']
+  }
+  const identity = deferred<typeof profile>()
+  const permissions = deferred<string[]>()
+  if (timing === 'app') {
+    vi.spyOn(authApi, 'me').mockReturnValue(identity.promise)
+    vi.spyOn(rbacApi, 'fetchUserRoles').mockResolvedValue([{ id: 1, name: '普通用户', code: 'user', is_builtin: true }])
+    vi.spyOn(rbacApi, 'fetchUserPermissions').mockReturnValue(permissions.promise)
+    vi.spyOn(rbacApi, 'fetchUserMenus').mockResolvedValue([])
+    vi.spyOn(rbacApi, 'fetchUserDataScope').mockResolvedValue({ id: 1, role_id: 1, scope_type: 'project_own' })
+    window.sessionStorage.setItem(`prism-agent-drawer-visible:${profile.id}`, '1')
+  }
+  const push = vi.spyOn(router, 'push')
+  const refreshed = mountDrawer(undefined, [router], false, timing === 'app' ? App : AgentChatDrawer)
+  try {
+    if (timing === 'app') {
+      const fetchingProfile = restoredUser.fetchProfile()
+      expect(refreshed.findComponent(AgentChatDrawer).exists()).toBe(false)
+      identity.resolve(profile)
+      await settleAll()
+      expect(restoredUser.profile?.id).toBe(profile.id)
+      expect(refreshed.findComponent(AgentChatDrawer).exists()).toBe(false)
+      permissions.resolve(['agent:chat', 'project:view'])
+      await fetchingProfile
+    } else {
+      if (timing === 'settled') await settleAll()
+      if (timing === 'microtask') await Promise.resolve()
+      restoredUser.profile = profile
+      restoredUser.roles = ['user']
+    }
+    await settleAll()
+    const drawer = timing === 'app' ? refreshed.getComponent(AgentChatDrawer) : refreshed
+    expect((drawer.vm as any).sessionId).toBe(sessionId)
+    expect(refreshed.text()).toContain(result)
+    expect(refreshed.text()).not.toContain('未在服务器留痕')
+    expect(refreshed.text()).not.toContain('这次没有完成')
+    expect(refreshed.find('.msg-error-card').exists()).toBe(false)
+    expect(loadAgentChatSnapshot(sessionId, key)?.messages.filter(message => message.localAction)).toHaveLength(2)
+    expect(push).not.toHaveBeenCalled()
+    expect(streams.start).not.toHaveBeenCalled()
+  } finally { refreshed.unmount(); push.mockRestore() }
 })
 
 it.each(['completed', 'pending'] as const)('本地导航恢复断网：%s记录在切回、卸载后仍保留且不重放', async status => {

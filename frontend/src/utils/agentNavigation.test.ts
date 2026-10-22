@@ -161,6 +161,7 @@ describe('local navigation cost guard', () => {
         children: [
           { path: 'audit', meta: { title: '系统操作审计', role: 'admin' } },
           { path: 'platform', meta: { title: '平台配置中心', role: 'admin' } },
+          { path: 'access', meta: { title: '用户与权限中心', role: 'admin', roles: ['admin'] } },
           { path: 'operations', meta: { title: '运行监控', role: 'admin' } },
           { path: 'users', meta: { title: '用户管理', role: 'admin', permissions: ['user:view'] } },
           { path: 'embedding', meta: { title: 'RAG 嵌入配置', role: 'admin', superAdmin: true } },
@@ -242,8 +243,17 @@ describe('local navigation cost guard', () => {
     })
   })
 
+  it.each([true, false])('菜单原名“用户与权限”直接使用管理路由权限，管理员=%s', admin => {
+    expect(resolveLocalNavigationRequest('打开用户与权限', routerFor('/admin/access'), {
+      ...guard(true), isAdmin: () => admin,
+    })).toEqual(admin ? {
+      kind: 'navigate', directive: { action: 'navigate', route: '/admin/access', label: '用户与权限中心' },
+    } : { kind: 'forbidden' })
+  })
+
   describe.each(['管理后台的', '管理端的', '管理员的'])('中文管理限定词 %s', qualifier => {
     it.each([
+      ['用户与权限', '/admin/access', '用户与权限中心'],
       ['平台配置', '/admin/platform', '平台配置中心'],
       ['审计', '/admin/audit', '系统操作审计'],
     ])('无权账号打开%s直接禁止，不降级同名用户入口', (target, _route, _label) => {
@@ -253,6 +263,7 @@ describe('local navigation cost guard', () => {
     })
 
     it.each([
+      ['用户与权限', '/admin/access', '用户与权限中心'],
       ['平台配置', '/admin/platform', '平台配置中心'],
       ['审计', '/admin/audit', '系统操作审计'],
     ])('具备管理权限打开%s准确选择管理路径', (target, route, label) => {
@@ -263,6 +274,7 @@ describe('local navigation cost guard', () => {
     })
 
     it.each([
+      ['用户与权限', '读取用户列表'],
       ['平台配置', '修改默认模型'],
       ['审计', '删除审计日志'],
     ])('打开%s同时要求%s时不得当作纯导航吞掉写入命令', (target, operation) => {
@@ -275,6 +287,7 @@ describe('local navigation cost guard', () => {
     { target: '管理后台的平台配置', route: '/admin/platform', label: '平台配置中心', admin: true, operation: '修改默认模型' },
     { target: '管理端的平台配置', route: '/admin/platform', label: '平台配置中心', admin: true, operation: '修改默认模型' },
     { target: '管理员的平台配置', route: '/admin/platform', label: '平台配置中心', admin: true, operation: '修改默认模型' },
+    { target: '用户与权限', route: '/admin/access', label: '用户与权限中心', admin: true, operation: '读取用户列表' },
     { target: '平台配置', route: '/admin/platform', label: '平台配置中心', admin: true, operation: '修改默认模型' },
     { target: '审计', route: '/audit', label: '操作审计', admin: false, operation: '删除审计日志' },
     { target: '项目', route: '/projects', label: '项目管理', admin: false, operation: '删除项目' },

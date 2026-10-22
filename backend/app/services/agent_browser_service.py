@@ -18,10 +18,10 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationError
 from app.core.permission_codes import PermissionCode
 from app.models.agent_browser_action import AgentBrowserAction
-from app.models.agent_response_run import AgentResponseRun
+from app.models.agent_response_run import AgentResponseRun, response_run_stop_requested
 from app.models.user import User
 from app.schemas.agent_browser import BrowserAckIn
-from app.services import rbac_service
+from app.services import agent_supervisor_service, rbac_service
 
 ACTION_TTL_SECONDS = 120
 SNAPSHOT_TTL_SECONDS = 120
@@ -153,7 +153,8 @@ def authorize_route(db: Session, user: User, route: str) -> str:
 
 
 def _owner_run(
-    db: Session, user: User, *, run_id: str, session_key: str, surface: str, expected_token_version: int | None = None
+    db: Session, user: User, *, run_id: str, session_key: str, surface: str, expected_token_version: int | None = None,
+    lock: bool = False,
 ) -> AgentResponseRun:
     if not re.fullmatch(r"[A-Za-z0-9_-]{8,128}", session_key or ""):
         raise ValidationError("页面操作必须绑定有效的当前会话")
@@ -165,17 +166,33 @@ def _owner_run(
         raise ForbiddenError("页面动作的登录凭据已变更，请重新发起")
     if surface not in {"user", "admin"} or (surface == "admin" and not rbac_service.is_admin_user(db, actor.id)):
         raise ForbiddenError("当前账号没有该会话权限")
-    run = (
+    query = (
         db.query(AgentResponseRun)
         .filter_by(run_id=run_id, user_id=actor.id, session_key=session_key, surface=surface)
         .populate_existing()
-        .first()
     )
+    run = (query.with_for_update() if lock else query).first()
     if run is None:
         raise NotFoundError("页面操作运行不存在")
-    if run.status not in _ACTIVE:
+    if run.status not in _ACTIVE or response_run_stop_requested(run):
         raise ConflictError("小菱运行已停止，不能继续页面操作")
     return run
+
+
+def _lock_team_parent_runs(db: Session, user: User, binding: Mapping[str, Any] | None) -> None:
+    """先按团队统一顺序锁住全部父运行，避免直接父运行与 root 的反向加锁。"""
+    if binding is None:
+        return
+    from app.models.agent_team import AgentTeam
+    from app.services import agent_team_service
+
+    team = db.get(AgentTeam, binding["team_id"], populate_existing=True)
+    if team is None or team.user_id != int(user.id):
+        raise ConflictError("页面动作的团队归属已失效")
+    try:
+        agent_team_service.require_parent_run_not_stopped(db, team, lock=True)
+    except agent_team_service.AgentTeamError as exc:
+        raise ConflictError("页面动作的父运行已停止或归属失效") from exc
 
 
 def _owner_action(db: Session, user: User, action_id: int, session_key: str, surface: str) -> AgentBrowserAction:
@@ -188,14 +205,28 @@ def _owner_action(db: Session, user: User, action_id: int, session_key: str, sur
     if row is None:
         raise NotFoundError("页面操作不存在")
     _owner_run(
-        db, user, run_id=row.run_id, session_key=session_key, surface=surface, expected_token_version=row.token_version
+        db, user, run_id=row.run_id, session_key=session_key, surface=surface,
+        expected_token_version=row.token_version,
+    )
+    _lock_team_parent_runs(db, user, json.loads(row.arguments_json).get("_team_binding"))
+    _owner_run(
+        db, user, run_id=row.run_id, session_key=session_key, surface=surface,
+        expected_token_version=row.token_version, lock=True,
+    )
+    _validate_team_binding(db, user, row, lock=True)
+    # 同一父运行行锁覆盖动作领取/回执提交；再次读当前值拦截前置检查后的停止。
+    _owner_run(
+        db, user, run_id=row.run_id, session_key=session_key, surface=surface,
+        expected_token_version=row.token_version, lock=True,
     )
     return row
 
 
-def _resolve_arguments(
-    db: Session, user: User, run: AgentResponseRun, action: str, args: Mapping[str, Any]
-) -> dict[str, Any]:
+def action_requires_confirmation(action: str) -> bool:
+    return action in _MUTATIONS
+
+
+def validate_action_input(action: str, args: Mapping[str, Any]) -> None:
     keys = {
         "inspect": set(),
         "navigate": {"route"},
@@ -205,8 +236,47 @@ def _resolve_arguments(
         "select": {"control_handle", "value"},
         "check": {"control_handle", "checked"},
     }
-    if action not in keys or not isinstance(args, Mapping) or set(args) != keys[action]:
+    if not isinstance(action, str) or action not in keys or not isinstance(args, Mapping) or set(args) != keys[action]:
         raise ValidationError("页面动作参数不符合已登记契约")
+
+
+def _validate_team_binding(db: Session, user: User, row: AgentBrowserAction, *, lock: bool = False) -> None:
+    """团队归属仅取持久服务端绑定；所有领取/回执入口均复核当前租约。"""
+    binding = json.loads(row.arguments_json).get("_team_binding")
+    if binding is None:
+        return
+    from app.models.agent_team import AgentTeamTask
+    from app.services import agent_team_service
+
+    task = db.get(AgentTeamTask, binding["task_id"], populate_existing=True)
+    if task is None or not hmac.compare_digest(_hash(task.lease_token or ""), binding["lease_sha256"]):
+        raise ConflictError("页面动作的团队租约已失效")
+    try:
+        team, task, member = agent_team_service.require_active_task_lease(
+            db, team_id=binding["team_id"], task_id=task.id, lease_token=task.lease_token,
+            owner_user_id=int(user.id), lock=lock,
+        )
+    except agent_team_service.AgentTeamError as exc:
+        raise ConflictError("页面动作的团队租约已失效") from exc
+    agent_supervisor_service.require_browser_team_session(
+        db, team, expected_token_version=row.token_version, lock=lock,
+    )
+    parent = db.get(AgentResponseRun, team.agent_run_id or team.root_agent_run_id, populate_existing=True)
+    if parent is not None and (response_run_stop_requested(parent) or parent.status not in _ACTIVE):
+        raise ConflictError("小菱运行已停止，不能继续页面操作")
+    raw = json.loads(task.input_json)
+    if (member.address != "agent:site_operator" or parent is None or parent.run_id != row.run_id
+            or parent.user_id != row.user_id or parent.session_key != team.session_key
+            or parent.surface != team.surface or row.session_key != team.session_key or row.surface != team.surface
+            or raw.get("operation") != "operate_current_page" or raw.get("action") != row.action
+            or _hash(_json({"action": row.action, "args": raw.get("args")})) != row.input_sha256):
+        raise ConflictError("页面动作与持久团队任务或父运行不匹配")
+
+
+def _resolve_arguments(
+    db: Session, user: User, run: AgentResponseRun, action: str, args: Mapping[str, Any]
+) -> dict[str, Any]:
+    validate_action_input(action, args)
     if action == "inspect":
         return {}
     if action == "navigate":
@@ -265,7 +335,7 @@ def _required(row: AgentBrowserAction, nonce: str) -> dict[str, Any]:
         "account_id": row.user_id,
         "client_nonce": nonce,
         "action": row.action,
-        "args": json.loads(row.arguments_json),
+        "args": {key: value for key, value in json.loads(row.arguments_json).items() if key != "_team_binding"},
         "observation_snapshot_id": row.observation_snapshot_id,
         "expires_at": row.expires_at.replace(tzinfo=timezone.utc).isoformat(),
         "status": row.status,
@@ -335,9 +405,24 @@ async def request_action(
     args: Mapping[str, Any],
     event_sink,
     approved: bool = False,
+    team_binding: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """只接收主控已复核的动作；返回观察摘要，不向模型返回客户端凭据。"""
-    run = _owner_run(db, user, run_id=run_id, session_key=session_key, surface=surface)
+    """只接收受信执行器已复核的动作；返回观察摘要，不向模型返回客户端凭据。"""
+    if team_binding is None:
+        _owner_run(db, user, run_id=run_id, session_key=session_key, surface=surface)
+        token_version = int(user.token_version or 0)
+    else:
+        from app.models.agent_team import AgentTeam
+
+        team = db.get(AgentTeam, team_binding["team_id"], populate_existing=True)
+        if team is None or team.user_id != int(user.id):
+            raise ConflictError("页面动作的团队归属已失效")
+        token_version = agent_supervisor_service.require_browser_team_session(db, team)
+        _owner_run(db, user, run_id=run_id, session_key=session_key, surface=surface,
+                   expected_token_version=token_version)
+    _lock_team_parent_runs(db, user, team_binding)
+    run = _owner_run(db, user, run_id=run_id, session_key=session_key, surface=surface,
+                     expected_token_version=token_version, lock=True)
     if action in _MUTATIONS and not approved:
         raise ForbiddenError("页面操作尚未由当前账号确认")
     request_id = _hash(f"{user.id}:{run_id}:{call_id}")
@@ -346,6 +431,9 @@ async def request_action(
     if row is not None:
         if row.action != action or row.input_sha256 != fingerprint:
             raise ConflictError("同一工具调用不得改变页面动作")
+        if json.loads(row.arguments_json).get("_team_binding") != team_binding:
+            raise ConflictError("同一页面动作不得改变团队租约归属")
+        _validate_team_binding(db, user, row, lock=True)
         _expire(db, row)
         # 重入时不给第二个执行凭据；queued 由所属客户端 pending 恢复。
         if row.status not in {"queued", "executing"}:
@@ -369,7 +457,7 @@ async def request_action(
             request_id=request_id,
             input_sha256=fingerprint,
             user_id=user.id,
-            token_version=int(user.token_version or 0),
+            token_version=token_version,
             run_id=run_id,
             session_key=session_key,
             surface=surface,
@@ -381,6 +469,9 @@ async def request_action(
             nonce_sha256=_hash(nonce),
             expires_at=_now() + timedelta(seconds=ACTION_TTL_SECONDS),
         )
+        if team_binding is not None:
+            row.arguments_json = _json({**resolved, "_team_binding": dict(team_binding)})
+            _validate_team_binding(db, user, row, lock=True)
         db.add(row)
         db.commit()
         if event_sink is not None:
@@ -403,14 +494,16 @@ async def request_action(
                 surface=surface,
                 expected_token_version=row.token_version,
             )
-        except (ForbiddenError, ConflictError):
-            db.query(AgentBrowserAction).filter_by(id=row.id, status=row.status).update(
-                {
-                    "status": "indeterminate" if row.status == "executing" else "cancelled",
-                    "error": "运行或账号权限已变更，停止页面动作，不重放可能已执行的操作",
-                },
-                synchronize_session=False,
-            )
+            _validate_team_binding(db, user, row)
+        except (ForbiddenError, ConflictError, NotFoundError):
+            if row.status in {"queued", "executing"}:
+                db.query(AgentBrowserAction).filter_by(id=row.id, status=row.status).update(
+                    {
+                        "status": "indeterminate" if row.status == "executing" else "cancelled",
+                        "error": "运行、租约或账号权限已变更，停止页面动作，不重放可能已执行的操作",
+                    },
+                    synchronize_session=False,
+                )
             db.commit()
             raise
         _expire(db, row)
@@ -430,6 +523,7 @@ def pending_actions(db: Session, user: User, *, run_id: str, session_key: str, s
     for row in rows:
         if row.token_version != int(user.token_version or 0):
             continue
+        _validate_team_binding(db, user, row)
         _expire(db, row)
         if row.status == "queued":
             nonce = secrets.token_urlsafe(32)

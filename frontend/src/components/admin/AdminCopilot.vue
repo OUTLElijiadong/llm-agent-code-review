@@ -478,6 +478,19 @@ function rememberCurrentDraft(): void {
 
 watch(inputText, (draft) => saveAgentChatDraft(sessionId.value, draft, chatStorageKey.value), { flush: 'sync' })
 
+/** 清理当前会话的运行视图，避免步骤、进度和详情状态串入空会话。 */
+function resetSessionRuntime(): void {
+  loading.value = false
+  showTyping.value = false
+  lastActiveToolName.value = ''
+  runningSinceMs.value = null
+  sandboxProgress.value = ''
+  cancelPromptVisible.value = false
+  thinkingCityOpen.value = false
+  selectedTeamId.value = null
+  expandedTables.value = new Set()
+}
+
 /** 会话切换:中止本地流视图与轮询,清空后展示欢迎语并恢复目标会话。 */
 async function handleSessionSelect(nextSessionId: string): Promise<void> {
   // 切换器重挂载等场景会重复发出当前会话的 select:避免中断正在运行的流;
@@ -507,6 +520,7 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   invalidateSessionPoll()
   sessionPollStopped = false
   sessionSnapshotSignature = ''
+  historyWindow.reset('')
   latestHistorySession = null
   historyHasMore.value = false
   historyLoading.value = false
@@ -515,14 +529,13 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   // 每个会话独立保留草稿；页面刷新或跨布局后切回仍可继续编辑。
   inputText.value = loadAgentChatDraft(nextSessionId, chatStorageKey.value)
   sessionPollFailures = 0
-  cancelPromptVisible.value = false
+  sessionPollError.value = ''
+  sessionLastPolledAt.value = ''
   sessionRun.value = null
   agentTeams.value = []
   agentTeamLoading.value = false
   agentTeamError.value = ''
-  loading.value = false
-  showTyping.value = false
-  lastActiveToolName.value = ''
+  resetSessionRuntime()
   activityStore.clear()
   sessionRestoring.value = true
   messages.value = [welcomeEntry()]
@@ -819,17 +832,23 @@ function applySessionSnapshot(session: AgentResponseSession): void {
     mesh_messages: session.mesh_messages,
     pending: session.pending,
   })
-  if (signature === sessionSnapshotSignature) return
+  const emptySession = !session.run && !session.pending && !session.messages.length
+    && !(session.history_page?.total) && !(session.events?.length) && !(session.mesh_messages?.length)
+  // 空快照即使签名未变，也必须收掉上次流式事件留下的步骤。
+  if (signature === sessionSnapshotSignature && !emptySession) return
   // Streaming owns the live DOM. Apply a poll snapshot after it settles so a
   // stale database read cannot erase text that is still arriving over SSE.
   if (loading.value) return
+  // created 尚未确认时，服务端空态不能抹掉真实提交及其未送达提示。
+  if (emptySession && unconfirmedStart.value) return
+  if (emptySession) resetSessionRuntime()
   const displaySession = withLoadedHistory(session)
   sessionSnapshotSignature = signature
   // 检查点没有逐条发送时间，不能把整轮同步时间冒充历史消息时间。
   const restoredTime = ''
   const restored = restoredEntries(displaySession, restoredTime)
-  // 服务端恢复出历史时,按欢迎语+历史整体重建,避免与本地占位重复
-  if (restored.length) messages.value = [welcomeEntry(), ...restored]
+  // 权威空态也整体重建；本地导航回执仍由 restoredEntries 合并保留。
+  if (restored.length || emptySession) messages.value = [welcomeEntry(), ...restored]
   const pending = pendingEntry(session, restoredTime)
   if (pending) messages.value.push(pending)
   // 失败/取消终态:把失败原因留在消息流,否则用户只见历史而不知道上次没做完
