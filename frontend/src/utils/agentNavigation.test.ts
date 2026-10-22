@@ -271,6 +271,44 @@ describe('local navigation cost guard', () => {
     })
   })
 
+  describe.each([
+    { target: '管理后台的平台配置', route: '/admin/platform', label: '平台配置中心', admin: true, operation: '修改默认模型' },
+    { target: '管理端的平台配置', route: '/admin/platform', label: '平台配置中心', admin: true, operation: '修改默认模型' },
+    { target: '管理员的平台配置', route: '/admin/platform', label: '平台配置中心', admin: true, operation: '修改默认模型' },
+    { target: '平台配置', route: '/admin/platform', label: '平台配置中心', admin: true, operation: '修改默认模型' },
+    { target: '审计', route: '/audit', label: '操作审计', admin: false, operation: '删除审计日志' },
+    { target: '项目', route: '/projects', label: '项目管理', admin: false, operation: '删除项目' },
+  ])('导航分句边界：$target', ({ target, route, label, admin, operation }) => {
+    const actor = {
+      ...guard(true),
+      isAdmin: () => admin,
+      hasRole: (role: string) => role === 'reviewer',
+    }
+
+    it('否定查询后肯定写入必须保留完整命令', () => {
+      expect(resolveLocalNavigationRequest(`打开${target}，不要查询，直接${operation}`,
+        routerFor(route), actor)).toBeNull()
+    })
+
+    it.each(['，', '\n'])('否定查询后无宾语的肯定删除也不能当成否定动作列表，分隔符=%j', separator => {
+      expect(resolveLocalNavigationRequest(`打开${target}，不要查询${separator}删除`,
+        routerFor(route), actor)).toBeNull()
+    })
+
+    it.each(['不要查询，不要修改', '不要查询、修改'])(
+      '只有否定动作边界“%s”时仍本地导航', boundary => {
+        expect(resolveLocalNavigationRequest(`打开${target}，${boundary}`, routerFor(route), actor)).toEqual({
+          kind: 'navigate', directive: { action: 'navigate', route, label },
+        })
+      },
+    )
+  })
+
+  it('否定查询后要求读取页面标题时不能只执行导航', () => {
+    expect(resolveLocalNavigationRequest('打开管理后台的平台配置，不要查询，读取页面标题',
+      routerFor('/admin/platform'), { ...guard(true), isAdmin: () => true })).toBeNull()
+  })
+
   it.each([false, true])('没有管理限定词的同名审计入口保持用户路径，管理员=%s', isAdmin => {
     expect(resolveLocalNavigationRequest('打开审计', routerFor('/audit'), {
       ...guard(true), isAdmin: () => isAdmin, hasRole: (role: string) => role === 'reviewer',

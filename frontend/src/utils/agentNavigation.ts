@@ -45,19 +45,26 @@ export interface LocalNavigationResult {
   directive?: AgentNavigateDirective
 }
 
-function compactNavigationText(value: string): string {
-  return value
+function compactNavigationText(value: string, preserveClauses = false): string {
+  return (preserveClauses ? value.replace(/[\r\n]+/g, ';') : value)
     .replace(/[\s\u200b\uFEFF]/g, '')
-    .replace(/[，,。.!！?？:：;；、"“”‘’`~～（）()【】[\]<>]/g, '')
+    .replace(/[，,。.!！?？:：;；、"“”‘’`~～（）()【】[\]<>]/g, punctuation => (
+      preserveClauses && /[，,。.!！?？:：;；]/.test(punctuation) ? ';' : ''
+    ))
 }
 
 function isSafeLocalNavigationTail(value: string): boolean {
   const tail = value
     .replace(/^(?:页面|页|界面|菜单)/, '')
-    .replace(/^(?:即可|就行|就好|吧)+/, '')
-  // “不要查询/修改/执行……”是对本地导航的明确边界说明,不代表要执行这些动作。
-  if (/^(?:不要|无需|不需要|不用)/.test(tail)) return true
-  return tail === '' || /^(?:一下)*(?:完成后(?:回复|告诉我|返回)?(?:已打开|打开成功|完成)?)?$/.test(tail)
+    .replace(/^(?:;|即可|就行|就好|吧)+/, '')
+    .replace(/;+$/, '')
+  // 只接受完整否定分句，不能把“不要查询，直接修改……”吞作导航边界。
+  if (/^(?:不要|无需|不需要|不用|不)/.test(tail)) {
+    return tail.split(';').filter(Boolean).every(clause => (
+      /^(?:不要|无需|不需要|不用|不)(?:查询|读取|修改|删除|执行|写入|点击|操作)(?:(?:和|与|或|以及|也|并且|并)?(?:不要|无需|不需要|不用|不)?(?:查询|读取|修改|删除|执行|写入|点击|操作))*(?:(?:任何|其他|其它)?(?:运维|业务)?(?:操作|任务))?$/.test(clause)
+    ))
+  }
+  return tail === '' || /^(?:一下)*(?:完成后(?:回复|告诉我|返回)?(?:已打开|打开成功|完成)?)?$/.test(tail.replace(/;/g, ''))
 }
 
 function localNavigationTargets(router: Pick<Router, 'options'>): Array<{ route: string; label: string; matchLabel: string }> {
@@ -84,7 +91,7 @@ export function resolveLocalNavigationRequest(
   guardSource: Parameters<typeof isRouteAllowed>[1],
 ): LocalNavigationResult | null {
   if (!content || content.length > MAX_LOCAL_NAVIGATION_TEXT_LENGTH) return null
-  const compact = compactNavigationText(content).replace(/(管理端|管理后台|管理员)的/g, '$1')
+  const compact = compactNavigationText(content, true).replace(/(管理端|管理后台|管理员)的/g, '$1')
   if (!compact) return null
 
   const matches: Array<{ route: string; label: string; matchLabel: string; explicitAdmin: boolean }> = []
@@ -92,7 +99,7 @@ export function resolveLocalNavigationRequest(
     const matchLabel = compactNavigationText(target.matchLabel)
     const start = compact.indexOf(matchLabel)
     if (start < 0) continue
-    const rawPrefix = compact.slice(0, start)
+    const rawPrefix = compact.slice(0, start).replace(/;/g, '')
     const qualifier = rawPrefix.match(/(?:管理端|管理后台|管理员)$/)?.[0]
     const prefix = qualifier ? rawPrefix.slice(0, -qualifier.length) : rawPrefix
     const tail = compact.slice(start + matchLabel.length)
