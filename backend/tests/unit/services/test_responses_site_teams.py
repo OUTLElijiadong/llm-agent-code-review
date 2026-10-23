@@ -587,6 +587,118 @@ def test_trusted_terminal_callback_must_match_server_status(status, truthful_sum
     assert "绑定服务端回执" in guard(checkpoint, "团队 53 已完成")
 
 
+def test_trusted_terminal_status_is_scoped_to_its_team_in_multi_team_summary():
+    guard = service.AgentResponsesService._validate_xiaoling_completion
+    checkpoint = _team_checkpoint([
+        ("failed-roundtable", "get_agent_team", {"team_id": 397}, {
+            "team_id": 397, "status": "failed",
+        }),
+        ("replacement-review", "get_agent_team", {"team_id": 398}, {
+            "team_id": 398, "status": "running",
+        }),
+    ], context_metadata={
+        "trusted_terminal_team_snapshot": {"team_id": 397, "status": "failed"},
+    })
+
+    summary = "团队397的圆桌审查执行失败。替代正式审查团队398仍在运行中，尚未完成。"
+
+    assert guard(checkpoint, summary) is None
+    assert checkpoint.context_metadata[service.COMPLETION_GUARD_FORCED_OUTPUT_KEY].startswith(
+        "团队 397 执行失败。"
+    )
+
+
+def test_multi_team_success_claim_cannot_override_failed_original_team():
+    guard = service.AgentResponsesService._validate_xiaoling_completion
+    checkpoint = _team_checkpoint([
+        ("failed-roundtable", "get_agent_team", {"team_id": 397}, {
+            "team_id": 397, "status": "failed",
+        }),
+        ("completed-replacement", "get_agent_team", {"team_id": 398}, {
+            "team_id": 398, "status": "completed",
+        }),
+    ], context_metadata={
+        "trusted_terminal_team_snapshot": {"team_id": 397, "status": "failed"},
+    })
+
+    assert guard(
+        checkpoint,
+        "团队397的圆桌审查执行失败。替代正式审查团队398已完成。",
+    ) is None
+    assert checkpoint.context_metadata[service.COMPLETION_GUARD_FORCED_OUTPUT_KEY].startswith(
+        "团队 397 执行失败。"
+    )
+
+    assert guard(
+        checkpoint,
+        "团队397的圆桌审查已完成。替代正式审查团队398已完成。",
+    )
+
+    ambiguous_team_scope = _team_checkpoint([
+        ("failed-roundtable", "get_agent_team", {"team_id": 397}, {
+            "team_id": 397, "status": "failed",
+        }),
+        ("completed-replacement", "get_agent_team", {"team_id": 398}, {
+            "team_id": 398, "status": "completed",
+        }),
+    ], context_metadata={
+        "trusted_terminal_team_snapshot": {"team_id": 397, "status": "failed"},
+    })
+    assert "团队 397 的服务端终态为 failed" in guard(
+        ambiguous_team_scope,
+        "团队397与团队398均已完成。",
+    )
+
+
+def test_multi_team_summary_requires_matching_readback_for_each_claimed_status():
+    guard = service.AgentResponsesService._validate_xiaoling_completion
+    failed_original = {
+        "trusted_terminal_team_snapshot": {"team_id": 397, "status": "failed"},
+    }
+
+    unverified_replacement = _team_checkpoint([
+        ("failed-roundtable", "get_agent_team", {"team_id": 397}, {
+            "team_id": 397, "status": "failed",
+        }),
+    ], context_metadata=failed_original)
+    assert "不能包含其他或非法团队编号" in guard(
+        unverified_replacement,
+        "团队397圆桌审查执行失败。替代正式审查团队398已完成。",
+    )
+
+    running_replacement = _team_checkpoint([
+        ("failed-roundtable", "get_agent_team", {"team_id": 397}, {
+            "team_id": 397, "status": "failed",
+        }),
+        ("replacement-review", "get_agent_team", {"team_id": 398}, {
+            "team_id": 398, "status": "running",
+        }),
+    ], context_metadata=failed_original)
+    assert "团队 398 的服务端终态为 running" in guard(
+        running_replacement,
+        "团队397圆桌审查执行失败。替代正式审查团队398已完成。",
+    )
+
+
+def test_multi_team_readback_must_match_requested_team_id():
+    guard = service.AgentResponsesService._validate_xiaoling_completion
+    checkpoint = _team_checkpoint([
+        ("failed-roundtable", "get_agent_team", {"team_id": 397}, {
+            "team_id": 397, "status": "failed",
+        }),
+        ("replacement-review", "get_agent_team", {"team_id": 398}, {
+            "team_id": 399, "status": "completed",
+        }),
+    ], context_metadata={
+        "trusted_terminal_team_snapshot": {"team_id": 397, "status": "failed"},
+    })
+
+    assert "不能包含其他或非法团队编号" in guard(
+        checkpoint,
+        "团队397圆桌审查执行失败。替代正式审查团队398已完成。",
+    )
+
+
 def test_completed_team_requires_completed_worker_and_verifier_coverage():
     guard = service.AgentResponsesService._validate_xiaoling_completion
     completed_calls = [

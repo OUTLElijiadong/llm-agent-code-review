@@ -524,7 +524,7 @@ class DiscussionOrchestrator:
         self._trace_id = new_trace_id()
         all_turns = [DiscussionTurn(**turn) for turn in checkpoint.get("turns", [])]
         self._all_turns = all_turns
-        deferred_logs: list[dict] = list(checkpoint.get("deferred_logs", []))
+        deferred_logs: list[dict] = _restore_deferred_logs(checkpoint.get("deferred_logs", []))
         turn_counter = int(checkpoint.get("turn_counter") or 0)
         summary_text = str(checkpoint.get("summary_text") or "")
         self._user_inputs = list(checkpoint.get("user_inputs", []))
@@ -722,7 +722,7 @@ class DiscussionOrchestrator:
                 "remaining_plan": [(r, i, profile.code) for r, i, profile in remaining_plan],
                 "turns": [item.to_dict() for item in all_turns],
                 "coverage": {**coverage, "model_calls_used": call_budget.used},
-                "deferred_logs": deferred_logs, "turn_counter": turn_counter,
+                "deferred_logs": _serialize_deferred_logs(deferred_logs), "turn_counter": turn_counter,
                 "summary_text": summary_text, "summary_done": summary_done,
                 "extraction": extraction if extraction is not None else checkpoint.get("extraction"),
                 "user_inputs": self._user_inputs, "steering_inputs": self._steering_inputs,
@@ -2230,6 +2230,28 @@ def _require_discussion_actor(db, user_id: int, project_id: int) -> None:
         require_project_execution(auth_db, int(project_id), user)
         if not check_permission(auth_db, int(user_id), PermissionCode.REVIEW_START):
             raise ForbiddenError("圆桌执行权限已撤销", code=40300)
+
+
+def _serialize_deferred_logs(logs: list[dict]) -> list[dict]:
+    """只编码 call_raw 的已知时间字段，保持检查点为 JSON 且不改动内存审计数据。"""
+    serialized = []
+    for entry in logs:
+        meta = dict(entry["meta"])
+        if isinstance(meta.get("create_time"), datetime):
+            meta["create_time"] = meta["create_time"].isoformat()
+        serialized.append({**entry, "meta": meta})
+    return serialized
+
+
+def _restore_deferred_logs(logs: list[dict]) -> list[dict]:
+    """恢复补写 AiCallLog 所需的 datetime，保留原时间、时区、精度及已记账日志 ID。"""
+    restored = []
+    for entry in logs:
+        meta = dict(entry["meta"])
+        if isinstance(meta.get("create_time"), str):
+            meta["create_time"] = datetime.fromisoformat(meta["create_time"])
+        restored.append({**entry, "meta": meta})
+    return restored
 
 
 def _call_raw_for_task(agent: DeepSeekAgent, task_id: int, user_id: int, *,

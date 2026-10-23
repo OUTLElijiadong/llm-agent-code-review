@@ -4,6 +4,7 @@ import { isSafeXiaolingRoute } from '@/utils/xiaolingNavigation'
 export const SITE_BROWSER_TARGET_EVENT = 'prism:site-browser-target'
 const SNAPSHOT_TTL = 120_000
 const CONTROL_SELECTOR = 'button,a[href],input,textarea,select,[role="button"],[role="combobox"],[role="checkbox"],[role="radio"],[role="tab"],[role="option"],[role="menuitem"],[contenteditable="true"]'
+const NAVIGATION_SELECTOR = 'nav,[role="navigation"]'
 const EXCLUDED = '.copilot-panel,.agent-chat-drawer,.agent-chat-panel,.chat-drawer,.agent-floating-panel,.monaco-editor,[data-site-browser-exclude]'
 const SECRET = /password|passwd|secret|api[_ -]?key|access[_ -]?token|credential|密钥|密码|凭据|注册码|访问令牌|验证码/i
 
@@ -67,7 +68,10 @@ function scopeRoots(): HTMLElement[] {
   const topDialog = dialogs.map((element, index) => ({ element, index, layer: layerOf(element) }))
     .sort((left, right) => left.layer - right.layer || left.index - right.index).at(-1)?.element
   const roots = topDialog ? [topDialog]
-    : Array.from(document.querySelectorAll<HTMLElement>('main,[role="main"]')).filter(visible)
+    : [
+      ...document.querySelectorAll<HTMLElement>('main,[role="main"]'),
+      ...document.querySelectorAll<HTMLElement>(NAVIGATION_SELECTOR),
+    ].filter(visible)
   // Element Plus 选择菜单 Teleport 到 body，只收录业务控件声明关联的弹层。
   for (const root of [...roots]) {
     for (const element of root.querySelectorAll<HTMLElement>('[aria-controls],[aria-owns]')) {
@@ -119,7 +123,11 @@ export function createSiteBrowserBridge(options: Options) {
     const seen = new Set<HTMLElement>()
     const out: SiteBrowserObservation = { snapshot_id: id, route: context.route,
       title: text(roots.map(root => root.querySelector('h1,h2,[role="heading"]')?.textContent || '').find(Boolean)), controls: [], messages: [] }
-    for (const root of roots) {
+    // 导航先分配有限的控件预算，避免长列表把主内容区外的菜单截掉。
+    // scopeRoots 仍保持主内容在前，使无目标滚动继续作用于业务页。
+    const controlRoots = [...roots].sort((left, right) =>
+      Number(right.matches(NAVIGATION_SELECTOR)) - Number(left.matches(NAVIGATION_SELECTOR)))
+    for (const root of controlRoots) {
       for (const element of root.querySelectorAll<HTMLElement>(CONTROL_SELECTOR)) {
         if (seen.has(element) || !visible(element) || out.controls.length >= 100) continue
         seen.add(element)

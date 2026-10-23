@@ -37,6 +37,48 @@ describe('controlled site browser bridge', () => {
     expect(JSON.stringify(payload)).not.toMatch(/never-forward-me|私人聊天秘密/)
     expect(payload.observation.controls.find(control => control.type === 'password')?.readonly).toBe(true)
   })
+  it.each(['nav', 'div role="navigation"'])('observes and really clicks visible navigation outside main (%s)', async tag => {
+    const closeTag = tag.split(' ')[0]
+    document.body.insertAdjacentHTML('afterbegin', `<${tag} aria-label="主导航"><button>项目管理</button></${closeTag}>`)
+    const clicked = vi.fn(() => { route = '/projects' })
+    document.querySelector('button')!.addEventListener('click', clicked)
+    const agent = bridge()
+    await agent.handle(request(1, 'inspect'))
+    const control = ack.mock.calls[0]![1].observation.controls.find(item => item.label === '项目管理')
+    expect(control?.client_handle).toBeTruthy()
+    await agent.handle(request(2, 'click', { client_handle: control!.client_handle, route, snapshot_id: 'snapshot-1' }))
+    expect(clicked).toHaveBeenCalledOnce()
+    expect(ack.mock.calls[1]![1].outcome).toBe('completed')
+    expect(ack.mock.calls[1]![1].observation.route).toBe('/projects')
+  })
+  it('keeps navigation discoverable when the main content fills the control budget', async () => {
+    document.querySelector('main')!.insertAdjacentHTML('beforeend', Array.from({ length: 100 }, (_, i) => `<button>任务 ${i}</button>`).join(''))
+    document.body.insertAdjacentHTML('beforeend', '<nav aria-label="管理与社区导航"><button>管理工作台</button></nav>')
+    await bridge().handle(request(1, 'inspect'))
+    const controls = ack.mock.calls[0]![1].observation.controls
+    expect(controls).toHaveLength(100)
+    expect(controls.some(item => item.label === '管理工作台')).toBe(true)
+  })
+  it('excludes hidden navigation and assistant navigation from observations', async () => {
+    document.body.insertAdjacentHTML('beforeend', '<nav hidden><button>隐藏导航</button></nav><aside class="agent-floating-panel"><nav><button>私密会话导航</button></nav></aside>')
+    await bridge().handle(request(1, 'inspect'))
+    const labels = ack.mock.calls[0]![1].observation.controls.map(item => item.label)
+    expect(labels).not.toContain('隐藏导航')
+    expect(labels).not.toContain('私密会话导航')
+  })
+  it('does not expose background navigation while a business dialog is open', async () => {
+    document.body.insertAdjacentHTML('beforeend', '<nav><button>项目管理</button></nav><section role="dialog" style="z-index:5000"><button>取消操作</button></section>')
+    await bridge().handle(request(1, 'inspect'))
+    expect(ack.mock.calls[0]![1].observation.controls.map(item => item.label)).toEqual(['取消操作'])
+  })
+  it('scrolls main content instead of the newly included navigation', async () => {
+    document.body.insertAdjacentHTML('afterbegin', '<nav><button>项目管理</button></nav>')
+    const scroll = vi.fn()
+    document.querySelector('main')!.innerHTML = '<h1>论坛</h1><button>发布帖子</button>'
+    document.querySelector('main')!.scrollBy = scroll
+    await bridge().handle(request(1, 'scroll', { direction: 'down' }))
+    expect(scroll).toHaveBeenCalledWith({ top: 400, behavior: 'auto' })
+  })
   it('claims before exact real click and rejects old handles after ACK snapshot replacement', async () => {
     const agent = bridge(); const clicked = vi.fn(); document.querySelector('button')!.addEventListener('click', clicked)
     await agent.handle(request(1, 'inspect'))
