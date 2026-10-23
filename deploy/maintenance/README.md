@@ -2,8 +2,7 @@
 
 `cleanup.sh` 默认只盘点，只有显式传入 `--apply` 才清理。允许的范围：
 
-- `/tmp`、`/var/tmp` 顶层名称为 `prism-maintenance-*.tmp`、单硬链接、超过 7 天未修改且未访问的普通文件。
-- `/tmp`、`/var/tmp` 顶层超过 14 天的 `prism-v数字*.bundle` / `prism-数字*.bundle` 源码传输包：仅当 fuser 确认未占用、包可读取、生产仓库并非浅克隆且所有引用提交都可从当前 HEAD 历史到达时清理；任何检查不确定就保留。
+- `/tmp`、`/var/tmp` 顶层超过 14 天的 `prism-v数字*.bundle` / `prism-数字*.bundle` 源码传输包：仅当 fuser 确认未占用、包可读取、生产仓库并非浅克隆且所有引用提交都可从当前 HEAD 历史到达时清理；删除前再次核对文件身份、大小、修改时间和占用状态；任何检查不确定就保留。
 - 超过 168 小时、Docker 判定可回收的 builder 缓存。
 - 超过 7 天的归档 systemd journal 和本脚本维护日志；当前运行日志始终排除。
 

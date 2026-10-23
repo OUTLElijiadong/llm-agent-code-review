@@ -24,7 +24,7 @@ case "${1:-}" in
 esac
 [[ $# -le 1 ]] || { usage >&2; exit 2; }
 
-for command_name in awk chmod date docker find flock journalctl mkdir rm touch tr; do
+for command_name in awk chmod date docker find flock git journalctl mkdir rm stat touch tr; do
   command -v "$command_name" >/dev/null 2>&1 || {
     printf 'ERROR: required command is unavailable: %s\n' "$command_name" >&2
     exit 1
@@ -104,38 +104,13 @@ if active_operation; then
   exit 0
 fi
 
-summarize_old_files() {
-  local directory="$1"
-  find "$directory" -xdev -mindepth 1 -maxdepth 1 -type f \
-    -name 'prism-maintenance-*.tmp' -links 1 -mmin "+$retention_minutes" -amin "+$retention_minutes" -printf '%s\n' 2>/dev/null |
-    awk -v directory="$directory" '
-      { count++; bytes += $1 }
-      END { printf "%s: files=%d bytes=%d\n", directory, count, bytes }
-    '
-}
-
-clean_old_files() {
-  local directory="$1" candidate
-  while IFS= read -r -d '' candidate; do
-    if (( apply )); then
-      rm -f -- "$candidate"
-      log "REMOVED: expired temporary file under $directory"
-    else
-      log "DRY-RUN: would remove expired temporary file under $directory"
-    fi
-  done < <(
-    find "$directory" -xdev -mindepth 1 -maxdepth 1 -type f \
-      -name 'prism-maintenance-*.tmp' -links 1 -mmin "+$retention_minutes" -amin "+$retention_minutes" -print0 2>/dev/null
-  )
-}
-
 resource_snapshot() {
   df -Pk / | awk 'NR == 2 { printf "root_available_kib=%s root_used_percent=%s\n", $4, $5 }'
   awk '/^MemAvailable:/ { printf "memory_available_kib=%s\n", $2 } /^SwapFree:/ { printf "swap_free_kib=%s\n", $2 }' /proc/meminfo
 }
 
 clean_expired_transfer_bundles() {
-  local bundle heads revision reference safe fuser_status
+  local bundle heads revision reference safe fuser_status original_stat
   if ! command -v fuser >/dev/null 2>&1; then
     log 'SKIP: fuser is unavailable; source transfer bundles are retained'
     return
@@ -145,6 +120,7 @@ clean_expired_transfer_bundles() {
     return
   fi
   while IFS= read -r -d '' bundle; do
+    original_stat="$(stat -c '%d:%i:%s:%Y:%h' -- "$bundle" 2>/dev/null)" || continue
     if fuser -- "$bundle" >/dev/null 2>&1; then
       log 'SKIP: source transfer bundle is in use'
       continue
@@ -167,6 +143,18 @@ clean_expired_transfer_bundles() {
       log 'SKIP: source transfer bundle contains revisions not retained by the current production history'
       continue
     fi
+    # Validate again after inspecting the bundle, immediately before unlinking.
+    if [[ ! -f "$bundle" || -L "$bundle" || "$(stat -c '%d:%i:%s:%Y:%h' -- "$bundle" 2>/dev/null)" != "$original_stat" ]]; then
+      log 'SKIP: source transfer bundle changed during inspection'
+      continue
+    fi
+    if fuser -- "$bundle" >/dev/null 2>&1; then
+      log 'SKIP: source transfer bundle became active during inspection'
+      continue
+    else
+      fuser_status=$?
+      [[ "$fuser_status" == 1 ]] || { log 'SKIP: source transfer bundle usage is uncertain'; continue; }
+    fi
     if (( apply )); then
       rm -f -- "$bundle"
       log 'REMOVED: expired source transfer bundle; all referenced commits remain reachable in the production history'
@@ -179,12 +167,8 @@ clean_expired_transfer_bundles() {
 
 log 'Resources before cleanup'
 resource_snapshot
-log "$(summarize_old_files /tmp)"
-log "$(summarize_old_files /var/tmp)"
 clean_expired_transfer_bundles
 if (( apply )); then
-  clean_old_files /tmp
-  clean_old_files /var/tmp
   log "Pruning reclaimable Docker builder cache older than $cache_until"
   docker builder prune --force --filter "until=$cache_until"
   log 'Vacuuming archived systemd journal entries older than 7 days'
@@ -197,7 +181,7 @@ if (( apply )); then
     done
   log 'Removed expired maintenance logs; current run log was excluded'
 else
-  log "DRY-RUN: --apply would remove the listed eligible temp files, builder cache older than $cache_until, archived journal entries older than 7 days, and old maintenance logs"
+  log "DRY-RUN: --apply would remove the eligible source transfer bundles, builder cache older than $cache_until, archived journal entries older than 7 days, and old maintenance logs"
 fi
 
 log 'Resources after cleanup'
