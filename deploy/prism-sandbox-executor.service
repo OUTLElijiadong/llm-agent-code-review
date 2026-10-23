@@ -18,6 +18,11 @@ StateDirectory=prism-sandbox
 StateDirectoryMode=0770
 LogsDirectory=prism-sandbox
 LogsDirectoryMode=0700
+# 高危源码只落在 tmpfs 的 /run/prism-sandbox-jobs;/run 每次开机清空且
+# ProtectSystem=strict 下非 root 无法自建,须由 systemd 代为创建。
+RuntimeDirectory=prism-sandbox-jobs
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=restart
 UMask=0007
 ExecStart=/usr/bin/python3 @DEPLOY_DIR@/prism_sandbox_executor.py
 Restart=on-failure
