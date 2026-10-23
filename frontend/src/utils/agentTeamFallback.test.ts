@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { agentTeamFallbackKey, buildAgentTeamFallback, terminalTeamReceiptsForFailedRun } from './agentTeamFallback'
+import { agentTeamReceiptKey, isScopedTerminalAgentTeam, terminalTeamReceiptsForFailedRun } from './agentTeamFallback'
 import type { AgentTeamDetail } from '@/api/agentTeams'
 
 function detail(overrides: Partial<AgentTeamDetail> = {}): AgentTeamDetail {
@@ -41,31 +41,17 @@ function detail(overrides: Partial<AgentTeamDetail> = {}): AgentTeamDetail {
   }
 }
 
-describe('团队审查自动部分结果', () => {
-  it('仅从同账号、同入口、同会话的终态账本构造有边界的结果', () => {
-    const result = buildAgentTeamFallback(detail(), {
-      teamId: 41, surface: 'user', sessionId: 'session-41', upstreamError: 'HTTP 402 billing quota',
-    })
-
-    expect(result).toContain('团队审查部分结果（自动整理）')
-    expect(result).toContain('额度或计费拒绝')
-    expect(result).toContain('未经小菱最终模型复核')
-    expect(result).toContain('不可信输入进入 eval')
-    expect(result).toContain('handler.py:18')
-    expect(result).toContain('核验未成功，不能视为通过')
-    expect(buildAgentTeamFallback(detail(), {
-      teamId: 41, surface: 'admin', sessionId: 'session-41', upstreamError: '',
-    })).toBeNull()
-    expect(buildAgentTeamFallback(detail(), {
-      teamId: 41, surface: 'user', sessionId: 'another-session', upstreamError: '',
-    })).toBeNull()
+describe('团队进度恢复', () => {
+  it('仅接受同入口、同会话的终态账本，不生成任何成员结论', () => {
+    expect(isScopedTerminalAgentTeam(detail(), { teamId: 41, surface: 'user', sessionId: 'session-41' })).toBe(true)
+    expect(isScopedTerminalAgentTeam(detail(), { teamId: 41, surface: 'admin', sessionId: 'session-41' })).toBe(false)
+    expect(isScopedTerminalAgentTeam(detail(), { teamId: 41, surface: 'user', sessionId: 'another' })).toBe(false)
+    expect(isScopedTerminalAgentTeam(detail(), { teamId: 42, surface: 'user', sessionId: 'session-41' })).toBe(false)
   })
 
-  it('非终态团队不产生貌似最终的答复，重复回执使用稳定幂等键', () => {
-    expect(buildAgentTeamFallback(detail({ status: 'running' }), {
-      teamId: 41, surface: 'user', sessionId: 'session-41', upstreamError: '',
-    })).toBeNull()
-    expect(agentTeamFallbackKey('message-1')).toBe(agentTeamFallbackKey('message-1'))
+  it('非终态不能确认完成，重复回执使用稳定幂等键', () => {
+    expect(isScopedTerminalAgentTeam(detail({ status: 'running' }), { teamId: 41, surface: 'user', sessionId: 'session-41' })).toBe(false)
+    expect(agentTeamReceiptKey('message-1')).toBe(agentTeamReceiptKey('message-1'))
   })
 
   it('按失败 run 的团队创建事件或 Mesh 消息 ID 精确关联当前会话回执', () => {

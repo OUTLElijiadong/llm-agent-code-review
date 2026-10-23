@@ -11,21 +11,18 @@ import {
   retryAgentTeam,
   type AgentTeamDetail,
   type AgentTeamMember,
-  type AgentTeamMessage,
   type AgentTeamTask,
 } from '@/api/agentTeams'
 import AgentMemberWorkCard from '@/components/ai/AgentMemberWorkCard.vue'
 import { useFloatingChatPosition } from '@/composables/useFloatingChatPosition'
 import { useUserStore } from '@/stores/user'
-import { formatDateTime, parseUtcTimestamp } from '@/utils/format'
 
 /**
- * 子 Agent 团队独立悬浮窗(Codex 风格多 Agent 群聊视图)。
+ * 子 Agent 团队独立悬浮窗。
  *
  * 区别于主聊天面板(AgentChatDrawer):这是一个可拖拽的独立浮窗,
- * 把一个子 Agent 团队渲染成「群聊」——每条协作消息是一个带头像/角色
- * 配色的气泡,成员卡片实时展示「正在做什么」,顶部是强化进度条,
- * 任务明细默认折叠,并提供「重试失败」「取消团队」操作入口。
+ * 只展示团队状态、成员任务分派和进度，不展示结论或协作正文。
+ * 提供「重试失败」「取消团队」操作入口。
  */
 
 const props = defineProps<{
@@ -47,19 +44,9 @@ const actionSubmitting = ref(false)
 const userStore = useUserStore()
 let targetGeneration = 0
 let disposed = false
-/** 气泡滚动容器:新消息到达时自动滚到底部。 */
-const chatBodyRef = ref<HTMLElement | null>(null)
-/** 按消息ID记录展开状态，切换团队时清空，避免内容状态串到另一会话。 */
-const expandedMessageIds = ref<Set<string>>(new Set())
 
 const members = computed<AgentTeamMember[]>(() => props.team?.members ?? [])
 const tasks = computed<AgentTeamTask[]>(() => props.team?.tasks ?? [])
-const messages = computed<AgentTeamMessage[]>(() =>
-  [...(props.team?.messages ?? [])].sort((left, right) => {
-    if (left.ledger_id !== undefined && right.ledger_id !== undefined) return left.ledger_id - right.ledger_id
-    return 0
-  }),
-)
 
 /** 进度统计:优先用后端 counts,缺失时按任务状态本地统计。 */
 const counts = computed(() => {
@@ -105,7 +92,6 @@ watch(
   [() => props.team?.team_id, () => props.team?.session_id, () => props.visible, () => userStore.profile?.id, () => userStore.token],
   () => {
     targetGeneration += 1
-    expandedMessageIds.value = new Set()
     actionSubmitting.value = false
   },
   { flush: 'sync' },
@@ -120,237 +106,19 @@ const TASK_STATUS_LABELS: Record<string, string> = {
   completed: '已完成', failed: '失败', blocked: '已阻塞',
   cancelled: '已取消', dead_letter: '失败终止', expired: '已过期',
 }
-const ROLE_LABELS: Record<string, string> = {
-  worker: '执行', verifier: '验证', summarizer: '汇总',
-}
-/**
- * 非成员发言者按真实地址区分，不再把用户/系统消息一律算到小菱头上：
- * session:* 是派发团队的主小菱会话，agent:orchestrator 是小菱编排，
- * agent:supervisor 是小菱监督，user:* 是当前用户，system:* 是平台系统。
- */
-function nonMemberSpeaker(raw: string): Omit<Speaker, 'key'> | null {
-  const text = raw.trim().toLowerCase()
-  if (!text || text.startsWith('session:') || ['agent:xiaoling', 'agent:manager', 'xiaoling', 'manager', '小菱'].includes(text)) {
-    return { name: '小菱', badge: '主持', initial: '菱', theme: 'manager' }
-  }
-  if (text === 'agent:orchestrator' || text === 'agent:coordinator') {
-    return { name: '小菱', badge: '编排', initial: '菱', theme: 'manager' }
-  }
-  if (text === 'agent:supervisor') {
-    return { name: '小菱', badge: '监督', initial: '菱', theme: 'manager' }
-  }
-  if (text.startsWith('user:')) return { name: '你', badge: '用户', initial: '你', theme: 'user' }
-  if (text.startsWith('system:')) return { name: '系统', badge: '平台', initial: '系', theme: 'system' }
-  return null
-}
-
 function teamStatusLabel(status: string): string {
   return TEAM_STATUS_LABELS[status] ?? status
 }
 function taskStatusLabel(status: string): string {
   return TASK_STATUS_LABELS[status] ?? status
 }
-function roleLabel(role: string): string {
-  return ROLE_LABELS[role] ?? role
-}
 function statusClass(status: string): string {
   return `is-${status.replace(/[^a-z0-9_-]/gi, '-')}`
 }
 
-/** 归一化地址:小写并去掉 agent:/member: 等前缀,便于与 member_key/address 比对。 */
-function normalizeAddress(raw?: string | null): string {
-  return (raw ?? '').trim().toLowerCase().replace(/^(agent|member|session|user|system)[:/]+/, '')
-}
-
-function findMember(raw?: string | null): AgentTeamMember | undefined {
-  const key = normalizeAddress(raw)
-  if (!key) return undefined
-  return members.value.find((member) => {
-    const candidates = [member.member_key, member.address, member.display_name]
-    return candidates.some((candidate) => candidate && normalizeAddress(candidate) === key)
-  })
-}
-
-/** 发言者身份:优先按角色配色(worker/verifier/summarizer),否则视为小菱/系统主持人。 */
-interface Speaker {
-  key: string
-  name: string
-  /** 气泡头部角色徽标文案;小菱/系统为空(不展示徽标)。 */
-  badge: string
-  /** 头像内单字。 */
-  initial: string
-  /** 配色类别 → CSS 修饰类。 */
-  theme: 'manager' | 'worker' | 'verifier' | 'summarizer' | 'user' | 'system'
-}
-
-function resolveSpeaker(raw?: string | null): Speaker {
-  const key = normalizeAddress(raw) || 'system'
-  const member = findMember(raw)
-  if (member) {
-    // 未知角色按执行成员配色，避免冒用小菱的品牌紫。
-    const theme = ROLE_LABELS[member.role] ? (member.role as Speaker['theme']) : 'worker'
-    return {
-      key,
-      name: member.display_name,
-      badge: roleLabel(member.role),
-      initial: (member.display_name || roleLabel(member.role) || '员').trim().charAt(0),
-      theme,
-    }
-  }
-  const text = (raw ?? '').trim()
-  const known = nonMemberSpeaker(text)
-  if (known) return { key, ...known }
-  // 未在成员列表里的其他地址:按未知成员处理,用执行色兜底
-  return { key, name: text, badge: '', initial: text.charAt(0).toUpperCase() || '员', theme: 'worker' }
-}
-
-/**
- * 「@某人」小标签:send_to 指向具体成员时展示「指派 @xx」,广播/回到小菱时不展示。
- * task.assign 类消息用「指派」,其余用「回复」。
- */
-function mentionLabel(message: AgentTeamMessage): string {
-  const target = findMember(message.send_to)
-  if (!target) return ''
-  if (normalizeAddress(message.send_to) === normalizeAddress(message.sent_from)) return ''
-  const verb = /assign|dispatch|delegate/i.test(message.message_type) ? '指派' : '回复'
-  return `${verb} @${target.display_name}`
-}
-
-/** 每个成员的实时工作状态已由 AgentMemberWorkCard 渲染(状态+计时+日志)。 */
-
 function taskMember(task: AgentTeamTask): string {
-  return task.member_key || members.value.find((member) => member.member_id === task.member_id)?.display_name || '未分配'
-}
-
-function textOf(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : ''
-}
-
-/** 把错误/结果里的人类可读说明提出来；原始 JSON 仍可展开核对。 */
-function readableErrors(errors?: Array<Record<string, unknown>> | null): string[] {
-  return (errors ?? [])
-    .map((item) => textOf(item.message) || textOf(item.reason) || textOf(item.code))
-    .filter((line, index, list) => line && list.indexOf(line) === index)
-    .slice(0, 6)
-}
-
-function taskResultSummary(task: AgentTeamTask): string {
-  return textOf(task.result?.summary)
-}
-
-/** 核验/汇总成员的结论：verdict/verification_status 与证据条数。 */
-function taskVerification(task: AgentTeamTask): string {
-  const result = task.result ?? {}
-  const verdict = textOf(result.verdict) || textOf(result.verification_status) || textOf(result.status)
-  const evidence = Array.isArray(result.evidence) ? result.evidence.length : null
-  if (!verdict && evidence === null) return ''
-  return [verdict && `结论：${verdict}`, evidence !== null && `证据 ${evidence} 条`].filter(Boolean).join(' · ')
-}
-
-/** 团队终态说明：完成写汇总结论，失败/阻塞写原因与涉及任务，不让用户只看到状态色块。 */
-const teamOutcome = computed<{ tone: string; title: string; lines: string[] } | null>(() => {
-  const team = props.team
-  if (!team || !['completed', 'failed', 'blocked', 'cancelled', 'expired'].includes(team.status)) return null
-  const summary = (team.summary ?? {}) as Record<string, unknown>
-  const error = (team.error ?? {}) as Record<string, unknown>
-  const finalResult = (summary.final_result ?? {}) as Record<string, unknown>
-  const lines: string[] = []
-  const finalText = textOf(finalResult.summary)
-  if (finalText) lines.push(finalText)
-  if (summary.partial) lines.push('部分完成：仅汇总了已交付的成员结果。')
-  const failedTasks = Array.isArray(error.failed_tasks) ? (error.failed_tasks as unknown[]).map(String) : []
-  if (failedTasks.length) lines.push(`未完成任务：${failedTasks.join('、')}`)
-  const reasons = tasks.value
-    .filter((task) => ['failed', 'blocked', 'dead_letter', 'expired'].includes(task.status))
-    .flatMap((task) => readableErrors(task.errors).map((line) => `${task.title}：${line}`))
-  lines.push(...reasons.slice(0, 4))
-  const reason = textOf(error.reason)
-  const reasonText: Record<string, string> = {
-    user_cancelled: '用户已停止团队，不会自动恢复。',
-    missing_verifier_or_summarizer: '团队缺少核验或汇总成员，无法给出可信结论。',
-    all_tasks_cancelled_by_instruction: '所有执行任务都已按指令停止。',
-  }
-  if (reason) lines.push(reasonText[reason] ?? reason)
-  const titles: Record<string, [string, string]> = {
-    completed: ['success', '团队已完成'],
-    failed: ['danger', '团队执行失败'],
-    blocked: ['warning', '团队被阻塞，需要处理后再继续'],
-    cancelled: ['muted', '团队已停止'],
-    expired: ['muted', '团队已超过截止时间'],
-  }
-  const [tone, title] = titles[team.status]
-  return { tone, title, lines: lines.length ? lines : ['没有记录更多说明。'] }
-})
-
-function formatTime(value?: string | null): string {
-  const timestamp = parseUtcTimestamp(value)
-  return Number.isFinite(timestamp) ? formatDateTime(timestamp, 'HH:mm') : ''
-}
-
-function formatFullDetail(value: unknown): string {
-  if (value === undefined || value === null) return ''
-  try {
-    if (typeof value === 'string') return value
-    return JSON.stringify(value, null, 2) || ''
-  } catch {
-    return String(value)
-  }
-}
-
-const renderedMessages = computed(() => messages.value.map((message) => {
-  const payloadText = formatFullDetail(message.payload)
-  const characters = Array.from(payloadText)
-  return {
-    message,
-    payloadText,
-    payloadPreview: characters.length > 160 ? `${characters.slice(0, 160).join('')}…` : payloadText,
-    hasPayload: message.payload !== undefined && message.payload !== null && payloadText.length > 0,
-    hasLongPayload: characters.length > 160,
-  }
-}))
-
-function isPayloadExpanded(message: AgentTeamMessage): boolean {
-  return expandedMessageIds.value.has(message.message_id)
-}
-
-function togglePayload(message: AgentTeamMessage): void {
-  const next = new Set(expandedMessageIds.value)
-  if (next.has(message.message_id)) next.delete(message.message_id)
-  else next.add(message.message_id)
-  expandedMessageIds.value = next
-}
-
-async function copyPayload(message: AgentTeamMessage): Promise<void> {
-  const team = props.team
-  if (!team) return
-  const target = {
-    generation: targetGeneration,
-    teamId: team.team_id,
-    sessionId: team.session_id,
-    accountId: userStore.profile?.id ?? null,
-    token: userStore.token,
-  }
-  const targetIsCurrent = () => Boolean(
-    !disposed && props.visible
-    && target.generation === targetGeneration
-    && props.team?.team_id === target.teamId
-    && props.team.session_id === target.sessionId
-    && (userStore.profile?.id ?? null) === target.accountId
-    && userStore.token === target.token,
-  )
-  try {
-    const clipboard = globalThis.navigator?.clipboard
-    if (!clipboard?.writeText) throw new Error('Clipboard API unavailable')
-    await clipboard.writeText(formatFullDetail(message.payload))
-    if (!targetIsCurrent()) return
-    ElMessage.success('已复制完整内容')
-  } catch {
-    if (!targetIsCurrent()) return
-    const next = new Set(expandedMessageIds.value)
-    next.add(message.message_id)
-    expandedMessageIds.value = next
-    ElMessage.error('无法访问剪贴板，已展开完整内容，请手动复制')
-  }
+  const member = members.value.find((item) => item.member_id === task.member_id || item.member_key === task.member_key)
+  return member?.display_name || task.member_key || '未分配'
 }
 
 function close(): void {
@@ -406,22 +174,9 @@ watch(
   },
 )
 
-/** 新消息/成员状态变化时,气泡区自动滚动到底部。 */
-watch(
-  () => [messages.value.length, props.team?.updated_at],
-  async () => {
-    if (!props.visible) return
-    await nextTick()
-    const el = chatBodyRef.value
-    if (el) el.scrollTop = el.scrollHeight
-  },
-  { flush: 'post' },
-)
-
 onBeforeUnmount(() => {
   disposed = true
   targetGeneration += 1
-  expandedMessageIds.value = new Set()
   actionSubmitting.value = false
 })
 
@@ -639,28 +394,14 @@ async function cancelTeam(): Promise<void> {
           </div>
         </div>
 
-        <div ref="chatBodyRef" class="team-window-body">
-          <section
-            v-if="teamOutcome"
-            class="team-window-outcome"
-            :class="`is-${teamOutcome.tone}`"
-            role="status"
-            aria-label="团队结果"
-          >
-            <strong>{{ teamOutcome.title }}</strong>
-            <ul>
-              <li v-for="(line, index) in teamOutcome.lines" :key="index">{{ line }}</li>
-            </ul>
-          </section>
-          <!-- 成员实时工作卡片(Codex 风格:头像+状态+计时+操作日志) -->
+        <div class="team-window-body">
+          <!-- 成员实时工作卡片 -->
           <section v-if="members.length" class="team-window-section team-window-members-section" aria-label="团队成员实时状态">
             <AgentMemberWorkCard
               v-for="member in members"
               :key="member.member_id"
               :member="member"
               :tasks="tasks"
-              :events="props.team?.events ?? []"
-              :team-started-at="team.started_at"
               show-ask
               :show-stop="canCancel && !actionSubmitting"
               @ask="team && emit('ask-member', { teamId: team.team_id, name: $event.display_name, address: $event.address })"
@@ -668,62 +409,7 @@ async function cancelTeam(): Promise<void> {
             />
           </section>
 
-          <!-- 多 Agent 群聊气泡流 -->
-          <section v-if="messages.length" class="team-window-section team-window-chat" aria-label="协作消息">
-            <div
-              v-for="(entry, messageIndex) in renderedMessages"
-              :key="entry.message.message_id"
-              class="team-chat-row"
-            >
-              <span
-                class="team-chat-avatar"
-                :class="`is-${resolveSpeaker(entry.message.sent_from).theme}`"
-                aria-hidden="true"
-              >{{ resolveSpeaker(entry.message.sent_from).initial }}</span>
-              <div class="team-chat-main">
-                <div class="team-chat-head">
-                  <span class="team-chat-name">{{ resolveSpeaker(entry.message.sent_from).name }}</span>
-                  <span
-                    v-if="resolveSpeaker(entry.message.sent_from).badge"
-                    class="team-chat-badge"
-                    :class="`is-${resolveSpeaker(entry.message.sent_from).theme}`"
-                  >{{ resolveSpeaker(entry.message.sent_from).badge }}</span>
-                  <span v-if="mentionLabel(entry.message)" class="team-chat-mention">{{ mentionLabel(entry.message) }}</span>
-                  <time class="team-chat-time">{{ formatTime(entry.message.create_time ?? entry.message.created_at) }}</time>
-                </div>
-                <div class="team-chat-bubble" :class="`is-${resolveSpeaker(entry.message.sent_from).theme}`">
-                  <p class="team-chat-subject">{{ entry.message.subject || entry.message.message_type }}</p>
-                  <div v-if="entry.hasPayload" class="team-chat-payload">
-                    <pre
-                      :id="`team-message-payload-${messageIndex}`"
-                      class="team-chat-payload-text"
-                      :class="{
-                        'is-expanded': isPayloadExpanded(entry.message),
-                        'team-chat-payload-full': isPayloadExpanded(entry.message),
-                        'team-chat-payload-preview': !isPayloadExpanded(entry.message),
-                      }"
-                    >{{ isPayloadExpanded(entry.message) ? entry.payloadText : entry.payloadPreview }}</pre>
-                    <div v-if="entry.hasLongPayload" class="team-chat-payload-actions">
-                      <button
-                        class="team-chat-payload-toggle"
-                        type="button"
-                        :aria-expanded="isPayloadExpanded(entry.message)"
-                        :aria-controls="`team-message-payload-${messageIndex}`"
-                        @click="togglePayload(entry.message)"
-                      >{{ isPayloadExpanded(entry.message) ? '收起' : '展开全文' }}</button>
-                      <button
-                        class="team-chat-payload-copy"
-                        type="button"
-                        @click="copyPayload(entry.message)"
-                      >复制完整内容</button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <p v-if="!members.length && !messages.length" class="team-window-empty">
+          <p v-if="!members.length && !tasks.length" class="team-window-empty">
             团队详情正在同步…
           </p>
 
@@ -740,21 +426,6 @@ async function cancelTeam(): Promise<void> {
                   {{ taskMember(task) }} · 第 {{ task.attempt_count }}/{{ task.max_attempts }} 次尝试
                   <template v-if="task.depends_on.length"> · 依赖 {{ task.depends_on.join('、') }}</template>
                 </small>
-                <p v-if="taskResultSummary(task)" class="team-window-task-result">结果：{{ taskResultSummary(task) }}</p>
-                <p v-if="taskVerification(task)" class="team-window-task-result">{{ taskVerification(task) }}</p>
-                <p
-                  v-for="(line, index) in readableErrors(task.errors)"
-                  :key="`err-${index}`"
-                  class="team-window-task-reason"
-                >{{ line }}</p>
-                <details v-if="task.instructions" class="team-window-task-instructions">
-                  <summary>执行指令</summary>
-                  <p>{{ task.instructions }}</p>
-                </details>
-                <details v-if="task.errors?.length" class="team-window-task-error">
-                  <summary>原始错误记录</summary>
-                  <code class="team-window-task-error-content">{{ formatFullDetail(task.errors) }}</code>
-                </details>
               </li>
             </ol>
           </details>

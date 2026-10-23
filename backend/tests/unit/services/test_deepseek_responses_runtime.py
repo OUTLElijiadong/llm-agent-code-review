@@ -2404,3 +2404,34 @@ async def test_trusted_team_contradiction_fails_closed_without_persisting_claim(
     assert checkpoint.context_metadata["completion_guard_retries"] == COMPLETION_GUARD_RETRY_LIMIT
     assert len(transport.payloads) == COMPLETION_GUARD_RETRY_LIMIT + 1
     assert executor.calls == []
+
+
+@pytest.mark.asyncio
+async def test_creation_notice_waits_for_checkpoint_commit_and_precedes_model() -> None:
+    committed = asyncio.Event()
+    noticed = []
+
+    class DelayedStore(InMemoryCheckpointStore):
+        async def create(self, checkpoint):
+            await committed.wait()
+            return await super().create(checkpoint)
+
+    store = DelayedStore()
+    transport = ScriptedTransport([_message_response("完成")])
+    runtime = DeepSeekResponsesRuntime(
+        transport=transport, tool_executor=RecordingExecutor(), checkpoint_store=store,
+    )
+
+    async def on_created():
+        assert await store.load("run-ready-order") is not None
+        assert not transport.payloads
+        noticed.append("committed")
+
+    task = asyncio.create_task(runtime.start("审查代码", run_id="run-ready-order", on_created=on_created))
+    await asyncio.sleep(0)
+    assert noticed == []
+    assert not task.done()
+    committed.set()
+    result = await task
+    assert noticed == ["committed"]
+    assert result.status == COMPLETED

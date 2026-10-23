@@ -32,7 +32,7 @@ export interface AgentChatSnapshotMessage {
   content: string
   /** 消息发起时已发现的子 Agent 团队,用于关闭/重开后恢复卡片位置。 */
   teamIds?: number[]
-  /** 团队终态回执的自动部分答复，按回执 ID 幂等恢复。 */
+  /** 旧版自动拼接结果的标记，仅用于过滤历史缓存。 */
   teamFallback?: boolean
   autoResultKey?: string
   /** 失败卡片只属于其产生的运行,切换账号或会话时不得串入。 */
@@ -388,13 +388,18 @@ export function removeAgentChatSession(storageKey: string, sessionId: string): v
   }
 }
 
+/** 旧版成员拼接内容不能在切换会话或刷新后回流为小菱结论。 */
+function isXiaolingSnapshotMessage(message: AgentChatSnapshotMessage): boolean {
+  return !message.teamFallback && !message.autoResultKey?.startsWith('team-terminal:')
+}
+
 export function loadAgentChatSnapshot(sessionId: string, storageKey = ''): AgentChatSnapshot | null {
   try {
     const raw = window.localStorage.getItem(SNAPSHOT_PREFIX + scopedSessionKey(sessionId, storageKey))
     if (!raw) return null
     const parsed = JSON.parse(raw) as AgentChatSnapshot
     if (!parsed || !Array.isArray(parsed.messages)) return null
-    return parsed
+    return { ...parsed, messages: parsed.messages.filter(isXiaolingSnapshotMessage) }
   } catch {
     return null
   }
@@ -431,7 +436,7 @@ export function findPristineAgentChatSession(
 export function saveAgentChatSnapshot(sessionId: string, snapshot: AgentChatSnapshot, storageKey = ''): void {
   try {
     // 空的时间线消息也可能携带团队锚点,不能在快照压缩时丢掉。
-    const retained = snapshot.messages.filter((item) => item.content.trim() || item.teamIds?.length)
+    const retained = snapshot.messages.filter((item) => isXiaolingSnapshotMessage(item) && (item.content.trim() || item.teamIds?.length))
     const trimmed = retained.slice(-60)
     window.localStorage.setItem(
       SNAPSHOT_PREFIX + scopedSessionKey(sessionId, storageKey),

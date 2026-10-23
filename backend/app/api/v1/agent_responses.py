@@ -1555,6 +1555,13 @@ async def stream_agent_response(
             except Exception:  # noqa: BLE001 - 元数据降级为默认模型名
                 pass
 
+        async def publish_created() -> None:
+            # 只由运行内核在检查点提交成功后调用；上游模型不能伪造就绪通知。
+            await queue.put({
+                "type": "response.created",
+                "response": {"id": run_id, "object": "response", "status": "in_progress", "model": response_model},
+            })
+
         async def sink(event: Mapping[str, Any]) -> None:
             nonlocal discard_events
             if discard_events:
@@ -1705,7 +1712,7 @@ async def stream_agent_response(
                             pass
                     if payload.action == "start":
                         with usage_context(int(run_user.id), source_attribution):
-                            start_kwargs: dict[str, Any] = {"run_id": run_id, "event_sink": sink}
+                            start_kwargs: dict[str, Any] = {"run_id": run_id, "event_sink": sink, "on_created": publish_created}
                             if server_history_transcript is not None:
                                 start_kwargs["server_history_transcript"] = server_history_transcript
                             if isinstance(trusted_terminal_team_snapshot, dict):
@@ -1812,17 +1819,12 @@ async def stream_agent_response(
                 f"event: {value.get('type', 'message')}\ndata: {json.dumps(value, ensure_ascii=False, default=str)}\n\n"
             )
 
-        yield encode(
-            {
+        if payload.action != "start":
+            # 恢复/批准/取消引用的是已经持久化的既有运行。
+            yield encode({
                 "type": "response.created",
-                "response": {
-                    "id": run_id,
-                    "object": "response",
-                    "status": "in_progress",
-                    "model": response_model,
-                },
-            }
-        )
+                "response": {"id": run_id, "object": "response", "status": "in_progress", "model": response_model},
+            })
         async def guarded_execute() -> Any:
             # 非人为异常（数据库抖动、上游故障等）不让运行停在 running：
             # 立即转入带恢复标记的失败态并从检查点续跑；人为停止由检查点 stop_requested 收敛。

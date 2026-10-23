@@ -28,7 +28,7 @@ import {
 } from '@/api/agentMesh'
 import { getAgentTeam, listAgentTeams, type AgentTeamDetail } from '@/api/agentTeams'
 import { shouldRefreshAgentTeamDetail } from '@/utils/agentTeamPolling'
-import { agentTeamFallbackKey, buildAgentTeamFallback, terminalTeamReceiptsForFailedRun } from '@/utils/agentTeamFallback'
+import { agentTeamReceiptKey, isScopedTerminalAgentTeam, terminalTeamReceiptsForFailedRun } from '@/utils/agentTeamFallback'
 import { createProject, updateProject, deleteProject } from '@/api/project'
 import { upload as uploadCodeFile } from '@/api/codeFile'
 import AgentSessionSwitcher from '@/components/ai/AgentSessionSwitcher.vue'
@@ -214,8 +214,8 @@ function compactDesktopAnchor(panel: HTMLElement): { left: number; top: number }
     || window.innerWidth > COMPACT_DESKTOP_MAX_WIDTH
     || window.innerHeight <= COMPACT_DESKTOP_MIN_HEIGHT
   ) return null
-  const panelWidth = panel.offsetWidth || 400
-  const panelHeight = panel.offsetHeight || 620
+  const panelWidth = panel.offsetWidth || 370
+  const panelHeight = panel.offsetHeight || 560
   return {
     left: Math.max(12, window.innerWidth - panelWidth - COMPACT_DESKTOP_ACTION_GUTTER),
     top: Math.max(12, window.innerHeight - panelHeight - 24),
@@ -863,25 +863,6 @@ function applySessionSnapshot(session: AgentResponseSession): void {
       time: '',
     })
   }
-  appendPersistedTeamFallbacks(session.session_id)
-}
-
-function appendPersistedTeamFallbacks(targetSessionId: string): void {
-  const snapshot = loadAgentChatSnapshot(targetSessionId, chatStorageKey.value)
-  if (!snapshot) return
-  const existing = new Set(messages.value.map((entry) => entry.autoResultKey).filter(Boolean))
-  for (const fallback of snapshot.messages) {
-    if (fallback.role !== 'assistant' || !fallback.teamFallback || !fallback.autoResultKey
-      || existing.has(fallback.autoResultKey)) continue
-    messages.value.push({
-      ...assistantEntry({ type: 'text', content: fallback.content, status: 'completed' }),
-      time: '',
-      teamFallback: true,
-      autoResultKey: fallback.autoResultKey,
-      teamIds: fallback.teamIds?.length ? [...fallback.teamIds] : undefined,
-    })
-    existing.add(fallback.autoResultKey)
-  }
 }
 
 async function pollSessionSnapshot(generation: number): Promise<void> {
@@ -901,7 +882,7 @@ async function pollSessionSnapshot(generation: number): Promise<void> {
     if (!loading.value) applySessionSnapshot(session)
     await refreshAgentTeam(generation)
     if (!scopeCurrent()) return
-    if (!loading.value) await restoreTerminalTeamFallback(session, scopeCurrent)
+    if (!loading.value) await restoreTerminalTeamProgress(session, scopeCurrent)
     if (!scopeCurrent()) return
   } catch {
     if (!scopeCurrent()) return
@@ -934,7 +915,7 @@ async function restoreSession(generation = restoreGeneration + 1): Promise<void>
     applySessionSnapshot(session)
     await refreshAgentTeam()
     if (!scopeCurrent()) return
-    await restoreTerminalTeamFallback(session, scopeCurrent)
+    await restoreTerminalTeamProgress(session, scopeCurrent)
     if (!scopeCurrent()) return
   } catch {
     if (!scopeCurrent()) return
@@ -1017,7 +998,7 @@ async function handleMeshMessage(message: AgentMeshMessage, targetSessionId: str
     sessionRun.value?.error,
   )
   if (succeeded) return true
-  return appendTerminalTeamFallback(message, targetSessionId, scopeCurrent)
+  return refreshTerminalTeamProgress(message, targetSessionId, scopeCurrent)
 }
 
 function rememberResponseStop(set: Set<string>, runId: string): void {
@@ -1041,119 +1022,67 @@ function settlePendingCancelledRunReceipts(runId: string, message = '父级响�
   pendingCancelledRunReceipts.delete(runId)
 }
 
-async function acknowledgeFallbackReceipt(message: AgentMeshMessage, targetSessionId: string, summary: string): Promise<void> {
-  const key = agentTeamFallbackKey(message.message_id)
+async function acknowledgeTeamProgressReceipt(message: AgentMeshMessage, targetSessionId: string): Promise<void> {
   try {
-    await acknowledgeAgentMeshMessage('admin', targetSessionId, message.message_id, 'processing', key)
-    await acknowledgeAgentMeshMessage('admin', targetSessionId, message.message_id, 'completed', summary.slice(0, 1800))
+    // 团队回执消费与小菱汇总分开记账，避免汇总失败后反复投递同一回执。
+    await acknowledgeAgentMeshMessage('admin', targetSessionId, message.message_id, 'processing', agentTeamReceiptKey(message.message_id))
+    await acknowledgeAgentMeshMessage('admin', targetSessionId, message.message_id, 'completed', '团队执行进度已更新；小菱最终总结尚未生成。')
   } catch {
-    // 本地结果已持久化；桥接层仍可重投回执并按稳定键去重。
+    // 确认失败保留服务端回执，后续重投仍只更新进度，不合成聊天结论。
   }
 }
 
-async function appendTerminalTeamFallback(
+async function refreshTerminalTeamProgress(
   message: AgentMeshMessage,
   targetSessionId: string,
   scopeCurrent: () => boolean,
 ): Promise<boolean> {
-  if (message.context?.team_terminal !== true) return false
-  const key = agentTeamFallbackKey(message.message_id)
+  if (message.context?.team_terminal !== true || message.send_to !== `session:admin:${targetSessionId}`) return false
   const teamId = Number(message.payload?.team_id ?? message.context?.team_id)
   if (!Number.isSafeInteger(teamId) || teamId <= 0) return false
-  const activeSession = targetSessionId === sessionId.value
-  const cached = activeSession ? null : loadAgentChatSnapshot(targetSessionId, chatStorageKey.value)
-  const alreadySaved = activeSession
-    ? messages.value.some((entry) => entry.autoResultKey === key)
-    : Boolean(cached?.messages.some((entry) => entry.autoResultKey === key))
-  if (alreadySaved) {
-    await acknowledgeFallbackReceipt(message, targetSessionId, '团队部分结果已保存并展示；小菱最终模型汇总不可用。')
-    return true
-  }
-
   try {
-    const detail = await getAgentTeam(teamId)
-    if (!scopeCurrent()) return false
-    const content = buildAgentTeamFallback(detail, {
-      teamId, surface: 'admin', sessionId: targetSessionId,
-      upstreamError: sessionRun.value?.error || message.last_error || '',
-    })
-    if (!content) return false
-    const summaryMessage = {
-      role: 'assistant' as const, content, teamIds: [teamId],
-      teamFallback: true, autoResultKey: key,
-    }
-    if (activeSession) {
-      messages.value.push({
-        ...assistantEntry({ type: 'text', content, status: 'completed' }),
-        time: now(),
-        ...summaryMessage,
-      })
-      agentTeams.value = [...agentTeams.value.filter((team) => team.team_id !== teamId), detail]
+    const team = await getAgentTeam(teamId)
+    if (!scopeCurrent() || !isScopedTerminalAgentTeam(team, { teamId, surface: 'admin', sessionId: targetSessionId })) return false
+    // 请求返回期间可能切换对话，必须此时重新判断当前会话。
+    if (targetSessionId === sessionId.value) {
+      agentTeams.value = [...agentTeams.value.filter((item) => item.team_id !== teamId), team]
       persistSnapshot()
-      await scrollToBottom()
     } else {
+      const cached = loadAgentChatSnapshot(targetSessionId, chatStorageKey.value)
       saveAgentChatSnapshot(targetSessionId, {
-        messages: [...(cached?.messages ?? []), summaryMessage],
-        teams: cached?.teams,
+        messages: cached?.messages ?? [],
+        teams: [...(cached?.teams ?? []).filter((item) => item.team_id !== teamId), team],
         runStatus: cached?.runStatus ?? 'failed',
         updatedAt: Date.now(),
       }, chatStorageKey.value)
     }
     if (!scopeCurrent()) return false
-    await acknowledgeFallbackReceipt(message, targetSessionId, content)
+    await acknowledgeTeamProgressReceipt(message, targetSessionId)
     return true
   } catch {
     return false
   }
 }
 
-/** 刷新后只从失败运行明确绑定的管理员会话终态回执恢复，不重跑或重复确认。 */
-async function restoreTerminalTeamFallback(
+/** 刷新只恢复当前失败运行的团队进度，不把成员结果伪装成小菱答复。 */
+async function restoreTerminalTeamProgress(
   session: AgentResponseSession,
   scopeCurrent: () => boolean,
 ): Promise<void> {
   const run = session.run
-  if (
-    session.surface !== 'admin'
-    || session.session_id !== sessionId.value
-    || !run
-    || !['failed', 'incomplete', 'max_rounds_exceeded'].includes(run.status)
-  ) return
-
+  if (session.surface !== 'admin' || session.session_id !== sessionId.value || !run
+    || !['failed', 'incomplete', 'max_rounds_exceeded'].includes(run.status)) return
   for (const receipt of terminalTeamReceiptsForFailedRun(session)) {
     const teamId = Number(receipt.payload?.team_id ?? receipt.context?.team_id)
     if (!Number.isSafeInteger(teamId) || teamId <= 0) continue
-    const key = agentTeamFallbackKey(receipt.message_id)
-    if (messages.value.some((entry) => entry.autoResultKey === key)) continue
-
     try {
-      const cachedTeam = agentTeams.value.find((team) => team.team_id === teamId)
-      const team = cachedTeam ?? await getAgentTeam(teamId)
-      if (
-        !scopeCurrent()
-        || session.session_id !== sessionId.value
-        || sessionRun.value?.run_id !== run.run_id
-        || messages.value.some((entry) => entry.autoResultKey === key)
-      ) return
-      const content = buildAgentTeamFallback(team, {
-        teamId,
-        surface: 'admin',
-        sessionId: session.session_id,
-        upstreamError: run.error || receipt.last_error || '',
-      })
-      if (!content) continue
-      messages.value.push({
-        ...assistantEntry({ type: 'text', content, status: 'completed' }),
-        time: '',
-        runId: run.run_id,
-        teamFallback: true,
-        autoResultKey: key,
-        teamIds: [teamId],
-      })
-      agentTeams.value = [...agentTeams.value.filter((team) => team.team_id !== teamId), team]
+      const team = agentTeams.value.find((item) => item.team_id === teamId) ?? await getAgentTeam(teamId)
+      if (!scopeCurrent() || session.session_id !== sessionId.value || sessionRun.value?.run_id !== run.run_id) return
+      if (!isScopedTerminalAgentTeam(team, { teamId, surface: 'admin', sessionId: session.session_id })) continue
+      agentTeams.value = [...agentTeams.value.filter((item) => item.team_id !== teamId), team]
       persistSnapshot()
     } catch {
-      // 详情暂不可用时不伪造成功，后续会话轮询会再次尝试恢复。
+      // 团队详情暂不可用时保留小菱错误卡，后续轮询继续恢复。
     }
   }
 }
@@ -1206,7 +1135,7 @@ async function runBackgroundMeshMessage(
     await handle.done
     if (!scopeCurrent() || deferred) return false
     if (succeeded) return true
-    return appendTerminalTeamFallback(message, targetSessionId, scopeCurrent)
+    return refreshTerminalTeamProgress(message, targetSessionId, scopeCurrent)
   } catch {
     return false
   } finally {
@@ -1262,19 +1191,6 @@ function eventErrorMessage(event: ResponseStreamEvent): string {
   }
   return ''
 }
-
-// 星图异步出现或长高时，仅跟随原本贴底的阅读位置。
-watch([liveGraphTeams, teamForming], () => {
-  const area = messageArea.value
-  if (!area || area.scrollHeight - area.scrollTop - area.clientHeight > 80) return
-  const oldTop = area.scrollTop
-  const scopeCurrent = chatScope.capture()
-  void nextTick(() => {
-    if (scopeCurrent() && messageArea.value === area && area.scrollTop === oldTop) {
-      area.scrollTop = area.scrollHeight
-    }
-  })
-})
 
 async function scrollToBottom(): Promise<void> {
   await nextTick()
@@ -2341,6 +2257,10 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
       </div>
 
 
+      <section v-if="liveGraphTeams.length || teamForming || agentTeamError" class="copilot-team-graph" aria-label="团队实时进度">
+        <AgentTeamLiveGraph :teams="liveGraphTeams" :forming="teamForming" :error="agentTeamError" @open-detail="openTeamPanel($event.team_id)" />
+      </section>
+
       <div ref="messageArea" class="copilot-messages" :class="{ 'is-restoring': sessionRestoring }" aria-live="polite" @click="onMessageClick">
         <Transition name="mascot-float" :css="false">
           <div v-if="sessionRestoring" class="session-restoring-hint" role="status">
@@ -2561,7 +2481,6 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
           @open-panel="openTeamPanel"
         />
 
-        <AgentTeamLiveGraph :teams="liveGraphTeams" :forming="teamForming" :error="agentTeamError" @open-detail="openTeamPanel($event.team_id)" />
 
         <div v-if="thinkingCityActive" class="typing-row">
           <div class="message-avatar">
@@ -2727,8 +2646,8 @@ input { font: inherit; }
 
 .copilot-panel {
   position: fixed;
-  width: 400px;
-  height: 620px;
+  width: 370px;
+  height: 560px;
   max-width: calc(100vw - 24px);
   max-height: calc(100dvh - 24px);
   min-width: 0;
@@ -2736,9 +2655,10 @@ input { font: inherit; }
   grid-template-areas:
     'header'
     'progress'
+    'graph'
     'messages'
     'input';
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   overflow: hidden;
   border: 1px solid rgba(91, 88, 232, 0.14);
   border-radius: 18px;
@@ -2965,6 +2885,7 @@ input { font: inherit; }
 @keyframes session-restoring-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .session-restoring-spinner { animation: none; } }
 
+.copilot-team-graph { grid-area: graph; min-width: 0; min-height: 0; max-height: min(30dvh, 210px); overflow: auto; overscroll-behavior: contain; padding: 0 12px 8px; }
 .copilot-messages { grid-area: messages; min-height: 0; min-width: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 16px 14px;
   /* 极淡品牌氛围底 + 滚动渐隐,替代平涂灰 */
   background:

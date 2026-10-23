@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue"
 import { Close, CircleCheck, Loading, WarningFilled } from "@element-plus/icons-vue"
 import AgentTeamMemberBadge from "./AgentTeamMemberBadge.vue"
 import AgentMemberWorkCard from "./AgentMemberWorkCard.vue"
 import { ElMessage } from "element-plus/es/components/message/index"
 import { ElMessageBox } from "element-plus/es/components/message-box/index"
-import { cancelAgentTeamTasks, getAgentTeam, type AgentTeamDetail, type AgentTeamEvent, type AgentTeamMember, type AgentTeamTask } from "@/api/agentTeams"
-import { formatDateTime, parseUtcTimestamp } from "@/utils/format"
+import { cancelAgentTeamTasks, getAgentTeam, type AgentTeamDetail, type AgentTeamMember, type AgentTeamTask } from "@/api/agentTeams"
 
 const props = defineProps<{
   teamId: number | null
@@ -20,12 +19,10 @@ const emit = defineEmits<{
 const team = ref<AgentTeamDetail | null>(null)
 const loading = ref(false)
 const error = ref("")
-const activeTab = ref<"overview" | "members" | "tasks" | "events">("overview")
-const now = ref(Date.now())
+const activeTab = ref<"overview" | "members" | "tasks">("overview")
 const panelRef = ref<HTMLElement | null>(null)
 const closeButtonRef = ref<HTMLButtonElement | null>(null)
 let pollTimer: ReturnType<typeof setTimeout> | undefined
-let clockTimer: ReturnType<typeof setInterval> | undefined
 let pollGeneration = 0
 let previousFocusedElement: HTMLElement | null = null
 
@@ -144,34 +141,14 @@ watch(() => props.teamId, (teamId, previousTeamId) => {
 }, { immediate: true })
 watch(isTerminal, (t) => { if (t) stopPolling() })
 
-onMounted(() => {
-  // 秒级节拍驱动成员计时文案;5s 粒度会以 5 为步长跳变
-  clockTimer = setInterval(() => { now.value = Date.now() }, 1000)
-})
 onBeforeUnmount(() => {
   pollGeneration += 1
   stopPolling()
-  if (clockTimer) clearInterval(clockTimer)
   restorePreviousFocus()
 })
 
 const members = computed<AgentTeamMember[]>(() => team.value?.members ?? [])
 const tasks = computed<AgentTeamTask[]>(() => team.value?.tasks ?? [])
-const events = computed<AgentTeamEvent[]>(() => team.value?.events ?? [])
-
-const workingDuration = computed(() => {
-  if (!team.value) return ""
-  const start = parseUtcTimestamp(team.value.started_at || team.value.created_at)
-  const end = team.value.completed_at ? parseUtcTimestamp(team.value.completed_at) : now.value
-  if (!Number.isFinite(start) || !Number.isFinite(end)) return ""
-  const diff = Math.max(0, Math.floor((end - start) / 1000))
-  const h = Math.floor(diff / 3600)
-  const m = Math.floor((diff % 3600) / 60)
-  const s = diff % 60
-  if (h > 0) return `${h}小时${m}分${s}秒`
-  if (m > 0) return `${m}分${s}秒`
-  return `${s}秒`
-})
 
 const STATUS_LABELS: Record<string, string> = {
   draft: "草稿", queued: "排队中", running: "运行中", verifying: "验证中",
@@ -184,11 +161,6 @@ function taskStatusIcon(s: string) {
   if (s === "running") return "running"
   if (["failed", "dead_letter"].includes(s)) return "fail"
   return "pending"
-}
-
-function eventTime(e: AgentTeamEvent): string {
-  const timestamp = parseUtcTimestamp(e.created_at)
-  return Number.isFinite(timestamp) ? formatDateTime(timestamp, "HH:mm:ss") : ""
 }
 
 function askMember(member: AgentTeamMember): void {
@@ -231,11 +203,10 @@ function askMember(member: AgentTeamMember): void {
           <template v-else-if="team">
             <div class="panel-meta">
               <span class="meta-status" :class="`st-${team.status}`">{{ STATUS_LABELS[team.status] ?? team.status }}</span>
-              <span class="meta-duration">已运行 {{ workingDuration }}</span>
             </div>
 
             <nav class="panel-tabs" role="tablist" aria-label="团队详情视图">
-              <button v-for="tab in ([{ key: 'overview', label: '概览' }, { key: 'members', label: '成员' }, { key: 'tasks', label: '任务' }, { key: 'events', label: '事件' }] as const)"
+              <button v-for="tab in ([{ key: 'overview', label: '概览' }, { key: 'members', label: '成员' }, { key: 'tasks', label: '任务' }] as const)"
                 type="button"
                 :key="tab.key" class="tab-btn" :class="{ active: activeTab === tab.key }"
                 role="tab"
@@ -248,10 +219,6 @@ function askMember(member: AgentTeamMember): void {
 
             <div class="panel-body">
               <div v-if="activeTab === 'overview'" :id="`team-panel-${team.team_id}-overview`" class="tab-overview" role="tabpanel" :aria-labelledby="`team-tab-${team.team_id}-overview`" tabindex="0">
-                <div v-if="team.objective" class="overview-section">
-                  <div class="section-label">目标</div>
-                  <p class="section-text">{{ team.objective }}</p>
-                </div>
                 <div class="overview-section">
                   <div class="section-label">成员 ({{ members.length }})</div>
                   <div class="overview-badges">
@@ -277,10 +244,7 @@ function askMember(member: AgentTeamMember): void {
                   :key="m.member_id"
                   :member="m"
                   :tasks="tasks"
-                  :events="events"
-                  :team-started-at="team?.started_at ?? null"
                   show-ask
-                  :log-limit="5"
                   :show-stop="canStopTasks"
                   @ask="askMember"
                   @stop="stopMemberTask"
@@ -306,16 +270,6 @@ function askMember(member: AgentTeamMember): void {
                 <div v-if="!tasks.length" class="empty-tab">暂无任务数据</div>
               </div>
 
-              <div v-if="activeTab === 'events'" :id="`team-panel-${team.team_id}-events`" class="tab-events" role="tabpanel" :aria-labelledby="`team-tab-${team.team_id}-events`" tabindex="0">
-                <div v-for="e in events" :key="e.event_id" class="event-row">
-                  <span class="event-time">{{ eventTime(e) }}</span>
-                  <span class="event-type">{{ e.event_type }}</span>
-                  <span v-if="e.from_status || e.to_status" class="event-trans">
-                    {{ e.from_status }} → {{ e.to_status }}
-                  </span>
-                </div>
-                <div v-if="!events.length" class="empty-tab">暂无事件数据</div>
-              </div>
             </div>
           </template>
         </div>

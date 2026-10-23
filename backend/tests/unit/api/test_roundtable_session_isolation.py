@@ -1,12 +1,14 @@
 """圆桌会话跨账号隔离：B 账号不能列出、读取或停止 A 账号的圆桌。"""
 
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.dialects import mysql
+from sqlalchemy.orm import Query, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.api.v1 import discussion as discussion_api
@@ -71,3 +73,77 @@ def test_other_account_cannot_list_read_or_stop_roundtable(clients):
     ):
         assert response.status_code == 404
         assert "secret_alice" not in response.text and "私有发言" not in response.text
+
+
+def test_list_roundtables_preserves_priority_order_and_offset_pagination(clients):
+    client, alice, _bob, _current = clients
+    db = client.app.dependency_overrides[get_db]()
+    db.query(RoundtableSession).delete()
+    now = datetime.now(timezone.utc)
+    sessions = [
+        ("active-b", "active", 3),
+        ("paused-c", "paused", 2),
+        ("active-a", "active", 2),
+        ("failed-z", "failed", 2),
+        ("concluded-x", "concluded", 4),
+        ("partial-y", "partial", 4),
+    ]
+    db.add_all([
+        RoundtableSession(
+            session_id=session_id,
+            owner_user_id=alice.id,
+            file_name=f"{session_id}.py",
+            status=status,
+            agents=[],
+            progress={},
+            created_at=now - timedelta(minutes=age),
+            updated_at=now - timedelta(minutes=age),
+        )
+        for session_id, status, age in sessions
+    ])
+    db.commit()
+
+    first = client.get("/api/discuss/sessions", params={"limit": 2, "offset": 0})
+    assert first.status_code == 200
+    assert [item["session_id"] for item in first.json()["data"]["items"]] == ["paused-c", "active-a"]
+    assert first.json()["data"]["next_offset"] == 2
+
+    second = client.get("/api/discuss/sessions", params={"limit": 2, "offset": 2})
+    assert second.status_code == 200
+    assert [item["session_id"] for item in second.json()["data"]["items"]] == ["active-b", "failed-z"]
+    assert second.json()["data"]["next_offset"] == 4
+
+    third = client.get("/api/discuss/sessions", params={"limit": 2, "offset": 4})
+    assert third.status_code == 200
+    assert [item["session_id"] for item in third.json()["data"]["items"]] == ["partial-y", "concluded-x"]
+    assert third.json()["data"]["next_offset"] is None
+
+
+def test_list_roundtables_orders_only_session_ids_before_loading_json(clients, monkeypatch):
+    client, _alice, _bob, _current = clients
+    compiled_queries = []
+    original_all = Query.all
+
+    def capture_all(query):
+        compiled_queries.append(
+            str(query.statement.compile(dialect=mysql.dialect())).upper()
+        )
+        return original_all(query)
+
+    monkeypatch.setattr(Query, "all", capture_all)
+    response = client.get("/api/discuss/sessions", params={"limit": 2, "offset": 0})
+
+    assert response.status_code == 200
+    ordered_page = next(
+        query for query in compiled_queries
+        if "FROM ROUND_TABLE_SESSION" in query or "FROM ROUNDTABLE_SESSION" in query
+        if "ORDER BY CASE" in query
+    )
+    select_clause = ordered_page.split(" FROM ", 1)[0]
+    assert "SELECT ROUNDTABLE_SESSION.SESSION_ID" in select_clause
+    assert "ROUND_TABLE_SESSION.AGENTS" not in select_clause
+    assert "ROUNDTABLE_SESSION.AGENTS" not in select_clause
+    assert "ROUND_TABLE_SESSION.PROGRESS" not in select_clause
+    assert "ROUNDTABLE_SESSION.PROGRESS" not in select_clause
+    assert "UPDATED_AT DESC" in ordered_page
+    assert "SESSION_ID DESC" in ordered_page

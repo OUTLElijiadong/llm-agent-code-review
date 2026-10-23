@@ -924,7 +924,7 @@ describe('AgentChatDrawer Responses stream', () => {
     wrapper.unmount()
   })
 
-  it('终态团队的汇总模型遇到 402 时自动展示并保存有边界的部分结果', async () => {
+  it('汇总模型遇到402时只更新团队进度且不展示成员结论', async () => {
     window.localStorage.setItem('prism-agent-sessions:user', JSON.stringify([
       { id: 'user-test', title: '代码审查', createdAt: 1 },
     ]))
@@ -968,20 +968,20 @@ describe('AgentChatDrawer Responses stream', () => {
     await finish(0)
     await settleAll()
 
-    expect(wrapper.text()).toContain('团队审查部分结果（自动整理）')
-    expect(wrapper.text()).toContain('额度或计费拒绝')
-    expect(wrapper.text()).toContain('不可信输入进入 eval')
-    expect(wrapper.text()).toContain('未经小菱最终模型复核')
-    expect(wrapper.text()).toContain('核验服务不可用，不能视为通过')
+    expect(wrapper.text()).not.toContain('团队审查部分结果（自动整理）')
+    expect(wrapper.text()).not.toContain('额度或计费拒绝')
+    expect(wrapper.text()).not.toContain('不可信输入进入 eval')
+    expect(wrapper.text()).not.toContain('未经小菱最终模型复核')
+    expect(wrapper.text()).not.toContain('核验服务不可用，不能视为通过')
     expect(meshApi.acknowledge).toHaveBeenCalledWith('user', 'user-test', terminalReceipt.message_id, 'processing', expect.any(String))
-    expect(meshApi.acknowledge).toHaveBeenCalledWith('user', 'user-test', terminalReceipt.message_id, 'completed', expect.stringContaining('部分结果'))
+    expect(meshApi.acknowledge).toHaveBeenCalledWith('user', 'user-test', terminalReceipt.message_id, 'completed', expect.stringContaining('团队执行进度已更新'))
     const snapshot = loadAgentChatSnapshot('user-test', agentChatStorageKey('user'))
-    expect(snapshot?.messages.some((item) => item.teamFallback && item.autoResultKey === 'team-terminal:team-85-terminal-1-result')).toBe(true)
+    expect(snapshot?.messages.some((item) => item.teamFallback && item.autoResultKey === 'team-terminal:team-85-terminal-1-result')).toBe(false)
     expect(wrapper.find('.send-btn').exists()).toBe(true)
     wrapper.unmount()
   })
 
-  it('刷新后从失败运行绑定的终态团队账本恢复部分结果且不重跑模型', async () => {
+  it('刷新后仅恢复失败运行绑定的团队进度且不重跑模型', async () => {
     window.localStorage.setItem('prism-agent-sessions:user', JSON.stringify([
       { id: 'user-test', title: '代码审查', createdAt: 1 },
     ]))
@@ -1035,18 +1035,18 @@ describe('AgentChatDrawer Responses stream', () => {
     await settleAll()
 
     expect(streams.records).toHaveLength(0)
-    expect(wrapper.text()).toContain('团队审查部分结果（自动整理）')
-    expect(wrapper.text()).toContain('除数可能为零')
-    expect(wrapper.text()).toContain('未经小菱最终模型复核')
+    expect(wrapper.text()).not.toContain('团队审查部分结果（自动整理）')
+    expect(wrapper.text()).not.toContain('除数可能为零')
+    expect(wrapper.text()).not.toContain('未经小菱最终模型复核')
     expect(meshApi.acknowledge).not.toHaveBeenCalled()
     const snapshot = loadAgentChatSnapshot('user-test', agentChatStorageKey('user'))
-    expect(snapshot?.messages.filter(item => item.teamFallback)).toHaveLength(1)
+    expect(snapshot?.messages.filter(item => item.teamFallback)).toHaveLength(0)
 
     // 同一会话再次恢复必须按终态回执 ID 去重。
     await (wrapper.vm as any).handleSessionSelect('user-test')
     await settleAll()
-    expect(wrapper.text().match(/团队审查部分结果（自动整理）/g)).toHaveLength(1)
-    expect(loadAgentChatSnapshot('user-test', agentChatStorageKey('user'))?.messages.filter(item => item.teamFallback)).toHaveLength(1)
+    expect(wrapper.text()).not.toContain('团队审查部分结果（自动整理）')
+    expect(loadAgentChatSnapshot('user-test', agentChatStorageKey('user'))?.messages.filter(item => item.teamFallback)).toHaveLength(0)
     wrapper.unmount()
   })
 
@@ -2291,21 +2291,55 @@ describe('小菱账号切换隔离', () => {
 })
 
 
-describe('实时星图滚动跟随', () => {
-  it('靠近底部时跟随账本更新，向上阅读时保留位置', async () => {
+describe('实时星图布局', () => {
+  it('固定在消息列表上方独立区域，账本更新不改变消息阅读位置', async () => {
     const wrapper = await mountReadyDrawer()
     try {
       const area = wrapper.get('.chat-body').element as HTMLElement
       Object.defineProperty(area, 'scrollHeight', { configurable: true, value: 1000 })
       Object.defineProperty(area, 'clientHeight', { configurable: true, value: 400 })
-      area.scrollTop = 600
       const vm = wrapper.vm as any
-      vm.agentTeams = [...vm.agentTeams]
+      const team: AgentTeamDetail = {
+        team_id: 991,
+        title: '实时布局回归团队',
+        surface: 'user',
+        session_id: 'user-test',
+        status: 'running',
+        max_active_children: 3,
+        trace_id: 'trace-layout-991',
+        counts: { total: 1, completed: 0, running: 1, queued: 0, failed: 0, blocked: 0 },
+        members: [{ member_id: 1, member_key: 'reviewer', display_name: '代码审查 Agent', address: 'agent:reviewer', kind: 'registered', role: 'worker', status: 'running' }],
+        tasks: [{ task_id: 1, task_key: 'review', member_id: 1, member_key: 'reviewer', title: '复核页面布局', depends_on: [], status: 'running', priority: 1, attempt_count: 1, max_attempts: 2 }],
+        events: [],
+        messages: [],
+      }
+      vm.agentTeams = [team]
       await flushPromises()
-      expect(area.scrollTop).toBe(1000)
+
+      const graphRegion = wrapper.get('.live-team-graph-region').element as HTMLElement
+      const graph = wrapper.get('[aria-label="实时团队星图"]').element
+      expect(graphRegion.getAttribute('role')).toBe('region')
+      expect(graphRegion.getAttribute('tabindex')).toBe('0')
+      expect(graphRegion.contains(graph)).toBe(true)
+      expect(graphRegion.parentElement).toBe(area.parentElement)
+      expect(graphRegion.nextElementSibling).toBe(area)
+      expect(area.contains(graph)).toBe(false)
+
       area.scrollTop = 100
-      vm.agentTeams = [...vm.agentTeams]
+      vm.agentTeams = [{
+        ...team,
+        counts: { total: 2, completed: 0, running: 2, queued: 0, failed: 0, blocked: 0 },
+        members: [
+          ...team.members,
+          { member_id: 2, member_key: 'verifier', display_name: '独立核验 Agent', address: 'agent:verifier', kind: 'registered', role: 'worker', status: 'running' },
+        ],
+        tasks: [
+          ...team.tasks,
+          { task_id: 2, task_key: 'verify', member_id: 2, member_key: 'verifier', title: '核验星图刷新', depends_on: [], status: 'running', priority: 1, attempt_count: 1, max_attempts: 2 },
+        ],
+      }]
       await flushPromises()
+      expect(wrapper.get('[aria-label="实时团队星图"]').text()).toContain('2 个子 Agent · 2 个执行中')
       expect(area.scrollTop).toBe(100)
     } finally {
       wrapper.unmount()

@@ -465,8 +465,10 @@ def test_live_tool_metadata_survives_public_filter_without_unregistered_page_inj
 @pytest.mark.asyncio
 @pytest.mark.parametrize("surface", ["user", "admin"])
 @pytest.mark.parametrize("terminal_status", ["completed", "cancelled", "failed"])
-async def test_pending_run_creation_window_uses_real_checkpoint_id_and_keeps_owner_binding(db, owner, surface, terminal_status):
-    """客户端 run/created 早于 create 提交；404 不应通过伪造 run 或放宽归属修复。"""
+async def test_pending_run_creation_window_uses_real_checkpoint_id_and_keeps_owner_binding(
+    db, owner, surface, terminal_status, monkeypatch
+):
+    """客户端先收到 response.created；pending 只读探测等待真实检查点提交并继续校验归属。"""
     from app.models.agent_mesh import AgentMeshConversation
     from app.services.agent_responses_service import DatabaseCheckpointStore
     from app.services.deepseek_responses_runtime import RunCheckpoint
@@ -515,21 +517,38 @@ async def test_pending_run_creation_window_uses_real_checkpoint_id_and_keeps_own
         confirmation = await client.get("/api/agent-responses/session", params=params, headers=headers)
         assert confirmation.status_code == 200
         assert confirmation.json()["data"]["run"] is None
-        # 首次恢复探测发生在真正的运行创建之前；不生成占位检查点或页面动作。
-        missing = await client.get("/api/agent-browser/pending", params=params, headers=headers)
-        assert missing.status_code == 404
-        assert missing.json()["code"] == 40400
-        assert missing.json()["message"] == "页面操作运行不存在"
-        assert db.query(AgentResponseRun).filter_by(run_id=run_id).count() == 0
+        # 模拟执行任务在 pending 第一次读取后才提交检查点，复现 response.created 与持久化之间的窗口。
+        retry_calls = 0
+
+        def commit_checkpoint_on_retry(_delay):
+            nonlocal retry_calls
+            retry_calls += 1
+            assert retry_calls == 1
+            assert asyncio.run(store.create(checkpoint)) is True
+
+        with monkeypatch.context() as patcher:
+            patcher.setattr(service, "RUN_CREATION_RETRY_SECONDS", 0.05)
+            patcher.setattr(service, "RUN_CREATION_POLL_SECONDS", 0.001)
+            patcher.setattr(service, "sleep", commit_checkpoint_on_retry)
+            available = await client.get("/api/agent-browser/pending", params=params, headers=headers)
+        assert available.status_code == 200 and available.json()["data"] == {"actions": []}
+        assert retry_calls == 1
+        assert db.query(AgentResponseRun).filter_by(run_id=run_id).count() == 1
         assert db.query(AgentBrowserAction).count() == 0
-        assert await store.create(checkpoint) is True
         restored = await store.load(run_id)
         assert restored.run_id == run_id
         assert restored.last_response["id"] == "resp_upstream_response"
         confirmed = (await client.get("/api/agent-responses/session", params=params, headers=headers)).json()["data"]
         assert (confirmed["surface"], confirmed["session_id"], confirmed["run"]["run_id"]) == (surface, session_key, run_id)
-        available = await client.get("/api/agent-browser/pending", params=params, headers=headers)
-        assert available.status_code == 200 and available.json()["data"] == {"actions": []}
+        unknown = await client.get(
+            "/api/agent-browser/pending",
+            params={**params, "run_id": "run_never_created"},
+            headers=headers,
+        )
+        assert unknown.status_code == 404
+        assert unknown.json()["message"] == "页面操作运行不存在"
+        assert db.query(AgentResponseRun).filter_by(run_id="run_never_created").count() == 0
+        assert db.query(AgentBrowserAction).count() == 0
         for invalid in [
             {**params, "run_id": "resp_upstream_response"},
             {**params, "session_id": "other-session"},

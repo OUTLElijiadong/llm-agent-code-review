@@ -10,6 +10,7 @@ import json
 import re
 import secrets
 from datetime import datetime, timedelta, timezone
+from time import monotonic, sleep
 from typing import Any, Mapping
 from urllib.parse import parse_qs, urlsplit
 
@@ -26,6 +27,8 @@ from app.services import agent_supervisor_service, rbac_service
 ACTION_TTL_SECONDS = 120
 SNAPSHOT_TTL_SECONDS = 120
 POLL_SECONDS = 0.2
+RUN_CREATION_RETRY_SECONDS = 3.0
+RUN_CREATION_POLL_SECONDS = 0.1
 _ACTIVE = frozenset({"running", "approving", "answering"})
 _MUTATIONS = frozenset({"click", "fill", "select", "check"})
 _SENSITIVE = re.compile(
@@ -179,6 +182,30 @@ def _owner_run(
     if run.status not in _ACTIVE or response_run_stop_requested(run):
         raise ConflictError("小菱运行已停止，不能继续页面操作")
     return run
+
+
+def _pending_owner_run(db: Session, user: User, *, run_id: str, session_key: str, surface: str) -> AgentResponseRun:
+    """SSE may expose a run ID before its checkpoint commit; retry the read with a fresh transaction."""
+    deadline = monotonic() + RUN_CREATION_RETRY_SECONDS
+    expected_token_version = int(user.token_version or 0)
+    while True:
+        try:
+            return _owner_run(
+                db,
+                user,
+                run_id=run_id,
+                session_key=session_key,
+                surface=surface,
+                expected_token_version=expected_token_version,
+            )
+        except NotFoundError:
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                raise
+            # MySQL REPEATABLE READ would otherwise keep the first miss's snapshot
+            # for every retry and never observe the checkpoint commit.
+            db.rollback()
+            sleep(min(RUN_CREATION_POLL_SECONDS, remaining))
 
 
 def _lock_team_parent_runs(db: Session, user: User, binding: Mapping[str, Any] | None) -> None:
@@ -520,7 +547,7 @@ async def request_action(
 
 
 def pending_actions(db: Session, user: User, *, run_id: str, session_key: str, surface: str) -> dict[str, Any]:
-    _owner_run(db, user, run_id=run_id, session_key=session_key, surface=surface)
+    _pending_owner_run(db, user, run_id=run_id, session_key=session_key, surface=surface)
     rows = (
         db.query(AgentBrowserAction)
         .filter_by(user_id=user.id, run_id=run_id, session_key=session_key, surface=surface)

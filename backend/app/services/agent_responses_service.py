@@ -3729,6 +3729,7 @@ class AgentResponsesService:
         event_sink: Optional[EventSink] = None,
         server_history_transcript: Optional[Sequence[Mapping[str, Any]]] = None,
         trusted_terminal_team_snapshot: Optional[Mapping[str, Any]] = None,
+        on_created: Optional[Callable[[], Awaitable[None]]] = None,
     ) -> RuntimeResult:
         if self._db.query(AgentResponseRun).filter(AgentResponseRun.run_id == run_id).first() is not None:
             raise InvalidRunStateError("运行标识已存在，请恢复原任务或使用新的运行标识")
@@ -3833,6 +3834,7 @@ class AgentResponsesService:
             tools=tools,
             run_id=run_id,
             context_metadata=context_metadata,
+            on_created=on_created,
         )
         await self._emit_validated_output(event_sink, result)
         return result

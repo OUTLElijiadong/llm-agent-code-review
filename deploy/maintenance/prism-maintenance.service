@@ -1,0 +1,21 @@
+[Unit]
+Description=Prism bounded maintenance cleanup
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/opt/code-review
+ExecStart=/opt/code-review/deploy/maintenance/cleanup.sh --apply
+TimeoutStartSec=30min
+Nice=10
+IOSchedulingClass=idle
+UMask=0027
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=false
+StandardOutput=journal
+StandardError=journal

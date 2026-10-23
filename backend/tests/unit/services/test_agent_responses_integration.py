@@ -3723,7 +3723,8 @@ async def test_api_stream_filters_empty_deltas_and_emits_one_final_event(monkeyp
         def __init__(self, *_args, **_kwargs) -> None:
             pass
 
-        async def start(self, _messages, *, run_id: str, event_sink) -> RuntimeResult:
+        async def start(self, _messages, *, run_id: str, event_sink, on_created) -> RuntimeResult:
+            await on_created()
             await event_sink({"type": "response.output_text.delta", "delta": ""})
             await event_sink({"type": "response.output_text.delta", "delta": "第一行\n第二行"})
             await event_sink({"type": "response.completed", "response": {"id": "upstream"}})
@@ -3760,7 +3761,8 @@ async def test_api_stream_never_exposes_reasoning_or_raw_function_arguments(monk
         def __init__(self, *_args, **_kwargs) -> None:
             pass
 
-        async def start(self, _messages, *, run_id: str, event_sink) -> RuntimeResult:
+        async def start(self, _messages, *, run_id: str, event_sink, on_created) -> RuntimeResult:
+            await on_created()
             await event_sink({"type": "response.reasoning_text.delta", "delta": "reasoning-marker"})
             await event_sink(
                 {
@@ -3853,7 +3855,8 @@ async def test_api_stream_translates_runtime_approval_event_for_frontend(monkeyp
         def __init__(self, *_args, **_kwargs) -> None:
             pass
 
-        async def start(self, _messages, *, run_id: str, event_sink) -> RuntimeResult:
+        async def start(self, _messages, *, run_id: str, event_sink, on_created) -> RuntimeResult:
+            await on_created()
             return RuntimeResult(
                 run_id=run_id,
                 status="waiting_approval",
@@ -3902,8 +3905,9 @@ async def test_client_disconnect_does_not_cancel_started_agent_run(monkeypatch) 
         def __init__(self, *_args, **_kwargs) -> None:
             pass
 
-        async def start(self, _messages, *, run_id: str, event_sink) -> RuntimeResult:
+        async def start(self, _messages, *, run_id: str, event_sink, on_created) -> RuntimeResult:
             nonlocal cancelled
+            await on_created()
             started.set()
             try:
                 await asyncio.sleep(0.03)
@@ -3948,7 +3952,8 @@ async def test_client_disconnect_discards_burst_events_without_blocking_worker(m
         def __init__(self, *_args, **_kwargs) -> None:
             pass
 
-        async def start(self, _messages, *, run_id: str, event_sink) -> RuntimeResult:
+        async def start(self, _messages, *, run_id: str, event_sink, on_created) -> RuntimeResult:
+            await on_created()
             started.set()
             try:
                 await asyncio.sleep(0.03)

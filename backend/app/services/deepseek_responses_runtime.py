@@ -496,8 +496,9 @@ class DeepSeekResponsesRuntime:
         tools: Optional[Sequence[Mapping[str, Any]]] = None,
         run_id: Optional[str] = None,
         context_metadata: Optional[Mapping[str, Any]] = None,
+        on_created: Optional[Callable[[], Awaitable[None]]] = None,
     ) -> RuntimeResult:
-        """启动新运行并持续执行，直到完成、暂停或达到轮数上限。"""
+        """先持久化运行，再通知订阅方并执行模型与工具。"""
         actual_run_id = run_id or f"run_{uuid.uuid4().hex}"
         lock = self._locks.setdefault(actual_run_id, asyncio.Lock())
         async with lock:
@@ -513,6 +514,8 @@ class DeepSeekResponsesRuntime:
                 raise InvalidRunStateError(
                     f"运行 {actual_run_id} 无法创建：标识已存在或当前会话仍有待处理运行"
                 )
+            if on_created is not None:
+                await on_created()
             return await self._drive(checkpoint)
 
     async def approve(

@@ -83,19 +83,31 @@ def list_discussions(
     """当前账号的圆桌按运行中优先、更新时间倒序分页。"""
     bus = _bus_for_db(db)
     purge_stale_pending()
-    active_first = case((RoundtableSession.status.in_(["active", "paused"]), 0), else_=1)
-    rows = db.query(RoundtableSession).filter(
+    active_first = case((RoundtableSession.status.in_(("active", "paused")), 0), else_=1)
+    ordered_ids = db.query(RoundtableSession.session_id).filter(
         RoundtableSession.owner_user_id == int(user.id),
     ).order_by(
         active_first, RoundtableSession.updated_at.desc(), RoundtableSession.session_id.desc(),
     ).offset(offset).limit(limit + 1).all()
-    for row in rows[:limit]:
+    page_ids = [session_id for (session_id,) in ordered_ids[:limit]]
+    has_more = len(ordered_ids) > limit
+    if page_ids:
+        loaded_rows = db.query(RoundtableSession).filter(
+            RoundtableSession.owner_user_id == int(user.id),
+            RoundtableSession.session_id.in_(page_ids),
+        ).all()
+        rows_by_id = {row.session_id: row for row in loaded_rows}
+        rows = [rows_by_id[session_id] for session_id in page_ids if session_id in rows_by_id]
+    else:
+        rows = []
+
+    for row in rows:
         if row.status in {"active", "paused"}:
             bus.get_session(row.session_id, owner_user_id=int(user.id))
             db.refresh(row)
     return Resp(data={
-        "items": [_session_data(db, row) for row in rows[:limit]],
-        "next_offset": offset + limit if len(rows) > limit else None,
+        "items": [_session_data(db, row) for row in rows],
+        "next_offset": offset + limit if has_more else None,
     })
 
 

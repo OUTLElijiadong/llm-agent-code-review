@@ -331,3 +331,20 @@ describe('账号与入口绑定本地消息和草稿', () => {
     expect(window.localStorage.getItem('prism-agent-sessions:user:account:202:account:202')).toContain('b-history')
   })
 })
+
+describe('小菱结论来源', () => {
+  it('读写快照时过滤旧版成员拼接答复并保留小菱真实总结', () => {
+    const snapshot = {
+      messages: [
+        { role: 'assistant' as const, content: '成员旧结论', teamFallback: true },
+        { role: 'assistant' as const, content: '旧版终态结论', autoResultKey: 'team-terminal:receipt-1' },
+        { role: 'assistant' as const, content: '小菱最终总结' },
+      ],
+      runStatus: 'failed', updatedAt: 1,
+    }
+    window.localStorage.setItem('prism-agent-session-snapshot:legacy', JSON.stringify(snapshot))
+    expect(loadAgentChatSnapshot('legacy')?.messages.map(message => message.content)).toEqual(['小菱最终总结'])
+    saveAgentChatSnapshot('current', snapshot)
+    expect(loadAgentChatSnapshot('current')?.messages.map(message => message.content)).toEqual(['小菱最终总结'])
+  })
+})
