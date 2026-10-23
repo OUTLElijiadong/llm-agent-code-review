@@ -5104,6 +5104,16 @@ def _team_terminal_assertions(text: str) -> list[tuple[Optional[int], str, bool]
     negation = re.compile(
         r"(?:不能|不要|不得|禁止|并未|没有|未|不会|不是|不|\bnot\b|\bnever\b)[^，,。；;\n]{0,24}$", re.I,
     )
+    # 数量统计描述节点分布，零值和非零值都不能替代服务端团队终态。
+    count_before = re.compile(r"(?<![\w])([0-9]+|[零一二三四五六七八九十百两]+)\s*(?:个|项)?\s*$")
+    # 后置数字必须结束统计项，不能吞掉“已完成：3 个节点全部通过”中的团队状态。
+    count_after = re.compile(
+        r"\s*(?:(?:(?:子任务|任务|节点)?数(?:量)?\s*(?:[:：=]|为)?)|[:：=])\s*"
+        r"(?:[0-9]+|[零一二三四五六七八九十百两]+)(?=\s*(?:$|[、，,。；;）)\]】.!?！？]))",
+    )
+    count_ending = re.compile(
+        r"\s*(?:(?:个|项|子任务|任务|节点|tasks?|checks?)\s*)?(?:$|[、，,。；;）)\]】.!?！？])", re.I,
+    )
     assertions: list[tuple[Optional[int], str, bool]] = []
     subject = ""
     subject_team_ids: list[int] = []
@@ -5134,7 +5144,13 @@ def _team_terminal_assertions(text: str) -> list[tuple[Optional[int], str, bool]
                 r"(?:子任务|步骤|检查项)|\s+(?:[0-9]+\s+)?(?:steps?|tests?|subtasks?|checks?)\b",
                 suffix, re.I,
             )
-            if subject != "local" and not local_result:
+            quantity = count_before.search(prefix)
+            # “team 405 completed”里的 405 是身份，不是 completed 数量。
+            counted = bool(quantity and count_ending.match(suffix) and not any(
+                identifier.start() <= quantity.start(1) < identifier.end()
+                for identifier in _TEAM_ID_PATTERN.finditer(prefix)
+            )) or bool(count_after.match(suffix))
+            if subject != "local" and not local_result and not counted:
                 predicate_start = max(previous_end, teams[-1].end()) if teams else previous_end
                 denied = bool(negation.search(prefix[predicate_start:]))
                 if teams:

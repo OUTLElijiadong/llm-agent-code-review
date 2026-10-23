@@ -1484,3 +1484,79 @@ async def test_approved_business_capability_preserves_bound_execution_consent(db
     from app.services import agent_supervisor_service
     review = agent_supervisor_service.review_agent_team_plan(payload.model_dump(mode="json"))
     assert kwargs == {"supervisor_plan_sha256": review["plan_sha256"], "supervisor_confirmed_by": user_id}
+
+
+@pytest.mark.parametrize("text", [
+    "团队 405 已实际完成为终态（3/3 任务 completed，0 失败、0 阻塞），但结论有边界，需要说清楚。",
+    "团队 405 已完成，0 失败、0 阻塞。",
+    "团队 405 已完成，失败：0、阻塞：0。",
+    "团队 405 已完成，失败任务数为0、阻塞数为0。",
+    "team 405 completed (0 failed, 0 blocked).",
+])
+def test_completed_team_accepts_zero_failure_statistics(text):
+    checkpoint = _team_checkpoint([], context_metadata={
+        "trusted_terminal_team_snapshot": {"team_id": 405, "status": "completed"},
+    })
+
+    assert service.AgentResponsesService._validate_xiaoling_completion(checkpoint, text) is None
+    assert checkpoint.context_metadata[service.COMPLETION_GUARD_FORCED_OUTPUT_KEY].startswith("团队 405 已完成。")
+
+
+@pytest.mark.parametrize("text", [
+    "团队 405 已实际完成为终态（3/3 任务 completed，0 失败、0 阻塞），但结论有边界，需要说清楚。",
+    "项目管理页面（/projects）的只读验收已完成：团队 3 个节点全部完成，0 失败、0 阻塞。",
+])
+def test_production_terminal_count_text_has_no_failure_assertion(text):
+    assertions = service._team_terminal_assertions(text)
+
+    assert assertions
+    assert all(claimed == "completed" and not denied for _, claimed, denied in assertions)
+
+
+@pytest.mark.parametrize("statistics", [
+    "0 完成、0 失败、0 阻塞",
+    "3 completed、1 failed、2 blocked",
+    "完成数：3、失败任务数为1、阻塞数为2",
+])
+@pytest.mark.parametrize("status", ["completed", "failed", "blocked"])
+def test_terminal_counts_do_not_claim_team_failure_or_completion(statistics, status):
+    text = f"团队 405 统计：{statistics}。"
+    checkpoint = _team_checkpoint([], context_metadata={
+        "trusted_terminal_team_snapshot": {"team_id": 405, "status": status},
+    })
+
+    assert service._team_terminal_assertions(text) == []
+    assert service.AgentResponsesService._validate_xiaoling_completion(checkpoint, text) is None
+    label = {"completed": "已完成", "failed": "执行失败", "blocked": "已阻塞"}[status]
+    assert checkpoint.context_metadata[service.COMPLETION_GUARD_FORCED_OUTPUT_KEY].startswith(f"团队 405 {label}。")
+
+
+@pytest.mark.parametrize(("status", "text"), [
+    ("failed", "团队 405 已完成：3 个节点全部通过。"),
+    ("completed", "团队 405 执行失败：1 个节点异常。"),
+])
+def test_terminal_colon_count_keeps_explicit_state_guard(status, text):
+    checkpoint = _team_checkpoint([], context_metadata={
+        "trusted_terminal_team_snapshot": {"team_id": 405, "status": status},
+    })
+
+    assert service.AgentResponsesService._validate_xiaoling_completion(checkpoint, text) is not None
+    assert service.COMPLETION_GUARD_FORCED_OUTPUT_KEY not in checkpoint.context_metadata
+
+
+@pytest.mark.parametrize(("status", "text"), [
+    ("completed", "团队 405 执行失败。"),
+    ("completed", "团队 405 统计：0 失败、0 阻塞，但团队 405 执行失败。"),
+    ("completed", "团队 405 统计：1 失败、2 阻塞，但团队 405 执行失败。"),
+    ("completed", "团队 405 统计：0 失败、0 阻塞，但当前状态是阻塞。"),
+    ("failed", "团队 405 已完成。"),
+    ("failed", "团队 405 completed。"),
+    ("failed", "团队 405 统计：0 失败、0 阻塞，但团队 405 已完成。"),
+    ("failed", "团队 405 统计：3 completed、1 failed，但当前状态是已完成。"),
+])
+def test_terminal_count_summary_keeps_explicit_state_guard(status, text):
+    checkpoint = _team_checkpoint([], context_metadata={
+        "trusted_terminal_team_snapshot": {"team_id": 405, "status": status},
+    })
+
+    assert service.AgentResponsesService._validate_xiaoling_completion(checkpoint, text) is not None
