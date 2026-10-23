@@ -78,3 +78,19 @@ def test_failed_policy_batch_boundary_and_disabled_policy(db, monkeypatch):
     assert failed.status == cancelled.status == "deleted"
     monkeypatch.setattr(service.settings, "report_failed_retention_days", 0)
     assert service.sweep_expired_reports(db, now=NOW)["candidates"] == 0
+
+
+def test_team_linked_and_interrupted_roundtable_inputs_are_retained(db):
+    team_linked = _task(db, status="failed", days=60)
+    team_linked.agent_team_id = 123
+    task_linked = _task(db, status="failed", days=60)
+    task_linked.agent_team_task_id = 456
+    interrupted = _task(db, status="failed", days=60)
+    interrupted.coverage = {"stage": "interrupted"}
+    concluded = _task(db, status="failed", days=60, kind="discuss")
+    db.add(RoundtableSession(session_id="recoverable", owner_user_id=1, task_id=concluded.id,
+                            status="concluded", file_name="main.py", agents=[], progress={"phase": "interrupted"},
+                            created_at=NOW-timedelta(days=60), updated_at=NOW-timedelta(days=60)))
+    db.commit()
+    assert service.sweep_expired_reports(db, now=NOW)["purged"] == 0
+    assert db.query(ReviewReport).count() == 4

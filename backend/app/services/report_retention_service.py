@@ -55,7 +55,10 @@ def sweep_expired_reports(
         if cutoff is not None:
             protected = db.query(RoundtableSession.session_id).filter(
                 or_(RoundtableSession.task_id == ReviewTask.id, RoundtableSession.report_task_id == ReviewTask.id),
-                or_(RoundtableSession.status.notin_(_SESSION_TERMINAL), RoundtableSession.updated_at >= cutoff),
+                or_(
+                    RoundtableSession.status.notin_(_SESSION_TERMINAL), RoundtableSession.updated_at >= cutoff,
+                    RoundtableSession.progress["phase"].as_string() == "interrupted",
+                ),
             ).exists()
             policies.append(and_(
                 ReviewTask.status.in_(statuses), ended < cutoff, ReviewTask.update_time < cutoff, ~protected,
@@ -69,6 +72,8 @@ def sweep_expired_reports(
     ).exists()
     ids = [row[0] for row in db.query(ReviewTask.id).filter(
         ReviewTask.review_type.in_(_REVIEW_TYPES), or_(*policies), ~parent_exists,
+        ReviewTask.agent_team_id.is_(None), ReviewTask.agent_team_task_id.is_(None),
+        func.coalesce(ReviewTask.coverage["stage"].as_string(), "") != "interrupted",
     ).order_by(ended.asc(), ReviewTask.id.asc()).limit(settings.report_retention_batch_size).all()]
     result["candidates"] = len(ids)
     for task_id in ids:
@@ -86,6 +91,7 @@ def sweep_expired_reports(
             ended_at = (task.end_time or task.update_time or task.create_time) if task is not None else None
             protected_session = any(
                 row.status not in _SESSION_TERMINAL
+                or (row.progress or {}).get("phase") == "interrupted"
                 or _naive_utc(row.updated_at) >= cutoff
                 for row in sessions
             ) if cutoff is not None else True
@@ -94,6 +100,8 @@ def sweep_expired_reports(
                 or _naive_utc(ended_at) >= cutoff
                 or _naive_utc(task.update_time) >= cutoff
                 or task.review_type not in _REVIEW_TYPES or protected_session
+                or task.agent_team_id is not None or task.agent_team_task_id is not None
+                or (task.coverage or {}).get("stage") == "interrupted"
                 or db.query(PentestEngagement.id).filter_by(report_task_id=task_id).first() is not None
             ):
                 result["skipped"] += 1
