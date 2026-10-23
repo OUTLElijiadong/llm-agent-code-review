@@ -12,6 +12,7 @@ from __future__ import annotations
 import threading
 import time
 from datetime import datetime, timedelta, timezone
+from weakref import WeakValueDictionary
 
 from sqlalchemy import false as sa_false
 from sqlalchemy import func, or_, select
@@ -41,7 +42,7 @@ from app.services.report_service import (
 # TTL 内共享统计，同 key 并发请求只允许一个线程计算。
 _CACHE_LIMIT = 256
 _cache_lock = threading.Lock()
-_key_locks: dict[tuple, threading.Lock] = {}
+_key_locks: WeakValueDictionary = WeakValueDictionary()
 _stats_cache: dict[tuple, tuple[float, object]] = {}
 
 
@@ -69,8 +70,18 @@ def _cached_compute(store: dict, key: tuple, compute):
             if len(store) > _CACHE_LIMIT:
                 for stale in sorted(store.items(), key=lambda kv: kv[1][0])[: len(store) - _CACHE_LIMIT]:
                     store.pop(stale[0], None)
-                    _key_locks.pop(stale[0], None)
         return value
+
+
+def purge_expired_stats_cache() -> int:
+    """主动回收已过期聚合结果，避免无人再次访问时一直驻留内存。"""
+    now, ttl = time.monotonic(), _cache_ttl()
+    with _cache_lock:
+        expired = [key for key, (created, _) in _stats_cache.items() if now - created >= ttl]
+        for key in expired:
+            _stats_cache.pop(key, None)
+        # 弱引用锁在最后一个计算者/等待者退出后自动回收，避免锁表随历史 key 增长。
+    return len(expired)
 
 
 def invalidate_dashboard_stats(user_id: int | None = None) -> None:

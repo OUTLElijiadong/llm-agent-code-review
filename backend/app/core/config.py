@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     openapi_enabled: bool = True
     app_release: str = "dev"
-    app_version: str = "4.1.24"
+    app_version: str = "4.1.25"
     # 小菱每日模型 Token 提醒阈值；仅告警，不阻断交互会话。0 表示关闭。
     assistant_daily_token_alert_threshold: int = Field(default=5_000_000, ge=0, le=100_000_000)
     # 注册验证码开关:生产默认开(dev/test 可关以便自动化测试)
@@ -160,6 +160,10 @@ class Settings(BaseSettings):
     pentest_line_timeout: int = Field(default=420, ge=60, le=3600)
     # 渗透委托留存期(天): 终态委托超期由后台任务自动清理(含发现/报告), 0=关闭
     pentest_retention_days: int = Field(default=90, ge=0, le=3650)
+    # 普通审查和圆桌报告留存；0 关闭相应策略，派生报告沿用父业务生命周期。
+    report_success_retention_days: int = Field(default=30, ge=0, le=3650)
+    report_failed_retention_days: int = Field(default=7, ge=0, le=3650)
+    report_retention_batch_size: int = Field(default=25, ge=1, le=100)
     agent_knowledge_fetch_timeout: int = 15
     agent_knowledge_fetch_max_bytes: int = 1024 * 1024
     agent_knowledge_allow_private_urls: bool = False

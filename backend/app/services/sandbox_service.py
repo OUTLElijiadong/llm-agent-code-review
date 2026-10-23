@@ -152,6 +152,7 @@ _RESOURCE_POLICY_COMMON = {
 
 _AGENT_TEST_CACHE: dict[tuple[str, str, str], tuple[float, list[dict[str, str]]]] = {}
 _AGENT_TEST_CACHE_LOCK = threading.Lock()
+_AGENT_TEST_CACHE_LIMIT = 128
 
 
 def _utcnow() -> datetime:
@@ -3981,11 +3982,25 @@ def _get_cached_agent_test_files(key: tuple[str, str, str]) -> list[dict[str, st
         return [dict(item) for item in files]
 
 
+def purge_expired_test_cache() -> int:
+    """主动释放过期测试文件缓存；正在使用的文件已由调用方持有副本。"""
+    now = time.monotonic()
+    with _AGENT_TEST_CACHE_LOCK:
+        expired = [key for key, (deadline, _) in _AGENT_TEST_CACHE.items() if deadline <= now]
+        for key in expired:
+            _AGENT_TEST_CACHE.pop(key, None)
+    return len(expired)
+
+
 def _store_agent_test_files(key: tuple[str, str, str], files: list[dict[str, str]]) -> list[dict[str, str]]:
     ttl = int(getattr(settings, "sandbox_agent_test_cache_seconds", 3600) or 3600)
     cached_files = [dict(item) for item in files]
+    purge_expired_test_cache()
     with _AGENT_TEST_CACHE_LOCK:
         _AGENT_TEST_CACHE[key] = (time.monotonic() + ttl, cached_files)
+        while len(_AGENT_TEST_CACHE) > _AGENT_TEST_CACHE_LIMIT:
+            oldest = min(_AGENT_TEST_CACHE, key=lambda entry: _AGENT_TEST_CACHE[entry][0])
+            _AGENT_TEST_CACHE.pop(oldest, None)
     return [dict(item) for item in cached_files]
 
 

@@ -223,6 +223,17 @@ async def lifespan(app: FastAPI):
     )
 
     start_pentest_retention_sweeper()
+    from app.services.report_retention_service import (
+        start_report_retention_sweeper,
+        stop_report_retention_sweeper,
+    )
+    from app.services.runtime_cache_service import (
+        start_runtime_cache_sweeper,
+        stop_runtime_cache_sweeper,
+    )
+
+    start_report_retention_sweeper()
+    start_runtime_cache_sweeper()
     from app.services.background_task_recovery import (
         start_agent_run_recovery,
         start_terminal_receipt_recovery_scheduler,
@@ -262,6 +273,8 @@ async def lifespan(app: FastAPI):
         stop_agent_governance_scheduler()
         stop_jarvis_patrol()
         stop_project_import_dispatcher()
+        await stop_runtime_cache_sweeper()
+        stop_report_retention_sweeper()
         stop_pentest_retention_sweeper()
         stop_terminal_receipt_recovery_scheduler()
 

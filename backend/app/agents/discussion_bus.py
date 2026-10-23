@@ -489,7 +489,11 @@ class DiscussionBus:
                     q.needs_resync = True
         self._purge_expired()
 
-    def _purge_expired(self):
+    def purge_expired_sessions(self) -> int:
+        """由应用主事件循环定时调用；持久账本与活跃订阅保留。"""
+        return self._purge_expired()
+
+    def _purge_expired(self) -> int:
         """清理已结束且超过保留期、当前无订阅者的会话。"""
         now = time.time()
         expired = [
@@ -506,6 +510,7 @@ class DiscussionBus:
             self._control_callbacks.pop(sid, None)
             self._discussion_tasks.pop(sid, None)
             logger.debug(f"[DiscussBus] 过期会话已清理 session={sid}")
+        return len(expired)
 
     def _insert_session(self, session: DiscussionSession) -> None:
         """先持久化归属与可重开元数据，成功后才向调用方返回会话。"""
