@@ -130,6 +130,10 @@ class InvalidRunStateError(RuntimeError):
     """当前运行状态不允许所请求的恢复动作。"""
 
 
+class ResponseSessionBusyError(InvalidRunStateError):
+    """会话已有运行；自动投递应等待，不消耗失败重试预算。"""
+
+
 class IncompleteResponseStreamError(RuntimeError):
     """Responses 事件流在明确终止帧之前意外结束。"""
 

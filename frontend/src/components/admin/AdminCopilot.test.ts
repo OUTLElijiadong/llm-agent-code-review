@@ -23,7 +23,8 @@ const teamApi = vi.hoisted(() => ({ list: vi.fn(), detail: vi.fn(), messages: vi
 const mountedCopilots = new Set<VueWrapper>()
 
 vi.mock('@/utils/responsesStream', () => ({ streamResponses: streams.start }))
-vi.mock('@/api/agentResponses', () => ({
+vi.mock('@/api/agentResponses', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/api/agentResponses')>(),
   getAgentResponseSession: sessionApi.get,
   getAgentResponseSessionMessages: sessionApi.page,
   cancelAgentResponseRun: sessionApi.cancel,
@@ -2557,4 +2558,109 @@ it.each(['pending', 'claim'] as const)('停止真实接线：%s 迟到及停止�
     wrapper.unmount()
     vi.useRealTimers()
   }
+})
+
+
+describe('Mesh response.deferred 延期合同', () => {
+  function receipt(sessionId: string) {
+    return {
+      schema_version: '1.0', message_id: 'terminal-deferred', idempotency_key: 'terminal-deferred',
+      trace_id: 'trace-deferred', correlation_id: 'team:399', causation_id: '',
+      sent_from: 'system:agent_team', send_to: `session:admin:${sessionId}`,
+      message_type: 'task.result', priority: 'normal', subject: '团队任务完成', status: 'delivered',
+      payload: { team_id: 399 }, context: { team_id: 399, team_terminal: true, session_delivery: true },
+      artifacts: [], errors: [], requires_ack: true, max_attempts: 1, attempt_count: 0,
+      expires_at: '', create_time: '', update_time: '',
+    }
+  }
+
+  it.each([
+    { previousStatus: 'running', created: true },
+    { previousStatus: null, created: true },
+    { previousStatus: 'completed', created: false },
+    { previousStatus: 'cancelled', created: true },
+  ])('前台延期不消费回执、恢复原运行且允许同消息重投：%j', async ({ previousStatus, created }) => {
+    const wrapper = mountCopilot()
+    await openCopilot(wrapper)
+    await flushSessionRestore()
+    vi.useFakeTimers()
+    const vm = wrapper.vm as any
+    const originalRun = previousStatus ? {
+      run_id: 'original-parent', status: previousStatus, model: 'deepseek-v4-pro',
+      rounds: 2, error: '', updated_at: '2026-10-23T00:00:00Z',
+    } : null
+    vm.sessionRun = originalRun
+    if (previousStatus === 'cancelled') vm.cancelledResponseRunIds.add('original-parent')
+    const activity = useAgentActivityStore()
+    activity.begin('原页面操作仍在执行', 'deferred-existing-action')
+    messages.error.mockClear()
+    teamApi.detail.mockClear()
+    const message = receipt(vm.sessionId)
+    try {
+      const pending = vm.handleMeshMessage(message, vm.sessionId)
+      await flushPromises()
+      expect(streams.records).toHaveLength(1)
+      if (created) emit(0, { type: 'response.created', response: { id: 'never-started-mesh-run', model: 'deepseek-v4-pro' } })
+      emit(0, { type: 'response.deferred', message_id: message.message_id, reason: 'session_busy', retry_after_seconds: 5 })
+      await finish(0)
+      expect(await pending).toBe(false)
+      expect(vm.sessionRun).toEqual(originalRun)
+      expect(vm.unconfirmedStart).toBeNull()
+      expect(vm.messages.some((item: any) => item.role === 'error' || item.errorCard || item.teamFallback)).toBe(false)
+      expect(vm.messages.flatMap((item: any) => item.toolCalls ?? []).some((call: any) => call.status === 'failed')).toBe(false)
+      expect(messages.error).not.toHaveBeenCalled()
+      expect(teamApi.detail).not.toHaveBeenCalled()
+      expect(meshApi.acknowledge).not.toHaveBeenCalled()
+      expect(activity.active.has('deferred-existing-action')).toBe(true)
+      const snapshot = loadAgentChatSnapshot(vm.sessionId, vm.chatStorageKey)
+      expect(JSON.stringify(snapshot)).not.toContain('never-started-mesh-run')
+
+      const retry = vm.handleMeshMessage(message, vm.sessionId)
+      await flushPromises()
+      expect(streams.records).toHaveLength(2)
+      emit(1, { type: 'response.created', response: { id: 'real-mesh-run', model: 'deepseek-v4-pro' } })
+      emit(1, { type: 'response.completed', response: { id: 'real-mesh-run' } })
+      await finish(1)
+      expect(await retry).toBe(true)
+      expect(vm.sessionRun.run_id).toBe('real-mesh-run')
+      expect(vm.sessionRun.status).toBe('completed')
+      if (previousStatus === 'cancelled') expect(vm.isResponseRunResumeBlocked('original-parent')).toBe(true)
+    } finally { wrapper.unmount() }
+  })
+
+  it('后台延期不展示终态兜底、不确认回执、不改变当前会话且允许重投', async () => {
+    const wrapper = mountCopilot()
+    await openCopilot(wrapper)
+    await flushSessionRestore()
+    vi.useFakeTimers()
+    const vm = wrapper.vm as any
+    const originalRun = { run_id: 'foreground-parent', status: 'running', model: 'deepseek-v4-pro', rounds: 1, error: '', updated_at: '' }
+    vm.sessionRun = originalRun
+    const currentSessionId = vm.sessionId
+    const beforeMessages = JSON.stringify(vm.messages)
+    messages.error.mockClear()
+    teamApi.detail.mockClear()
+    const message = receipt('background-history')
+    try {
+      const pending = vm.handleMeshMessage(message, 'background-history')
+      await flushPromises()
+      emit(0, { type: 'response.created', response: { id: 'never-started-background' } })
+      emit(0, { type: 'response.deferred', message_id: message.message_id, reason: 'session_busy', retry_after_seconds: 5 })
+      await finish(0)
+      expect(await pending).toBe(false)
+      expect(teamApi.detail).not.toHaveBeenCalled()
+      expect(meshApi.acknowledge).not.toHaveBeenCalled()
+      expect(messages.error).not.toHaveBeenCalled()
+      expect(vm.sessionId).toBe(currentSessionId)
+      expect(vm.sessionRun).toEqual(originalRun)
+      expect(JSON.stringify(vm.messages)).toBe(beforeMessages)
+      expect(loadAgentChatSnapshot('background-history', vm.chatStorageKey)).toBeNull()
+      const retry = vm.handleMeshMessage(message, 'background-history')
+      await flushPromises()
+      expect(streams.records).toHaveLength(2)
+      emit(1, { type: 'response.completed', response: { id: 'real-background-run' } })
+      await finish(1)
+      expect(await retry).toBe(true)
+    } finally { wrapper.unmount() }
+  })
 })

@@ -8,6 +8,15 @@ import type {
 } from '@/types/responses'
 import type { AgentMeshMessage } from '@/api/agentMesh'
 
+/** Mesh 启动暂忙只表示延期，必须保留同消息的后续投递机会。 */
+export function isAgentMeshResponseDeferred(event: unknown, messageId: unknown): boolean {
+  if (!event || typeof event !== 'object' || typeof messageId !== 'string' || !messageId) return false
+  const value = event as Record<string, unknown>
+  return value.type === 'response.deferred'
+    && value.message_id === messageId
+    && value.reason === 'session_busy'
+}
+
 export interface AgentResponseImageAsset {
   id: number
   mime: string

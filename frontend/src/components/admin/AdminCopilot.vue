@@ -19,7 +19,7 @@ import { useAgentActivityStore } from '@/stores/agentActivity'
 import {
   type AdminCopilotMessage,
 } from '@/api/adminCopilot'
-import { cancelAgentResponseRun, getAgentResponseSession, getAgentResponseSessionMessages, type AgentResponseSession, type AgentResponseImageAsset } from '@/api/agentResponses'
+import { isAgentMeshResponseDeferred, cancelAgentResponseRun, getAgentResponseSession, getAgentResponseSessionMessages, type AgentResponseSession, type AgentResponseImageAsset } from '@/api/agentResponses'
 import { AgentSessionHistoryWindow } from '@/utils/agentSessionHistory'
 import {
   acknowledgeAgentMeshMessage,
@@ -1000,14 +1000,15 @@ async function handleMeshMessage(message: AgentMeshMessage, targetSessionId: str
       return false
     }
   }
+  let deferred = false
   const succeeded = await runResponse({
     action: 'start',
     surface: 'admin',
     session_id: sessionId.value,
     messages: [],
     mesh_message_id: message.message_id,
-  })
-  if (!scopeCurrent()) return false
+  }, () => { deferred = true })
+  if (!scopeCurrent() || deferred) return false
   settleAgentMeshTimeline(
     messages.value,
     message.message_id,
@@ -1168,6 +1169,7 @@ async function runBackgroundMeshMessage(
   // 只有 completed 才算成功:failed/incomplete/error 时后端可能重新入队,
   // 返回 true 会被 mesh 桥标记 handled,同 message_id 重投将被永久跳过。
   let succeeded = false
+  let deferred = false
   const handle = streamResponses({
     action: 'start',
     surface: 'admin',
@@ -1176,7 +1178,12 @@ async function runBackgroundMeshMessage(
     mesh_message_id: message.message_id,
   }, {
     async onEvent(event) {
-      if (!scopeCurrent()) return
+      if (!scopeCurrent() || deferred) return
+      if (isAgentMeshResponseDeferred(event, message.message_id)) {
+        deferred = true
+        waiting = false
+        return
+      }
       if (event.type === 'response.approval.required' || event.type === 'response.input.required') {
         waiting = true
       }
@@ -1197,7 +1204,7 @@ async function runBackgroundMeshMessage(
   chatScope.track(handle)
   try {
     await handle.done
-    if (!scopeCurrent()) return false
+    if (!scopeCurrent() || deferred) return false
     if (succeeded) return true
     return appendTerminalTeamFallback(message, targetSessionId, scopeCurrent)
   } catch {
@@ -1543,12 +1550,13 @@ async function retryRun(): Promise<void> {
   })
 }
 
-async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
+async function runResponse(payload: Record<string, unknown>, onDeferred?: () => void): Promise<boolean> {
   const scopeCurrent = chatScope.capture()
   const generation = submissionGeneration
   const requestedSessionId = sessionId.value
   const isCurrentSubmission = () => scopeCurrent() && generation === submissionGeneration && requestedSessionId === sessionId.value
-  if (payload.action === 'start') {
+  const meshStart = payload.action === 'start' && typeof payload.mesh_message_id === 'string' && Boolean(payload.mesh_message_id)
+  if (payload.action === 'start' && !meshStart) {
     // JSON 请求对象只在内存暂存，不将图片写入 localStorage 或会话快照。
     unconfirmedStart.value = {
       payload: JSON.parse(JSON.stringify(payload)) as Record<string, unknown>,
@@ -1600,28 +1608,49 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
     textTarget.navigations = directives.length ? directives : undefined
   }
 
+  let deferred = false
+  let pendingMeshResponse: Record<string, unknown> | null = null
+  const applyCreatedResponse = (response: Record<string, unknown>): void => {
+    if (typeof response.id === 'string' && response.id) unconfirmedStart.value = null
+    const runId = typeof response.id === 'string' ? response.id : sessionRun.value?.run_id ?? ''
+    activeRunId = runId || activeRunId
+    sessionRun.value = {
+      run_id: runId,
+      status: 'running',
+      model: typeof response.model === 'string' ? response.model : sessionRun.value?.model ?? '',
+      rounds: sessionRun.value?.rounds ?? 0,
+      error: '',
+      updated_at: new Date().toISOString(),
+    }
+    syncBusy()
+  }
+
   const handle = streamResponses(payload, {
     async onEvent(event) {
-      if (!isCurrentSubmission()) return
+      if (!isCurrentSubmission() || deferred) return
+      if (isAgentMeshResponseDeferred(event, payload.mesh_message_id) && meshStart) {
+        deferred = true
+        pendingMeshResponse = null
+        onDeferred?.()
+        return
+      }
       const eventRunId = event.type === 'response.created' && typeof event.response.id === 'string'
         ? event.response.id
         : ''
-      if ((eventRunId && isResponseRunResumeBlocked(eventRunId))
-        || (!eventRunId && activeRunId && isResponseRunResumeBlocked(activeRunId))) return
+      const guardedRunId = eventRunId || (typeof pendingMeshResponse?.id === 'string' ? pendingMeshResponse.id : activeRunId)
+      if (guardedRunId && isResponseRunResumeBlocked(guardedRunId)) return
+      if (pendingMeshResponse && event.type !== 'response.created') {
+        applyCreatedResponse(pendingMeshResponse)
+        pendingMeshResponse = null
+      }
       if (siteBrowser.handle(event)) return
       if (event.type === 'response.created') {
-        if (typeof event.response.id === 'string' && event.response.id) unconfirmedStart.value = null
-        const runId = typeof event.response.id === 'string' ? event.response.id : sessionRun.value?.run_id ?? ''
-        activeRunId = runId || activeRunId
-        sessionRun.value = {
-          run_id: runId,
-          status: 'running',
-          model: typeof event.response.model === 'string' ? event.response.model : sessionRun.value?.model ?? '',
-          rounds: sessionRun.value?.rounds ?? 0,
-          error: '',
-          updated_at: new Date().toISOString(),
+        if (meshStart) {
+          // API 会先发 created；直到下一条真实运行事件才确认新 run 存在。
+          pendingMeshResponse = event.response
+          return
         }
-        syncBusy()
+        applyCreatedResponse(event.response)
       } else if (event.type === 'response.audit.progress') {
         // 审计四阶段进度:挂在当前时间线条目上,渲染成角色阶段卡
         showTyping.value = false
@@ -1750,7 +1779,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
 
   try {
     await handle.done
-    if (!isCurrentSubmission()) return false
+    if (!isCurrentSubmission() || deferred) return false
     if (protocolError) {
       ElMessage.error(protocolError)
       appendErrorCard(protocolError)
@@ -1758,7 +1787,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
     }
     return true
   } catch (error) {
-    if (!isCurrentSubmission()) return false
+    if (!isCurrentSubmission() || deferred) return false
     activityStore.clear()
     if (!(error instanceof Error && error.name === 'AbortError')) {
       const info = actionableError(error, 'Agent 请求失败')
@@ -1780,7 +1809,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
       showTyping.value = false
       syncBusy()
       await scrollToBottom()
-      if (isCurrentSubmission()) scheduleSessionPoll()
+      if (isCurrentSubmission()) scheduleSessionPoll(deferred)
     }
   }
 }

@@ -1235,3 +1235,134 @@ def test_sweep_blocked_jarvis_messages_closes_history_and_active_run(db, user, m
     ).count() == 1
 
     assert agent_mesh_service.sweep_blocked_jarvis_messages(db) == {"messages": 0, "runs": 0}
+
+
+@pytest.mark.parametrize("status", ["running", "waiting_input", "waiting_approval"])
+def test_inbox_defers_receipt_until_current_response_settles(db, user, status):
+    for key in ("session-a1", "session-b1"):
+        agent_mesh_service.heartbeat(db, user, surface="user", session_key=key, title=key)
+    message = agent_mesh_service.send_message(db, user, surface="user", session_key="session-a1", message=_message())
+    active = AgentResponseRun(run_id="busy-parent", user_id=user.id, surface="user",
+                              session_key="session-b1", status=status, checkpoint_json="{}")
+    db.add(active)
+    db.commit()
+    for _ in range(5):
+        assert agent_mesh_service.pull_inbox(db, user, surface="user", session_key="session-b1") == []
+    row = db.query(AgentMeshMessage).filter_by(message_id=message["message_id"]).one()
+    assert row.status == "queued" and row.attempt_count == 0
+    active.status = "completed"
+    db.commit()
+    result = agent_mesh_service.pull_inbox(db, user, surface="user", session_key="session-b1")
+    assert result[0]["message_id"] == message["message_id"]
+    assert result[0]["status"] == "delivered" and result[0]["attempt_count"] == 1
+
+
+def test_busy_delivery_race_keeps_receipt_retryable_without_spending_budget(db, user):
+    for key in ("session-a1", "session-b1"):
+        agent_mesh_service.heartbeat(db, user, surface="user", session_key=key, title=key)
+    message = agent_mesh_service.send_message(db, user, surface="user", session_key="session-a1", message=_message())
+    agent_mesh_service.pull_inbox(db, user, surface="user", session_key="session-b1")
+    agent_mesh_service.ack_message(db, user, message["message_id"], surface="user", session_key="session-b1",
+                                 acknowledgement=AgentMeshAckIn(status="processing"))
+    for _ in range(5):
+        agent_mesh_service.defer_message_run(db, user, message["message_id"], surface="user", session_key="session-b1")
+        row = db.query(AgentMeshMessage).filter_by(message_id=message["message_id"]).one()
+        assert row.status == "delivered" and row.attempt_count == 1 and row.completed_at is None
+    agent_mesh_service.ack_message(db, user, message["message_id"], surface="user", session_key="session-b1",
+                                 acknowledgement=AgentMeshAckIn(status="completed"))
+    agent_mesh_service.defer_message_run(db, user, message["message_id"], surface="user", session_key="session-b1")
+    assert row.status == "completed"
+    with pytest.raises(agent_mesh_service.AgentMeshTargetError):
+        agent_mesh_service.defer_message_run(db, user, message["message_id"], surface="user", session_key="session-a1")
+
+
+@pytest.mark.parametrize(
+    "other_owner,other_surface,other_session",
+    [(8, "user", "session-b1"), (7, "admin", "session-b1"), (7, "user", "session-c1")],
+)
+def test_inbox_busy_gate_preserves_account_surface_and_session_isolation(
+    db, user, other_owner, other_surface, other_session,
+):
+    for key in ("session-a1", "session-b1"):
+        agent_mesh_service.heartbeat(db, user, surface="user", session_key=key, title=key)
+    message = agent_mesh_service.send_message(db, user, surface="user", session_key="session-a1", message=_message())
+    db.add(AgentResponseRun(run_id="other-busy", user_id=other_owner, surface=other_surface,
+                            session_key=other_session, status="running", checkpoint_json="{}"))
+    db.commit()
+    result = agent_mesh_service.pull_inbox(db, user, surface="user", session_key="session-b1")
+    assert result[0]["message_id"] == message["message_id"] and result[0]["status"] == "delivered"
+
+
+def test_direct_mesh_start_defers_queued_receipt_without_advancing_it(db, user):
+    from app.services.deepseek_responses_runtime import ResponseSessionBusyError
+    for key in ("session-a1", "session-b1"):
+        agent_mesh_service.heartbeat(db, user, surface="user", session_key=key, title=key)
+    message = agent_mesh_service.send_message(db, user, surface="user", session_key="session-a1", message=_message())
+    db.add(AgentResponseRun(run_id="busy-parent-direct", user_id=user.id, surface="user",
+                            session_key="session-b1", status="running", checkpoint_json="{}"))
+    db.commit()
+    with pytest.raises(ResponseSessionBusyError):
+        agent_mesh_service.prepare_message_run(
+            db, user, message["message_id"], surface="user", session_key="session-b1",
+        )
+    row = db.query(AgentMeshMessage).filter_by(message_id=message["message_id"]).one()
+    assert row.status == "queued" and row.attempt_count == 0
+
+
+def test_mesh_start_defers_when_parent_settles_between_delivery_checks(db, user, monkeypatch):
+    from app.services.deepseek_responses_runtime import ResponseSessionBusyError
+
+    for key in ("session-a1", "session-b1"):
+        agent_mesh_service.heartbeat(db, user, surface="user", session_key=key, title=key)
+    message = agent_mesh_service.send_message(
+        db, user, surface="user", session_key="session-a1", message=_message(),
+    )
+    # 投递时仍忙碌，随后父运行结束；未认领的消息仍应保留下一次投递机会。
+    checks = iter((True, False))
+    monkeypatch.setattr(agent_mesh_service, "_session_has_active_response_run", lambda *_args: next(checks))
+    with pytest.raises(ResponseSessionBusyError):
+        agent_mesh_service.prepare_message_run(
+            db, user, message["message_id"], surface="user", session_key="session-b1",
+        )
+    row = db.query(AgentMeshMessage).filter_by(message_id=message["message_id"]).one()
+    assert row.status == "queued" and row.attempt_count == 0
+    monkeypatch.setattr(agent_mesh_service, "_session_has_active_response_run", lambda *_args: False)
+    ready = agent_mesh_service.pull_inbox(db, user, surface="user", session_key="session-b1")
+    assert ready[0]["message_id"] == row.message_id and ready[0]["attempt_count"] == 1
+
+
+@pytest.mark.parametrize("entrypoint", ["pull", "prepare"])
+def test_busy_precheck_does_not_lock_runs_while_receipt_is_claimed(db, user, monkeypatch, entrypoint):
+    from app.services.deepseek_responses_runtime import ResponseSessionBusyError
+
+    for key in ("session-a1", "session-b1"):
+        agent_mesh_service.heartbeat(db, user, surface="user", session_key=key, title=key)
+    message = agent_mesh_service.send_message(
+        db, user, surface="user", session_key="session-a1", message=_message(),
+    )
+    agent_mesh_service.pull_inbox(db, user, surface="user", session_key="session-b1")
+    db.add(AgentResponseRun(
+        run_id="busy-lock-order-parent", user_id=user.id, surface="user",
+        session_key="session-b1", status="running", checkpoint_json="{}",
+    ))
+    db.commit()
+    observed_run_reads = []
+    execute = db.execute
+
+    def observe_execute(statement, *args, **kwargs):
+        if hasattr(statement, "get_final_froms") and any(
+            table.name == AgentResponseRun.__tablename__ for table in statement.get_final_froms()
+        ):
+            observed_run_reads.append(statement._for_update_arg is not None)
+        return execute(statement, *args, **kwargs)
+
+    monkeypatch.setattr(db, "execute", observe_execute)
+    if entrypoint == "pull":
+        assert agent_mesh_service.pull_inbox(db, user, surface="user", session_key="session-b1") == []
+    else:
+        with pytest.raises(ResponseSessionBusyError):
+            agent_mesh_service.prepare_message_run(
+                db, user, message["message_id"], surface="user", session_key="session-b1",
+            )
+    # 两入口只做建议性退让；跨表行锁留给检查点 create 的统一最终仲裁。
+    assert observed_run_reads and not any(observed_run_reads)

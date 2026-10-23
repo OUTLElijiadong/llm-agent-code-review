@@ -41,7 +41,7 @@ from app.services.agent_responses_service import (
     terminal_event,
 )
 from app.services.ai_usage_context import model_attribution, usage_context
-from app.services.deepseek_responses_runtime import InvalidRunStateError
+from app.services.deepseek_responses_runtime import InvalidRunStateError, ResponseSessionBusyError
 from app.utils.api_resolver import resolve_api_config
 from app.utils.input_validation import normalize_plain_text
 
@@ -1349,6 +1349,13 @@ def _public_stream_event(
             "output_index": event.get("output_index"),
             "content_index": event.get("content_index"),
         }
+    if event_type == "response.deferred":
+        return {
+            "type": event_type,
+            "message_id": str(event.get("message_id") or ""),
+            "reason": "session_busy",
+            "retry_after_seconds": 5,
+        }
     if event_type == "response.created":
         return {"type": event_type, "response": _public_response_envelope(event.get("response"))}
     if event_type in {"response.tool.started", "response.tool.completed", "response.tool.failed"}:
@@ -1755,6 +1762,12 @@ async def stream_agent_response(
                             logger.warning("小菱偏好更新暂未排入后台，保留本轮结果")
                     return result
                 except Exception as exc:
+                    if mesh_message_id and isinstance(exc, ResponseSessionBusyError):
+                        agent_mesh_service.defer_message_run(
+                            run_db, run_user, mesh_message_id,
+                            surface=payload.surface, session_key=payload.session_id,
+                        )
+                        raise
                     if payload.action in {"start", "resume", "approve"}:
                         try:
                             from app.agents.event_bus import emit_event
@@ -1817,6 +1830,8 @@ async def stream_agent_response(
                 try:
                     return await execute()
                 except Exception as exc:
+                    if payload.mesh_message_id and isinstance(exc, ResponseSessionBusyError):
+                        raise
                     if payload.action != "cancel":
                         recovery_state["value"] = await asyncio.to_thread(
                             agent_run_salvage.salvage_crashed_run, run_id, error=str(exc),
@@ -1875,6 +1890,14 @@ async def stream_agent_response(
             # 会继续驱动工具链；进程重启时再由持久检查点接管。
             return
         except Exception as exc:  # noqa: BLE001 - 流已开始，只能返回协议错误事件
+            if payload.mesh_message_id and isinstance(exc, ResponseSessionBusyError):
+                yield encode({
+                    "type": "response.deferred",
+                    "message_id": payload.mesh_message_id,
+                    "reason": "session_busy",
+                    "retry_after_seconds": 5,
+                })
+                return
             logger.exception("小菱运行 {} 流式执行异常", run_id)
             state = recovery_state.get("value") if "recovery_state" in locals() else ""
             public_message = (

@@ -455,6 +455,72 @@ def test_default_selection_records_binary_and_empty_exclusions(db, monkeypatch, 
     assert db.query(ReviewTaskFile).count() == 1
 
 
+def test_roundtable_failure_exposes_persisted_terminal_error_and_phase():
+    row = SimpleNamespace(
+        session_id="disc-failed",
+        status="failed",
+        project_id=13,
+        file_id=512,
+        file_name="1.py",
+        report_task_id=232,
+        progress={"phase": "failed", "terminal_error": "Object of type datetime is not JSON serializable"},
+    )
+
+    result = agent_team_review._roundtable_result(row)
+
+    assert result["status"] == "failed"
+    assert result["evidence"][0]["data"]["phase"] == "failed"
+    assert result["evidence"][0]["data"]["terminal_error"] == row.progress["terminal_error"]
+    assert {error["code"] for error in result["errors"]} == {
+        "roundtable_incomplete", "roundtable_terminal_error",
+    }
+    terminal_error = next(error for error in result["errors"] if error["code"] == "roundtable_terminal_error")
+    assert terminal_error["phase"] == "failed"
+    assert terminal_error["message"] == row.progress["terminal_error"]
+
+
+def test_roundtable_failure_caps_persisted_progress_details_and_cannot_report_success():
+    terminal_error = "x" * 700
+    row = SimpleNamespace(
+        session_id="disc-failed",
+        status="failed",
+        project_id=13,
+        file_id=512,
+        file_name="1.py",
+        report_task_id=232,
+        progress={"phase": "f" * 120, "terminal_error": terminal_error},
+    )
+
+    result = agent_team_review._roundtable_result(row, status="completed")
+
+    assert result["status"] == "failed"
+    data = result["evidence"][0]["data"]
+    assert len(data["terminal_error"]) == 500
+    terminal_detail = next(error for error in result["errors"] if error["code"] == "roundtable_terminal_error")
+    assert len(terminal_detail["message"]) == 500
+    assert len(data["phase"]) == len(terminal_detail["phase"]) == 80
+    assert data["phase"] == terminal_detail["phase"]
+
+
+def test_concluded_roundtable_does_not_expose_failure_progress():
+    row = SimpleNamespace(
+        session_id="disc-concluded",
+        status="concluded",
+        project_id=13,
+        file_id=512,
+        file_name="1.py",
+        report_task_id=232,
+        progress={"phase": "completed", "terminal_error": "stale failure detail"},
+    )
+
+    result = agent_team_review._roundtable_result(row)
+
+    assert result["status"] == "completed"
+    assert result["errors"] == []
+    assert "phase" not in result["evidence"][0]["data"]
+    assert "terminal_error" not in result["evidence"][0]["data"]
+
+
 @pytest.mark.parametrize("readonly", [False, True])
 def test_team_creation_preserves_run_review_contract_for_static_analysis(db, review_team, readonly):
     rows = review_team

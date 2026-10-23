@@ -24,6 +24,7 @@ from app.models.custom_agent import CustomAgent
 from app.models.user import User
 from app.schemas.agent_mesh import AgentMeshAckIn, AgentMeshMessageIn
 from app.services.ai_usage_context import current_attribution, model_attribution, usage_context
+from app.services.deepseek_responses_runtime import ResponseSessionBusyError
 
 ONLINE_WINDOW = timedelta(seconds=90)
 _SESSION_TERMINAL = {"completed", "failed", "cancelled", "expired", "dead_letter"}
@@ -1894,6 +1895,17 @@ def _expire_pending(db: Session, rows: list[AgentMeshMessage], now: datetime) ->
         _event(db, row, "expired", "system", {"reason": "delivery deadline exceeded"})
 
 
+def _session_has_active_response_run(db: Session, user_id: int, surface: str, session_key: str) -> bool:
+    # 此处只提前退让，不持运行锁，避免和消息认领形成反向等待。
+    # 若快照漏过并发新运行，检查点 create 的会话锁与当前读仍作最终仲裁。
+    return db.query(AgentResponseRun.id).filter(
+        AgentResponseRun.user_id == user_id,
+        AgentResponseRun.surface == surface,
+        AgentResponseRun.session_key == session_key,
+        AgentResponseRun.status.in_(_ACTIVE_RESPONSE_RUN_STATUSES),
+    ).first() is not None
+
+
 def pull_inbox(
     db: Session,
     user: User,
@@ -1927,6 +1939,9 @@ def pull_inbox(
         surface=surface,
         session_key=session_key,
     )
+    # 页面刷新/其他标签页可能仍在驱动原运行；以数据库为准暂缓投递，
+    # 正常等待不计作模型失败，也不能耗尽完成通知的重试预算。
+    session_busy = _session_has_active_response_run(db, int(user.id), surface, session_key)
     delivered: list[AgentMeshMessage] = []
     for row in rows:
         if row.status == "expired":
@@ -1939,6 +1954,8 @@ def pull_inbox(
             row.next_attempt_at = None
             row.last_error = "父级小菱运行已停止，迟到结果未触发新的模型调用"
             _event(db, row, "cancelled", target, {"reason": "parent_run_stopped"})
+            continue
+        if session_busy:
             continue
         if row.status == "queued":
             row.status = "delivered"
@@ -2220,6 +2237,11 @@ def prepare_message_run(
     if row.status == "queued":
         pull_inbox(db, user, surface=surface, session_key=session_key, limit=100)
         db.refresh(row)
+    # pull 可能刚因忙碌而保留 queued；即使父运行随后结束，也要等下次正式投递。
+    if row.status == "queued" or row.status in {"delivered", "acknowledged"} and _session_has_active_response_run(
+        db, int(user.id), surface, session_key,
+    ):
+        raise ResponseSessionBusyError("当前会话仍有待处理运行，结果通知将在空闲后继续")
     if row.status not in {"delivered", "acknowledged"}:
         raise AgentMeshStateError(f"消息当前状态 {row.status} 不能启动新回合")
     terminal_snapshot = None
@@ -2518,6 +2540,27 @@ def _verified_terminal_team_snapshot(
         "error_reason": error_reason or None,
         "result_reference": {"tool": "get_agent_team", "team_id": team_id},
     }
+
+
+def defer_message_run(
+    db: Session,
+    user: User,
+    message_id: str,
+    *,
+    surface: str,
+    session_key: str,
+) -> dict[str, Any]:
+    """运行创建竞争时归还投递，下一次拉取复用本次尝试且保留终态。"""
+    row = _owned_target_message(db, user, message_id, surface=surface, session_key=session_key)
+    if row.status in {"processing", "acknowledged"}:
+        row.status = "delivered"
+        row.processing_at = None
+        row.lease_token = None
+        row.lease_expires_at = None
+        _event(db, row, "deferred", _session_address(surface, session_key), {"reason": "session_busy"})
+        db.commit()
+        db.refresh(row)
+    return _message_out(row)
 
 
 def finish_message_run(

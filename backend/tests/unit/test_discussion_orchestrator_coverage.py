@@ -3551,3 +3551,73 @@ def test_finalize_mixed_invalid_findings_has_no_complete_coverage_or_score(db, m
     assert saved.coverage["score_available"] is False
     assert saved.score_version is None
     assert db.query(ReviewIssue).filter_by(task_id=task.id).count() == 0
+
+
+@pytest.mark.asyncio
+async def test_roundtable_checkpoint_preserves_call_timestamps_across_resume(monkeypatch):
+    """真实 call_raw 元数据可保存检查点，恢复后仍可按原时间补写审计且不重复调用。"""
+    timestamp = datetime(2026, 10, 23, 0, 1, 2, 345678, tzinfo=timezone.utc)
+    meta = {
+        "model_name": "fake-model", "create_time": timestamp,
+        "_usage_log_ids": [123], "_http_attempts": 1,
+        "_usage_attribution": {"root_agent_run_id": 77},
+        "response": "原始日期文本 2026-10-23T00:01:02+00:00",
+    }
+    bus = DiscussionBus()
+    session = bus.create_session(
+        "roundtable-datetime", 0, "time.py", owner_user_id=42, max_rounds=1,
+    )
+    agent = RecordingAgent(responses=[("专家核验完成", meta), ("主持人共识", meta)])
+    finalized = []
+
+    async def no_sleep(_seconds):
+        return None
+
+    def finalize(**kwargs):
+        finalized.append(kwargs)
+        return 77
+
+    monkeypatch.setattr(module, "_build_discussion_agents", lambda *_args: (
+        agent, {"code_reviewer": agent},
+    ))
+    monkeypatch.setattr(module, "build_discussion_environment", lambda **_kwargs: RecordingEnvironment())
+    monkeypatch.setattr(module, "_create_review_task", lambda **_kwargs: 77)
+    monkeypatch.setattr(module, "_resume_review_task", lambda *_args, **_kwargs: 77)
+    monkeypatch.setattr(module, "_finalize_review", finalize)
+    monkeypatch.setattr(module, "_review_task_state", lambda _task_id: {
+        "status": "success" if finalized else "running", "error": "",
+    })
+    monkeypatch.setattr(module.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(module, "AgentEventBus", EventBusProvider)
+    EventBusProvider.current = RecordingEventBus()
+    args = dict(
+        profiles=(GENERAL_AGENT,), code="print(1)", language="python",
+        file_name="time.py", user_id=42, project_id=12, file_id=34, max_rounds=1,
+    )
+    await _make_orchestrator(bus).start_discussion(session_id=session.session_id, **args)
+    assert session.terminal_status == "success"
+    assert len(session.turns) == 3
+    checkpoint = json.loads(json.dumps(session.progress["_checkpoint"]))
+    assert checkpoint["summary_done"] is True
+    assert len(checkpoint["deferred_logs"]) == 2
+    for entry in checkpoint["deferred_logs"]:
+        assert entry["meta"] == {**meta, "create_time": timestamp.isoformat()}
+    assert meta["create_time"] is timestamp  # 保存不能污染当前调用的审计元数据。
+    assert len(agent.calls) == 2
+
+    # 模拟从数据库 JSON 重载；已提交的专家发言与主持总结均不再调用模型。
+    resumed = bus.create_session(
+        "roundtable-datetime-resumed", 77, "time.py", owner_user_id=42, max_rounds=1,
+    )
+    resumed.progress["_checkpoint"] = checkpoint
+    finalized.clear()
+    await _make_orchestrator(bus).start_discussion(
+        session_id=resumed.session_id, resume_task_id=77, **args,
+    )
+    assert resumed.terminal_status == "success"
+    assert len(agent.calls) == 2
+    assert len(finalized) == 1
+    for entry in finalized[0]["deferred_logs"]:
+        assert entry["meta"] == meta
+        assert isinstance(entry["meta"]["create_time"], datetime)
+    assert checkpoint["deferred_logs"][0]["meta"]["create_time"] == timestamp.isoformat()

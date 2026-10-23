@@ -239,7 +239,12 @@ _ROUNDTABLE_TERMINAL = {"concluded", "partial", "failed", "cancelled", "interrup
 def _roundtable_result(row: Any, *, status: str | None = None, summary: str = "") -> dict[str, Any]:
     """把圆桌会话终态转换成团队任务结果；只有已结论的圆桌算完成。"""
     session_status = str(getattr(row, "status", "") or "")
-    state = status or ("completed" if session_status == "concluded" else "failed")
+    requested_state = status or ("completed" if session_status == "concluded" else "failed")
+    state = "failed" if requested_state == "completed" and session_status != "concluded" else requested_state
+    progress = getattr(row, "progress", None)
+    progress = progress if isinstance(progress, dict) else {}
+    phase = str(progress.get("phase") or "")[:80]
+    terminal_error = str(progress.get("terminal_error") or "")[:500]
     report_task_id = int(getattr(row, "report_task_id", 0) or getattr(row, "task_id", 0) or 0)
     detail = {
         "session_id": str(getattr(row, "session_id", "") or ""),
@@ -251,6 +256,11 @@ def _roundtable_result(row: Any, *, status: str | None = None, summary: str = ""
         "open_path": f"/agents?discuss_session={getattr(row, 'session_id', '')}",
         "report_url": f"/reports/{report_task_id}" if report_task_id and state == "completed" else None,
     }
+    if state == "failed":
+        if phase:
+            detail["phase"] = phase
+        if terminal_error:
+            detail["terminal_error"] = terminal_error
     default_summary = {
         "concluded": "圆桌讨论已形成结论",
         "partial": "圆桌讨论只形成部分结论",
@@ -262,7 +272,14 @@ def _roundtable_result(row: Any, *, status: str | None = None, summary: str = ""
         "summary": summary or default_summary,
         "evidence": [{"source": "roundtable_session", "data": detail}],
         "artifacts": [{"type": "roundtable_session", **detail}],
-        "errors": [] if state == "completed" else [{"code": "roundtable_incomplete", "status": session_status}],
+        "errors": [] if state == "completed" else [{
+            **{"code": "roundtable_incomplete", "status": session_status},
+            **({"phase": phase} if state == "failed" and phase else {}),
+        }] + ([{
+            "code": "roundtable_terminal_error",
+            "phase": phase or None,
+            "message": terminal_error,
+        }] if state == "failed" and terminal_error else []),
         "retryable": False,
     }
 

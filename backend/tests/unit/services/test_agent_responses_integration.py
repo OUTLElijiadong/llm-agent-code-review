@@ -759,7 +759,9 @@ async def test_database_checkpoint_store_blocks_new_run_while_session_is_pending
     )
 
     assert await store.create(first) is True
-    assert await store.create(second) is False
+    from app.services.deepseek_responses_runtime import ResponseSessionBusyError
+    with pytest.raises(ResponseSessionBusyError):
+        await store.create(second)
     assert db.query(AgentResponseRun).filter_by(run_id="run_second_pending").first() is None
 
 
@@ -4129,3 +4131,56 @@ def test_operations_tool_only_exposed_to_super_admin() -> None:
     assert "仅超级管理员" in schema["description"]
     # 权限点存在,且 SERVER_OPS 前缀权限只授予唯一超级管理员(见 super_admin 常量)
     assert PermissionCode.SERVER_OPS_VIEW == "server_ops:view"
+
+
+@pytest.mark.asyncio
+async def test_mesh_busy_start_emits_deferred_without_failure_or_salvage(db, monkeypatch):
+    from app.models.agent_mesh import AgentMeshMessage, AgentMeshMessageEvent
+    from app.models.user import User
+    from app.schemas.agent_mesh import AgentMeshMessageIn
+    from app.services.deepseek_responses_runtime import ResponseSessionBusyError
+
+    for model in (User, AgentMeshMessage, AgentMeshMessageEvent):
+        model.__table__.create(db.get_bind(), checkfirst=True)
+    user = User(id=7, username="busy-owner", password="unused", role="user", status=1)
+    db.add(user)
+    db.commit()
+    mesh = api_module.agent_mesh_service
+    for key in ("busy-source", "busy-target"):
+        mesh.heartbeat(db, user, surface="user", session_key=key, title=key)
+    message = mesh.send_message(db, user, surface="user", session_key="busy-source",
+        message=AgentMeshMessageIn.model_validate({
+            "idempotency_key": "busy-race", "send_to": "session:user:busy-target",
+            "message_type": "coordination", "subject": "结果通知",
+            "payload": {"summary": "结果"}, "delivery": {"max_attempts": 1},
+        }))
+    salvage_calls = []
+    class BusyService:
+        def __init__(self, *_args, **_kwargs): pass
+        async def start(self, *_args, **_kwargs):
+            raise ResponseSessionBusyError("当前会话仍有待处理运行")
+    monkeypatch.setattr(api_module, "AgentResponsesService", BusyService)
+    monkeypatch.setattr(api_module.agent_run_salvage, "salvage_crashed_run", lambda *a, **k: salvage_calls.append(a))
+    response = await api_module.stream_agent_response(api_module.AgentResponsesRequest(
+        surface="user", session_id="busy-target", mesh_message_id=message["message_id"], messages=[]), db=db, user=user)
+    body = await _collect_stream(response)
+    assert "event: response.deferred" in body
+    assert "event: error" not in body and "event: response.failed" not in body
+    assert not salvage_calls
+    db.expire_all()
+    row = db.query(AgentMeshMessage).filter_by(message_id=message["message_id"]).one()
+    assert row.status == "delivered" and row.attempt_count == 1 and row.completed_at is None
+    assert not db.query(AgentResponseRun).count()
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_create_reports_busy_separately_from_duplicate_identifier(db):
+    from app.services.deepseek_responses_runtime import ResponseSessionBusyError
+    _activate_conversation(db, user_id=7, surface="user", session_key="busy-create")
+    db.add(AgentResponseRun(run_id="existing-parent", user_id=7, surface="user", session_key="busy-create",
+                            status="running", checkpoint_json="{}"))
+    db.commit()
+    store = DatabaseCheckpointStore(db, user_id=7, surface="user", session_key="busy-create")
+    with pytest.raises(ResponseSessionBusyError):
+        await store.create(RunCheckpoint(run_id="deferred-child", model="test", transcript=[], tools=[]))
+    assert db.query(AgentResponseRun).count() == 1
