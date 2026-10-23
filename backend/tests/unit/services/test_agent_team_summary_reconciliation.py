@@ -509,7 +509,10 @@ def test_duplicate_receipt_member_failure_is_independent_of_task_key_order(faile
     passed = _entry(result_receipt=_receipt())
     ordered = [failed, passed] if failed_first else [passed, failed]
     result = summarize_dependencies(dict(zip(("a", "z"), ordered)))
-    assert result["status"] == "failed"
+    # 部分完成算成功，但失败成员的缺口必须显式列出，共享业务结果仍标为未完成。
+    assert result["status"] == "completed" and result["partial"] is True
+    assert result["missing_tasks"] == ["a" if failed_first else "z"]
+    assert result["summary"].startswith("部分完成")
     assert len(result["business_results"]) == 1
     assert result["business_results"][0]["completed"] is False
     assert len(_checks(result, "business_result")[0]["sources"]) == 2

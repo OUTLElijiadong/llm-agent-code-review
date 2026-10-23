@@ -4441,8 +4441,21 @@ class AgentResponsesService:
                 task for task in tasks if isinstance(task, Mapping)
                 and positive_int(task.get("member_id")) in worker_member_ids
             ]
-            if not worker_tasks or any(task.get("status") != "completed" for task in worker_tasks):
+            summary = readback.get("summary") if isinstance(readback.get("summary"), Mapping) else {}
+            partial_team = bool(summary.get("partial"))
+            unfinished_workers = [
+                str(task.get("task_key") or "") for task in worker_tasks if task.get("status") != "completed"
+            ]
+            if not worker_tasks or not any(task.get("status") == "completed" for task in worker_tasks) or (
+                unfinished_workers and not partial_team
+            ):
                 return "团队状态显示完成，但没有全部完成的 worker 实际执行任务；不能汇总为成功。"
+            if unfinished_workers and not re.search(r"部分完成|部分(?:结果|交付)|未完成", output_text):
+                # 部分完成算成功，但答复必须如实说明哪些节点没完成。
+                return (
+                    "团队为部分完成：未完成节点 " + "、".join(unfinished_workers)
+                    + "；回复必须写明“部分完成”并列出这些未完成部分，不能宣称全部完成。"
+                )
             task_by_key = {
                 str(task.get("task_key") or ""): task for task in tasks if isinstance(task, Mapping)
             }
@@ -4463,7 +4476,9 @@ class AgentResponsesService:
                     dependency_task = task_by_key.get(dependency)
                     if isinstance(dependency_task, Mapping):
                         pending.extend(dependency_task.get("depends_on") or [])
-            worker_task_keys = {str(task.get("task_key") or "") for task in worker_tasks}
+            worker_task_keys = {
+                str(task.get("task_key") or "") for task in worker_tasks if task.get("status") == "completed"
+            }
             if not worker_task_keys <= verified_task_keys:
                 return "已完成的 verifier/summarizer 未覆盖所有 worker 工作任务；不能汇总为核验通过。"
             if checkpoint.context_metadata.get("coordinator_input_has_images") is True:

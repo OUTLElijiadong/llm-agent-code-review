@@ -1084,7 +1084,8 @@ def test_failed_worker_preserves_running_sibling_and_runs_partial_summarizer(db,
         result={"status": "partial", "summary": "安全审查发现 SEC-1；代码质量检查因输出截断未完成"},
         success=True,
     )
-    assert final["status"] == "failed"
+    # 部分完成算成功：团队收口为 completed，同时保留 partial 标记和失败节点清单。
+    assert final["status"] == "completed"
     assert final["summary"]["partial"] is True
     assert final["summary"]["failed_tasks"] == ["quality"]
     assert final["summary"]["final_result"]["summary"].startswith("安全审查发现 SEC-1")
@@ -3409,3 +3410,39 @@ def test_result_path_errors_list_available_keys(db, team_user):
             db, team_user, created["team_id"], claimed["task_id"], result_path="evidence",
         )
     assert "JSON Pointer" in str(invalid.value)
+
+
+def test_failed_worker_does_not_fail_fast_independent_siblings_with_summarizer(db, team_user):
+    """有 summarizer 时独立兄弟继续执行；只要有交付，团队按部分完成收口为 completed。"""
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _payload(
+        max_active_children=2,
+        members=[
+            {"member_key": "a", "display_name": "A", "address": "agent:project_analyzer", "role": "worker"},
+            {"member_key": "b", "display_name": "B", "address": "agent:project_analyzer", "role": "worker"},
+            {"member_key": "s", "display_name": "汇总", "address": "agent:reporter", "role": "summarizer"},
+        ],
+        tasks=[
+            {"task_key": "a", "member_key": "a", "title": "A", "instructions": "A", "priority": 100,
+             "max_attempts": 1},
+            {"task_key": "b", "member_key": "b", "title": "B", "instructions": "B", "priority": 10},
+            {"task_key": "s", "member_key": "s", "title": "汇总", "instructions": "汇总", "depends_on": ["a", "b"]},
+        ],
+    ))
+    first = agent_team_service.claim_next_task(db, created["team_id"])
+    assert first["task_key"] == "a"
+    after = _fail_claim(db, created["team_id"], first)
+    assert after["status"] == "running"
+    second = agent_team_service.claim_next_task(db, created["team_id"])
+    assert second is not None and second["task_key"] == "b"
+    agent_team_service.complete_task(
+        db, created["team_id"], second["task_id"], lease_token=second["lease_token"],
+        result={"status": "completed", "summary": "B 完成", "evidence": []}, success=True,
+    )
+    summary = agent_team_service.claim_next_task(db, created["team_id"])
+    final = agent_team_service.complete_task(
+        db, created["team_id"], summary["task_id"], lease_token=summary["lease_token"],
+        result={"status": "completed", "partial": True, "summary": "部分完成：B 已交付，A 未完成", "evidence": []},
+        success=True,
+    )
+    assert final["status"] == "completed"
+    assert final["summary"]["partial"] is True and final["summary"]["failed_tasks"] == ["a"]

@@ -612,6 +612,34 @@ def test_completed_team_requires_completed_worker_and_verifier_coverage():
     assert guard(verified, "团队 52 完成") is None
 
 
+def test_partial_completed_team_counts_as_success_but_must_name_missing_parts():
+    guard = service.AgentResponsesService._validate_xiaoling_completion
+    calls = [
+        ("agents", "list_agents", {}, {"agents": []}),
+        ("create", "create_agent_team", {}, {"team_id": 53, "status": "queued"}),
+        ("readback", "get_agent_team", {"team_id": 53}, {
+            "team_id": 53, "status": "completed", "summary": {"partial": True, "failed_tasks": ["quality"]},
+            "members": [
+                {"member_id": 1, "role": "worker"},
+                {"member_id": 3, "role": "worker"},
+                {"member_id": 2, "role": "summarizer"},
+            ],
+            "tasks": [
+                {"member_id": 1, "task_key": "security", "status": "completed", "depends_on": []},
+                {"member_id": 3, "task_key": "quality", "status": "failed", "depends_on": []},
+                {"member_id": 2, "task_key": "sum", "status": "completed", "depends_on": ["security", "quality"]},
+            ],
+        }),
+    ]
+    assert "部分完成" in guard(_team_checkpoint(calls), "团队 53 已完成，发现 SEC-1")
+    assert guard(_team_checkpoint(calls), "团队 53 部分完成：发现 SEC-1；quality 未完成") is None
+
+    not_partial = [*calls[:2], ("readback", "get_agent_team", {"team_id": 53}, {
+        **calls[2][3], "summary": {},
+    })]
+    assert "没有全部完成的 worker" in guard(_team_checkpoint(not_partial), "团队 53 部分完成")
+
+
 def test_agent_discovery_must_succeed_before_team_creation_in_same_turn():
     guard = service.AgentResponsesService._validate_xiaoling_completion
     late_discovery = _team_checkpoint([

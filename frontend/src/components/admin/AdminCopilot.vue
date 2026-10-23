@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { pageActionTargetHint, notifyCompletedPageAction, notifyVerifiedTeamPageActions, applyTeamResultToToolCalls } from '@/utils/agentPageActions'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { latestAssistantTarget, useChatAutoScroll } from '@/composables/useChatAutoScroll'
 import { useRouter } from 'vue-router'
 import {
   CircleCheck,
@@ -539,7 +540,7 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   activityStore.clear()
   sessionRestoring.value = true
   messages.value = [welcomeEntry()]
-  await scrollToBottom()
+  await forceScrollToBottom()
   if (!scopeCurrent()) return
   void restoreSession()
 }
@@ -926,7 +927,7 @@ async function restoreSession(generation = restoreGeneration + 1): Promise<void>
         sessionRestoring.value = false
         syncBusy()
         persistSnapshot()
-        await scrollToBottom()
+        await forceScrollToBottom()
         if (scopeCurrent()) void meshBridge.syncNow()
       }
     }
@@ -962,7 +963,7 @@ async function handleMeshMessage(message: AgentMeshMessage, targetSessionId: str
       toolCalls: agentMeshToolCalls([message], `session:admin:${sessionId.value}`),
     })
   }
-  await scrollToBottom()
+  await forceScrollToBottom()
   if (!scopeCurrent()) return false
   if (parentWasCancelled || stopWasUnconfirmed) {
     const timelineMessage = stopWasUnconfirmed
@@ -1192,9 +1193,28 @@ function eventErrorMessage(event: ResponseStreamEvent): string {
   return ''
 }
 
+// 星图可收起为一行，给消息区让位；偏好按端保存。
+const GRAPH_COLLAPSED_KEY = 'prism-xiaoling-graph-collapsed:admin'
+const graphCollapsed = ref(readGraphCollapsed())
+function readGraphCollapsed(): boolean {
+  try { return window.localStorage.getItem(GRAPH_COLLAPSED_KEY) === '1' } catch { return false }
+}
+function toggleGraphCollapsed(): void {
+  graphCollapsed.value = !graphCollapsed.value
+  try { window.localStorage.setItem(GRAPH_COLLAPSED_KEY, graphCollapsed.value ? '1' : '0') } catch { /* 存储不可用仍可切换 */ }
+}
+
+// 用户停在底部时跟随最新结论/询问；主动上翻阅读时不打断。
+const { scrollToBottom: forceScrollToBottomNow, followIfPinned } = useChatAutoScroll(messageArea)
+
 async function scrollToBottom(): Promise<void> {
   await nextTick()
-  if (messageArea.value) messageArea.value.scrollTop = messageArea.value.scrollHeight
+  followIfPinned()
+}
+
+async function forceScrollToBottom(): Promise<void> {
+  await nextTick()
+  forceScrollToBottomNow()
 }
 
 /**
@@ -1344,7 +1364,7 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
   const imageNote = imageCount ? `（含 ${imageCount} 张图片附件）` : ''
   const summary = `我已帮你把 ${okCount} 个文件${imageNote}上传到项目「${projectName}」(#${projectId},语言 ${uploadedLanguage})${failures.length ? `,${failures.length} 个失败(${failures[0]})` : ''}。接下来你想让我帮你对这个项目做什么?比如发起代码审查、安全扫描或沙箱部署。`
   messages.value.push(assistantEntry({ type: 'text', content: summary }))
-  await scrollToBottom()
+  await forceScrollToBottom()
   if (!scopeCurrent()) return
   if (failures.length) ElMessage.warning(`已上传 ${okCount} 个,${failures.length} 个失败`)
   else ElMessage.success(`已创建项目「${projectName}」并上传 ${okCount} 个文件`)
@@ -1374,7 +1394,7 @@ async function openPanel(): Promise<void> {
   await nextTick()
   restorePanelPosition()
   switcherRef.value?.ensureFreshOnOpen()
-  await scrollToBottom()
+  await forceScrollToBottom()
 }
 
 function closePanel(): void {
@@ -1629,7 +1649,8 @@ async function runResponse(payload: Record<string, unknown>, onDeferred?: () => 
         sessionRun.value = { ...(sessionRun.value ?? { run_id: event.run_id, model: '', rounds: 0, error: '', updated_at: '' }), run_id: event.run_id, status: 'waiting_approval' }
         clearSessionPoll()
         attachApprovalToToolCall(runToolCalls, event.call_id, event.tool_name, event.arguments)
-        const target = syncTimeline()
+        // 小菱的询问挂在本轮最新一条助手消息上，始终出现在对话最底部。
+        const target = latestAssistantTarget(messages.value, syncTimeline())
         const duplicate = messages.value.some((entry) => (
           entry.approval?.run_id === event.run_id && entry.approval.call_id === event.call_id
         ))
@@ -1642,7 +1663,7 @@ async function runResponse(payload: Record<string, unknown>, onDeferred?: () => 
         sessionRun.value = { ...(sessionRun.value ?? { run_id: event.run_id, model: '', rounds: 0, error: '', updated_at: '' }), run_id: event.run_id, status: 'waiting_input' }
         clearSessionPoll()
         attachInputToToolCall(runToolCalls, event)
-        const target = syncTimeline()
+        const target = latestAssistantTarget(messages.value, syncTimeline())
         const duplicate = messages.value.some((entry) => (
           entry.inputRequest?.run_id === event.run_id
           && entry.inputRequest.call_id === event.call_id
@@ -1856,7 +1877,7 @@ async function sendMessage(): Promise<void> {
   if (autoTitleAgentChatSession(chatStorageKey.value, sessionId.value, content)) {
     switcherRef.value?.reload?.()
   }
-  await scrollToBottom()
+  await forceScrollToBottom()
   if (!scopeCurrent()) return
 
   // 纯页面导航是确定性本地动作,不必为“打开某页”启动付费 Responses 循环。
@@ -1868,7 +1889,7 @@ async function sendMessage(): Promise<void> {
       : '当前账号没有权限打开这个页面。'
     messages.value.push({ ...assistantEntry({ type: 'text', content: message }), localAction })
     persistSnapshot()
-    await scrollToBottom()
+    await forceScrollToBottom()
     if (!scopeCurrent()) return
     if (localNavigation.kind === 'navigate' && directive) {
       const targetSessionId = sessionId.value, storageKey = chatStorageKey.value
@@ -2155,6 +2176,24 @@ onMounted(() => {
   document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 
+// 团队卡插在最近一次用户提问后的第一条“有正文或询问”的助手回复之前：
+// 执行过程在上，小菱结论与询问始终在对话最下面。
+const teamCardsIndex = computed(() => {
+  const list = messages.value
+  let lastUser = -1
+  for (let index = list.length - 1; index >= 0; index -= 1) {
+    if (list[index].role === 'user') { lastUser = index; break }
+  }
+  for (let index = lastUser + 1; index < list.length; index += 1) {
+    const entry = list[index]
+    if (entry.role !== 'assistant') continue
+    const hasAnswer = Boolean(String(entry.payload?.content ?? '').trim())
+      || Boolean(entry.approval || entry.inputRequest)
+    if (hasAnswer) return index
+  }
+  return list.length
+})
+
 // SSE 提交完成后，实际写入与独立核验仍由团队账本持续提供。
 watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
   for (const team of agentTeams.value) {
@@ -2257,8 +2296,15 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
       </div>
 
 
-      <section v-if="liveGraphTeams.length || teamForming || agentTeamError" class="copilot-team-graph" aria-label="团队实时进度">
-        <AgentTeamLiveGraph :teams="liveGraphTeams" :forming="teamForming" :error="agentTeamError" @open-detail="openTeamPanel($event.team_id)" />
+      <section v-if="liveGraphTeams.length || teamForming || agentTeamError" class="copilot-team-graph" :class="{ 'is-collapsed': graphCollapsed }" aria-label="团队实时进度">
+        <button
+          class="live-graph-toggle"
+          type="button"
+          :aria-expanded="!graphCollapsed"
+          :title="graphCollapsed ? '展开团队星图' : '收起团队星图，给对话让出空间'"
+          @click="toggleGraphCollapsed"
+        >{{ graphCollapsed ? '展开星图' : '收起星图' }}</button>
+        <AgentTeamLiveGraph v-show="!graphCollapsed" :teams="liveGraphTeams" :forming="teamForming" :error="agentTeamError" @open-detail="openTeamPanel($event.team_id)" />
       </section>
 
       <div ref="messageArea" class="copilot-messages" :class="{ 'is-restoring': sessionRestoring }" aria-live="polite" @click="onMessageClick">
@@ -2290,9 +2336,17 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
             @click="askQuickQuestion(question)"
           >{{ question }}</button>
         </div>
+        <template v-for="(entry, entryIndex) in messages" :key="entry.id">
+        <template v-if="entryIndex === teamCardsIndex">
+          <AgentTeamCard
+            v-for="team in agentTeams"
+            :key="team.team_id"
+            :team="team"
+            :loading="agentTeamLoading"
+            @open-panel="openTeamPanel"
+          />
+        </template>
         <article
-          v-for="entry in messages"
-          :key="entry.id"
           class="message-row"
           :class="[`is-${entry.role}`, { 'has-timeline': entry.toolCalls?.length || entry.auditPhases?.length, 'has-error': entry.payload.type === 'error' }]"
         >
@@ -2472,14 +2526,18 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
             <time v-if="entry.time">{{ entry.time }}</time>
           </div>
         </article>
+        </template>
 
-        <AgentTeamCard
-          v-for="team in agentTeams"
-          :key="team.team_id"
-          :team="team"
-          :loading="agentTeamLoading"
-          @open-panel="openTeamPanel"
-        />
+        <!-- 本轮还没有小菱结论时，团队卡在最下方；有结论后卡片位于结论之前。 -->
+        <template v-if="teamCardsIndex >= messages.length">
+          <AgentTeamCard
+            v-for="team in agentTeams"
+            :key="team.team_id"
+            :team="team"
+            :loading="agentTeamLoading"
+            @open-panel="openTeamPanel"
+          />
+        </template>
 
 
         <div v-if="thinkingCityActive" class="typing-row">
@@ -2646,8 +2704,8 @@ input { font: inherit; }
 
 .copilot-panel {
   position: fixed;
-  width: 370px;
-  height: 560px;
+  width: min(420px, calc(100vw - 32px));
+  height: min(640px, calc(100dvh - 24px));
   max-width: calc(100vw - 24px);
   max-height: calc(100dvh - 24px);
   min-width: 0;
@@ -2658,7 +2716,8 @@ input { font: inherit; }
     'graph'
     'messages'
     'input';
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  /* 消息区保底高度：星图与进度先让位给对话内容。 */
+  grid-template-rows: auto auto auto minmax(min(160px, 35cqh), 1fr) auto;
   overflow: hidden;
   border: 1px solid rgba(91, 88, 232, 0.14);
   border-radius: 18px;
@@ -2885,7 +2944,12 @@ input { font: inherit; }
 @keyframes session-restoring-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .session-restoring-spinner { animation: none; } }
 
-.copilot-team-graph { grid-area: graph; min-width: 0; min-height: 0; max-height: min(30dvh, 210px); overflow: auto; overscroll-behavior: contain; padding: 0 12px 8px; }
+.copilot-team-graph { position: relative; grid-area: graph; min-width: 0; min-height: 0; max-height: clamp(96px, 30cqh, 320px); overflow: auto; overscroll-behavior: contain; padding: 0 12px 8px; }
+.copilot-team-graph.is-collapsed { max-height: none; overflow: visible; }
+.copilot-team-graph :deep(.live-map-scroll) { max-height: clamp(72px, 20cqh, 240px); }
+.copilot-team-graph :deep(.live-work-list) { max-height: clamp(40px, 8cqh, 120px); }
+.live-graph-toggle { position: sticky; top: 0; z-index: 2; float: right; min-height: 28px; padding: 0 10px; margin: 4px 4px 0 0; border: 1px solid rgba(91, 88, 232, 0.2); border-radius: 999px; background: #fff; color: var(--brand-600, #4b47d6); font-size: 12px; cursor: pointer; }
+.copilot-team-graph.is-collapsed .live-graph-toggle { float: none; display: block; width: 100%; margin: 0; text-align: left; }
 .copilot-messages { grid-area: messages; min-height: 0; min-width: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 16px 14px;
   /* 极淡品牌氛围底 + 滚动渐隐,替代平涂灰 */
   background:

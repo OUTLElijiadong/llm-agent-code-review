@@ -8,7 +8,8 @@ export type FloatingChatResizeDirection = 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' |
 const EDGE = 12
 const DEFAULT_SIZE: Size = { width: 400, height: 620 }
 const MIN_SIZE: Size = { width: 360, height: 420 }
-const MAX_SIZE: Size = { width: 760, height: 900 }
+// 上限放宽到大屏可用：宽屏可把小菱拉成半屏工作区，最终仍受视口约束。
+const MAX_SIZE: Size = { width: 1600, height: 1400 }
 const KEYBOARD_RESIZE_STEP = 16
 
 function storageName(storageKey: string): string {

@@ -278,3 +278,56 @@ def test_team_roundtable_rejects_mismatched_parameters(monkeypatch):
     _patch_roundtable(monkeypatch, raw=raw, row=row)
     with pytest.raises(agent_team_service.AgentTeamAccessError):
         _run_roundtable(row)
+
+
+def test_team_roundtable_retries_deepseek_network_failure_then_reports_upstream(monkeypatch):
+    """DeepSeek 网络失败自动重开圆桌，重试 3 次仍失败则明确归因为 DeepSeek。"""
+    import json
+
+    from app.services import agent_team_review
+
+    raw = {"operation": "start_roundtable", "project_id": 1, "file_id": 2}
+    row = _Row("failed")
+    row.progress = {"phase": "failed", "terminal_error": "[call_raw] general 全部 3 次重试均失败: DeepSeek 网络请求失败: x"}
+    task, calls = _patch_roundtable(monkeypatch, raw=raw, row=row)
+
+    result = _run_roundtable(row)
+
+    assert calls["start"] == calls["launch"] == 1 + agent_team_review.ROUNDTABLE_NETWORK_RETRY_LIMIT
+    assert result["status"] == "failed"
+    assert "DeepSeek" in result["summary"] and "重试 3 次" in result["summary"]
+    assert any(error.get("code") == "deepseek_network_failure" for error in result["errors"])
+    assert json.loads(task.input_json)["_roundtable"]["network_retries"] == 3
+
+
+def test_team_roundtable_network_failure_recovers_on_retry(monkeypatch):
+    raw = {"operation": "start_roundtable", "project_id": 1, "file_id": 2}
+    row = _Row("failed")
+    row.progress = {"terminal_error": "DeepSeek 网络请求失败: reset"}
+    _task, calls = _patch_roundtable(monkeypatch, raw=raw, row=row)
+
+    from app.api.v1 import discussion
+
+    real_start = discussion.start_discussion
+
+    def start_then_recover(**kwargs):
+        response = real_start(**kwargs)
+        if calls["start"] >= 2:
+            row.status = "concluded"
+            row.progress = {}
+        return response
+
+    monkeypatch.setattr(discussion, "start_discussion", start_then_recover)
+    result = _run_roundtable(row)
+    assert result["status"] == "completed"
+    assert calls["start"] == 2
+
+
+def test_team_roundtable_non_network_failure_is_not_retried(monkeypatch):
+    raw = {"operation": "start_roundtable", "project_id": 1, "file_id": 2}
+    row = _Row("failed")
+    row.progress = {"terminal_error": "结构化问题抽取失败：字段缺失"}
+    _task, calls = _patch_roundtable(monkeypatch, raw=raw, row=row)
+    result = _run_roundtable(row)
+    assert result["status"] == "failed"
+    assert calls["start"] == 1

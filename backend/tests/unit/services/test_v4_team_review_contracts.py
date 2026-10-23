@@ -453,7 +453,8 @@ def test_coverage_summary_preserves_partial_counts_and_does_not_infer_unknown():
                                               "completed_chunks": 1, "failed_chunks": 1},
     }}, "unknown": {"status": "completed", "result": {"status": "completed"}}})
     coverage = {row["task_key"]: row for row in result["coverage_summary"]}
-    assert result["status"] == "failed"
+    assert result["status"] == "completed" and result["partial"] is True
+    assert result["missing_tasks"] == ["review"]
     assert coverage["review"]["completed_chunks"] == 1
     assert coverage["review"]["failed_chunks"] == 1
     assert coverage["unknown"] == {"task_key": "unknown"}

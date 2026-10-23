@@ -92,6 +92,11 @@ progress::-moz-progress-bar { background: #6d61ce; }
   .quick-question { min-height: 32px; padding: 6px 10px; }
   :deep(.agent-team-refresh) { margin-left: auto; }
 }
+@container floating-chat (max-height: 480px) {
+  /* 极矮窗口：星图只保留一行，进度条压缩，把高度全部让给对话。 */
+  .live-team-graph-region, .copilot-team-graph { max-height: 72px; }
+  .chat-progress, .copilot-progress { padding-block: 3px; }
+}
 @container floating-chat (max-height: 540px) {
   .mascot-hero, .copilot-hero { display: none; }
   .quick-questions { padding-block: 4px; }

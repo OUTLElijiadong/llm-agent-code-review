@@ -120,7 +120,7 @@ describe('useFloatingChatPosition', () => {
     } as unknown as PointerEvent)
     wrapper.vm.moveDrag({ clientX: 900, clientY: 400 } as PointerEvent)
     await nextTick()
-    expect(wrapper.attributes('style')).toContain('width: 760px')
+    expect(wrapper.attributes('style')).toContain('width: 1200px')
     expect(wrapper.attributes('style')).toContain('height: 668px')
 
     wrapper.vm.moveDrag({ clientX: -1000, clientY: -1000 } as PointerEvent)
@@ -225,7 +225,8 @@ describe('浮窗边角与响应式约束', () => {
       await nextTick()
       expect(wrapper.attributes('style')).toContain('left: 200px')
       expect(wrapper.attributes('style')).toContain('top: 200px')
-      expect(wrapper.attributes('style')).toContain('width: 760px')
+      // 放大到视口边缘为止（1280 - 200 - 12）。
+      expect(wrapper.attributes('style')).toContain('width: 1068px')
       expect(wrapper.attributes('style')).toContain('height: 688px')
     } finally { wrapper.unmount() }
   })

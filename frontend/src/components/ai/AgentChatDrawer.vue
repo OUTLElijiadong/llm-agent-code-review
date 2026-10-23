@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { pageActionTargetHint, notifyCompletedPageAction, notifyVerifiedTeamPageActions, applyTeamResultToToolCalls } from '@/utils/agentPageActions'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { latestAssistantTarget, useChatAutoScroll } from '@/composables/useChatAutoScroll'
 import { Check, CircleCheck, CircleCloseFilled, Close, Connection, CopyDocument, Upload, WarningFilled } from '@element-plus/icons-vue'
 
 import dayjs from 'dayjs'
@@ -566,7 +567,7 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   messages.value = [welcomeMessage()]
   await nextTick()
   if (!scopeCurrent()) return
-  scrollToBottom()
+  forceScrollToBottom()
   void restoreSession()
 }
 
@@ -883,7 +884,7 @@ async function restoreSession(): Promise<void> {
       persistSnapshot()
       await nextTick()
       if (scopeCurrent()) {
-        scrollToBottom()
+        forceScrollToBottom()
         void meshBridge.syncNow()
       }
     }
@@ -944,7 +945,7 @@ async function handleMeshMessage(message: AgentMeshMessage, targetSessionId: str
       return false
     }
   }
-  scrollToBottom()
+  forceScrollToBottom()
   let deferred = false
   const succeeded = await runResponse({
     action: 'start',
@@ -1813,7 +1814,8 @@ async function runResponse(payload: Record<string, unknown>, onDeferred?: () => 
         sessionRun.value = { ...(sessionRun.value ?? { run_id: event.run_id, status: 'running', model: modelName.value, rounds: 0, error: '', updated_at: '' }), run_id: event.run_id, status: 'waiting_approval' }
         clearSessionPoll()
         attachApprovalToToolCall(runToolCalls, event.call_id, event.tool_name, event.arguments)
-        const target = syncTimeline()
+        // 小菱的询问挂在本轮最新一条助手消息上，始终出现在对话最底部。
+        const target = latestAssistantTarget(messages.value, syncTimeline())
         const duplicate = messages.value.some((message) => (
           message.approval?.run_id === event.run_id && message.approval.call_id === event.call_id
         ))
@@ -1826,7 +1828,7 @@ async function runResponse(payload: Record<string, unknown>, onDeferred?: () => 
         sessionRun.value = { ...(sessionRun.value ?? { run_id: event.run_id, status: 'running', model: modelName.value, rounds: 0, error: '', updated_at: '' }), run_id: event.run_id, status: 'waiting_input' }
         clearSessionPoll()
         attachInputToToolCall(runToolCalls, event)
-        const target = syncTimeline()
+        const target = latestAssistantTarget(messages.value, syncTimeline())
         const duplicate = messages.value.some((message) => (
           message.inputRequest?.run_id === event.run_id
           && message.inputRequest.call_id === event.call_id
@@ -1880,7 +1882,7 @@ async function runResponse(payload: Record<string, unknown>, onDeferred?: () => 
           if (directive) followNavigation(directive)
         }
       }
-      void nextTick().then(scrollToBottom)
+      void nextTick().then(followIfPinned)
     },
   })
   activeResponse = handle
@@ -2138,7 +2140,7 @@ async function sendMessage(): Promise<void> {
 
   await nextTick()
   if (!scopeCurrent()) return
-  scrollToBottom()
+  forceScrollToBottom()
 
   // 纯页面导航是确定性本地动作,不必为“打开某页”启动付费 Responses 循环。
   // 权限仍由路由守卫裁决,实际跳转交给全局虚拟鼠标完成。
@@ -2330,10 +2332,22 @@ function onMessageClick(event: MouseEvent): void {
   followNavigation({ action: 'navigate', route: href, label })
 }
 
+// 星图可收起为一行，给消息区让位；偏好按端保存。
+const GRAPH_COLLAPSED_KEY = 'prism-xiaoling-graph-collapsed:user'
+const graphCollapsed = ref(readGraphCollapsed())
+function readGraphCollapsed(): boolean {
+  try { return window.localStorage.getItem(GRAPH_COLLAPSED_KEY) === '1' } catch { return false }
+}
+function toggleGraphCollapsed(): void {
+  graphCollapsed.value = !graphCollapsed.value
+  try { window.localStorage.setItem(GRAPH_COLLAPSED_KEY, graphCollapsed.value ? '1' : '0') } catch { /* 存储不可用仍可切换 */ }
+}
+
+// 用户停在底部时跟随最新结论/询问；主动上翻阅读时不打断。尺寸变化时若在底部也重新贴底。
+const { scrollToBottom: forceScrollToBottom, followIfPinned } = useChatAutoScroll(chatBody)
+
 function scrollToBottom(): void {
-  if (chatBody.value) {
-    chatBody.value.scrollTop = chatBody.value.scrollHeight
-  }
+  followIfPinned()
 }
 
 /* ── 拖拽上传文件建项目 ─────────────────────────────── */
@@ -2503,7 +2517,7 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
   messages.value.push({ id: messageId(), role: 'assistant', content: summary, time: dayjs().format('HH:mm') })
   await nextTick()
   if (!scopeCurrent()) return
-  scrollToBottom()
+  forceScrollToBottom()
   if (failures.length) ElMessage.warning(`已上传 ${okCount} 个,${failures.length} 个失败`)
   else ElMessage.success(`已创建项目「${projectName}」并上传 ${okCount} 个文件`)
   // 上传成功后交给固定全量验证工具，避免模型只回复“下一步做什么”而不执行。
@@ -2532,7 +2546,7 @@ watch(() => props.visible, async (val) => {
   await nextTick()
   restoreOrAnchor()
   switcherRef.value?.ensureFreshOnOpen()
-  scrollToBottom()
+  forceScrollToBottom()
 })
 
 watch([() => props.visible, () => props.preferredSessionRequestId], async ([visible, requestId]) => {
@@ -2830,11 +2844,20 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
             <div
               v-if="liveGraphTeams.length || teamForming"
               class="live-team-graph-region"
+              :class="{ 'is-collapsed': graphCollapsed }"
               role="region"
               aria-label="团队实时状态区域"
               tabindex="0"
             >
+              <button
+                class="live-graph-toggle"
+                type="button"
+                :aria-expanded="!graphCollapsed"
+                :title="graphCollapsed ? '展开团队星图' : '收起团队星图，给对话让出空间'"
+                @click="toggleGraphCollapsed"
+              >{{ graphCollapsed ? '展开星图' : '收起星图' }}</button>
               <AgentTeamLiveGraph
+                v-show="!graphCollapsed"
                 :teams="liveGraphTeams"
                 :forming="teamForming"
                 :error="agentTeamError"
@@ -3319,8 +3342,8 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
 
 .chat-drawer {
   position: fixed;
-  width: min(370px, calc(100vw - 32px));
-  height: min(560px, calc(100dvh - 24px));
+  width: min(420px, calc(100vw - 32px));
+  height: min(640px, calc(100dvh - 24px));
   max-width: calc(100vw - 24px);
   max-height: calc(100dvh - 24px);
   min-width: 0;
@@ -3583,14 +3606,45 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
 }
 
 .live-team-graph-region {
+  position: relative;
   flex: 0 1 auto;
   min-width: 0;
   min-height: 0;
-  max-height: min(220px, 38vh);
+  /* 星图随窗口高度让位：最多占消息区约三成，窗口越矮占比越小。 */
+  max-height: clamp(96px, 30cqh, 320px);
   margin: 0 12px 6px;
   overflow: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+}
+
+.live-team-graph-region.is-collapsed {
+  max-height: none;
+  overflow: visible;
+}
+
+.live-graph-toggle {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  float: right;
+  min-height: 28px;
+  padding: 0 10px;
+  margin: 4px 4px 0 0;
+  border: 1px solid rgba(91, 88, 232, 0.2);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--brand-600, #4b47d6);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.live-team-graph-region.is-collapsed .live-graph-toggle {
+  float: none;
+  display: block;
+  width: 100%;
+  margin: 0;
+  text-align: left;
 }
 
 .live-team-graph-region :deep(.agent-team-live) {
@@ -3617,8 +3671,8 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
 }
 
 .live-team-graph-region :deep(.live-team) { margin-top: 6px; }
-.live-team-graph-region :deep(.live-map-scroll) { max-height: 132px; }
-.live-team-graph-region :deep(.live-work-list) { max-height: 56px; }
+.live-team-graph-region :deep(.live-map-scroll) { max-height: clamp(72px, 20cqh, 240px); }
+.live-team-graph-region :deep(.live-work-list) { max-height: clamp(40px, 8cqh, 120px); }
 
 .mascot-hero {
   flex: 0 0 auto;
@@ -3721,7 +3775,8 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
 
 .chat-body {
   flex: 1;
-  min-height: 0;
+  /* 消息区保底高度：星图、进度、输入区都要先让位给对话内容。 */
+  min-height: min(160px, 35cqh);
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;

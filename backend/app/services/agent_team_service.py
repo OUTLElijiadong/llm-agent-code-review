@@ -2193,7 +2193,10 @@ def _refresh_team_status(db: Session, team: AgentTeam) -> None:
         _persist_terminal_team_notification(db, team, now=now)
         return
 
-    if failed or not verification:
+    # 有 summarizer 终点时不再 fail-fast：独立工作节点继续执行，只有依赖失败节点的
+    # 后继由 _promote_dependencies 阻断；summarizer 汇总已交付部分并如实列出缺口。
+    # 仅有 verifier 的团队无法消费部分结果，仍按 fail-fast 停止新工作。
+    if not verification or (failed and not pending_summarizers):
         failed_keys = [item.task_key for item in failed]
         now = _now()
         for task in tasks:
@@ -2250,6 +2253,9 @@ def _refresh_team_status(db: Session, team: AgentTeam) -> None:
                 "final_result": verification_results[-1]["result"] if verification_results else {},
             }
         )
+    elif failed and any(item.status in {"queued", "waiting_dependency", "running"} for item in workers):
+        team.status = "running"
+        team.started_at = team.started_at or _now()
     elif failed and pending_summarizers and not running:
         # A failed worker closes new work but leaves a declared summary endpoint
         # schedulable. It receives terminal dependency results and must report the
@@ -2260,15 +2266,18 @@ def _refresh_team_status(db: Session, team: AgentTeam) -> None:
         # 只有成员明确报告 blocked（缺合同/缺授权/需人工）时整队收口为 blocked；
         # 任何真实执行失败仍是 failed。
         root_failures = [item for item in failed if item.status != "blocked"]
-        team.status = "failed" if root_failures else "blocked"
-        team.completed_at = team.completed_at or _now()
         completed_summarizers = [
             item for item in tasks
             if members.get(int(item.member_id))
             and members[int(item.member_id)].role == "summarizer"
             and item.status == "completed"
         ]
-        if completed_summarizers:
+        completed_verification = [item for item in verification if item.status == "completed"]
+        # 部分完成算成功：至少一个工作节点交付且终点核验/汇总已完成。
+        partial_success = bool(completed_verification) and any(item.status == "completed" for item in workers)
+        team.status = "completed" if partial_success else ("failed" if root_failures else "blocked")
+        team.completed_at = team.completed_at or _now()
+        if completed_summarizers or partial_success:
             verification_results = [
                 {"task_key": item.task_key, "result": project_team_result(
                     _unjson(item.result_json, {}), team_id=team.id, task_id=item.id,
@@ -2287,7 +2296,9 @@ def _refresh_team_status(db: Session, team: AgentTeam) -> None:
                     "failed_tasks": failed_task_keys,
                     "blocked_tasks": blocked_task_keys,
                     "verification_results": verification_results,
-                    "final_result": _public(_unjson(completed_summarizers[-1].result_json, {})),
+                    "final_result": _public(_unjson(
+                        (completed_summarizers or completed_verification)[-1].result_json, {},
+                    )),
                 }
             )
         team.error_json = _json(

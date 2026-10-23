@@ -2417,6 +2417,11 @@ def prepare_message_run(
             f"\n\n【团队终态汇总回执】团队编号 {team_id}；"
             "服务端已完成真实账本读取，不要求再重复读取；如需未包含的任务详情，再使用团队编号调用工具。"
         )
+        if terminal_snapshot.get("partial"):
+            content += (
+                "\n该团队为部分完成（计为完成）：先给出已交付部分的结论，再单独列出未完成节点及原因；"
+                "不得把未完成部分写成已核验，也不要宣称全部完成。"
+            )
     review_protocol = _supervision_review_protocol(envelope)
     if review_protocol:
         content += "\n\n" + review_protocol
@@ -2449,6 +2454,8 @@ def render_terminal_team_fallback(snapshot: Mapping[str, Any]) -> str:
     team_id = int(snapshot.get("team_id") or 0)
     status = str(snapshot.get("status") or "")
     label = _TERMINAL_TEAM_LABELS.get(status, status or "状态未知")
+    if status == "completed" and snapshot.get("partial"):
+        label = "已完成（部分完成）"
     lines = [f"团队 {team_id} {label}。"]
     final_result = snapshot.get("final_result")
     summary = final_result.get("summary") if isinstance(final_result, Mapping) else None
@@ -2584,6 +2591,7 @@ def _verified_terminal_team_snapshot(
         "counts": detail.get("counts", {}),
         "task_statuses": task_statuses,
         "final_result": final_result,
+        "partial": bool(isinstance(summary, dict) and summary.get("partial")),
         "failed_task_samples": failed_tasks[:failure_sample_limit],
         "omitted_failed_task_count": max(0, len(failed_tasks) - failure_sample_limit),
         "error_reason": error_reason or None,

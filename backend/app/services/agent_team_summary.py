@@ -467,6 +467,10 @@ def summarize_dependencies(dependencies: dict[str, Any], *, _depth: int = 0) -> 
     bounded_tasks = sorted(set(bounded_tasks))
     conflicts = sorted(set(conflicts))
     complete = bool(outcomes) and not failed and not bounded_tasks and not conflicts
+    # 部分完成算成功：已有节点完整交付、未完成节点只是缺失（无证据冲突）时，汇总照常完成，
+    # 并在 partial/missing_tasks 与说明中如实列出缺口，不把缺失写成已核验。
+    delivered = [item["task_key"] for item in outcomes if item["task_key"] not in set(failed)]
+    partial = bool(failed) and bool(delivered) and not conflicts
     scope = "仅核对依赖节点返回的证据；问题数为已返回条目的精确去重，不代表全项目漏洞总数或实测确认数。"
     count_sources = [part for sources in finding_sources.values() for part in sources]
     check("finding_count", "/unique_finding_count", len(findings), "", "/evidence",
@@ -490,11 +494,16 @@ def summarize_dependencies(dependencies: dict[str, Any], *, _depth: int = 0) -> 
             else "未提供问题明细，不能推断无问题；")
     message = (f"汇总已完成：已核对 {len(outcomes)} 个子任务的结构化终态；{note}"
                "逐项结论的来源及核验范围见 claim_checks，成员原文未逐项核验。" if complete else
+               f"部分完成：{len(delivered)} 个子任务已交付（{', '.join(delivered)}），"
+               f"{len(failed)} 个未完成（{', '.join(failed)}），未完成部分的结论缺失、不能视为已核验；{note}"
+               "已交付部分的来源见 claim_checks。" if partial else
                "团队结果未完整覆盖；" + ("无成员输出；" if not outcomes else "") +
                f"待处理节点：{', '.join(failed) or '无'}；明细或覆盖不完整的节点：{', '.join(bounded_tasks) or '无'}；"
                f"证据冲突节点：{', '.join(conflicts) or '无'}。已保留可用证据。")
     return {
-        "status": "completed" if complete else "failed", "verification_status": verification_status,
+        "status": "completed" if complete or partial else "failed",
+        **({"partial": True, "delivered_tasks": delivered, "missing_tasks": failed} if partial else {}),
+        "verification_status": verification_status,
         "outcomes": outcomes, "findings_data_available": finding_data_available,
         "unique_finding_count": len(findings), "incomplete_tasks": failed, "conflicting_tasks": conflicts,
         "business_results": business_results,
@@ -505,11 +514,13 @@ def summarize_dependencies(dependencies: dict[str, Any], *, _depth: int = 0) -> 
         "coverage_summary_truncated": len(coverage_summary) > 20,
         "bounded_finding_tasks": bounded_tasks, "claim_checks": checks, "scope": scope, "summary": message,
         "evidence": evidence, "artifacts": [{"type": "agent_team_summary", "data": summary}],
-        "errors": [] if complete else [{
+        "errors": [] if complete or partial else [{
             "code": ("incomplete_dependencies" if failed else "dependency_evidence_conflict" if conflicts
                      else "finding_coverage_incomplete"),
             "task_keys": failed, "bounded_task_keys": bounded_tasks, "conflicting_task_keys": conflicts,
         }],
+        "warnings": [{"code": "incomplete_dependencies", "task_keys": failed,
+                      "bounded_task_keys": bounded_tasks}] if partial else [],
         "next_action": None if complete else {"review_incomplete_tasks": failed,
             "review_bounded_tasks": bounded_tasks, "review_conflicting_tasks": conflicts},
         "retryable": False,

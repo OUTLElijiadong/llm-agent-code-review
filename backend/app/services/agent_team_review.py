@@ -236,7 +236,8 @@ def run_team_review(
 _ROUNDTABLE_TERMINAL = {"concluded", "partial", "failed", "cancelled", "interrupted"}
 
 
-def _roundtable_result(row: Any, *, status: str | None = None, summary: str = "") -> dict[str, Any]:
+def _roundtable_result(row: Any, *, status: str | None = None, summary: str = "",
+                       extra_error: dict[str, Any] | None = None) -> dict[str, Any]:
     """把圆桌会话终态转换成团队任务结果；只有已结论的圆桌算完成。"""
     session_status = str(getattr(row, "status", "") or "")
     requested_state = status or ("completed" if session_status == "concluded" else "failed")
@@ -279,7 +280,7 @@ def _roundtable_result(row: Any, *, status: str | None = None, summary: str = ""
             "code": "roundtable_terminal_error",
             "phase": phase or None,
             "message": terminal_error,
-        }] if state == "failed" and terminal_error else []),
+        }] if state == "failed" and terminal_error else []) + ([extra_error] if extra_error else []),
         "retryable": False,
     }
 
@@ -296,7 +297,6 @@ def run_team_roundtable(
     from app.agents.discussion_bus import DiscussionBus
     from app.api.v1.discussion import start_discussion
     from app.api.v1.ws_discussion import launch_pending_discussion_from_thread, take_pending
-    from app.models.roundtable import RoundtableSession
 
     user_id = int(user.id)
     team, team_task, member = agent_team_service.require_active_task_lease(
@@ -309,23 +309,77 @@ def run_team_roundtable(
         raise agent_team_service.AgentTeamAccessError("圆桌参数与已授权的团队任务不一致")
     actor = _require_actor(db, user_id, project_id)
 
-    # 同一团队任务重派时复用已经启动的圆桌，避免重复开会。
-    session_id = str((raw.get("_roundtable") or {}).get("session_id") or "")
-    if not session_id:
-        response = start_discussion(
-            project_id=project_id, file_id=file_id, review_type="full", db=db, user=actor,
-            temporary_experts_json=json.dumps(temporary_experts or [], ensure_ascii=False),
-        )
-        session_id = str((response.data or {}).get("session_id") or "")
-        pending = take_pending(session_id)
-        if not session_id or pending is None:
-            raise agent_team_service.AgentTeamStateError("圆桌讨论上下文创建失败")
-        if not launch_pending_discussion_from_thread(pending):
-            raise agent_team_service.AgentTeamStateError("圆桌会话已结束或已被停止，未启动")
-        team_task.input_json = json.dumps({**raw, "_roundtable": {"session_id": session_id}}, ensure_ascii=False)
-    db.commit()  # 释放团队行锁，等待期间不占事务。
-
     bus = DiscussionBus.instance()
+    # 同一团队任务重派时复用已经启动的圆桌，避免重复开会。
+    roundtable_state = dict(raw.get("_roundtable") or {})
+    session_id = str(roundtable_state.get("session_id") or "")
+    network_retries = int(roundtable_state.get("network_retries") or 0)
+    while True:
+        if not session_id:
+            response = start_discussion(
+                project_id=project_id, file_id=file_id, review_type="full", db=db, user=actor,
+                temporary_experts_json=json.dumps(temporary_experts or [], ensure_ascii=False),
+            )
+            session_id = str((response.data or {}).get("session_id") or "")
+            pending = take_pending(session_id)
+            if not session_id or pending is None:
+                raise agent_team_service.AgentTeamStateError("圆桌讨论上下文创建失败")
+            if not launch_pending_discussion_from_thread(pending):
+                raise agent_team_service.AgentTeamStateError("圆桌会话已结束或已被停止，未启动")
+            roundtable_state = {"session_id": session_id, "network_retries": network_retries}
+            team_task.input_json = json.dumps({**raw, "_roundtable": roundtable_state}, ensure_ascii=False)
+        db.commit()  # 释放团队行锁，等待期间不占事务。
+
+        row, session, result = _wait_roundtable(
+            db, bus, session_id=session_id, team_id=team_id, task_id=task_id,
+            lease_token=lease_token, user_id=user_id,
+        )
+        if result is not None:
+            return result
+        if not _is_deepseek_network_failure(row, session):
+            return _roundtable_result(row)
+        if network_retries >= ROUNDTABLE_NETWORK_RETRY_LIMIT:
+            return _roundtable_result(
+                row, status="failed",
+                summary=(
+                    f"圆桌讨论因 DeepSeek 模型服务网络请求失败未完成，已自动重试 {network_retries} 次仍失败；"
+                    "这是上游 DeepSeek 服务的问题，不是项目代码或平台权限问题，请稍后重试。"
+                ),
+                extra_error={"code": "deepseek_network_failure", "retries": network_retries},
+            )
+        # DeepSeek 网络失败是瞬时上游故障：重新开一场圆桌，最多重试 3 次。
+        network_retries += 1
+        session_id = ""
+        db.rollback()
+        team, team_task, member = agent_team_service.require_active_task_lease(
+            db, team_id=team_id, task_id=task_id, lease_token=lease_token, owner_user_id=user_id, lock=True,
+        )
+        time.sleep(min(30, 5 * network_retries))
+
+
+ROUNDTABLE_NETWORK_RETRY_LIMIT = 3
+_DEEPSEEK_NETWORK_MARKERS = ("DeepSeek 网络请求失败", "DeepSeek network", "网络请求失败")
+
+
+def _is_deepseek_network_failure(row: Any, session: Any) -> bool:
+    """只把上游 DeepSeek 网络失败视为可重试；权限、参数、取消等终态不重试。"""
+    status = str(getattr(row, "status", "") or getattr(session, "status", "") or "")
+    if status not in {"failed", "partial", "interrupted"}:
+        return False
+    progress = getattr(row, "progress", None)
+    progress = progress if isinstance(progress, dict) else {}
+    text = " ".join(str(value or "") for value in (
+        progress.get("terminal_error"), getattr(session, "terminal_error", ""), getattr(row, "terminal_error", ""),
+    ))
+    return any(marker in text for marker in _DEEPSEEK_NETWORK_MARKERS)
+
+
+def _wait_roundtable(
+    db: Session, bus: Any, *, session_id: str, team_id: int, task_id: int, lease_token: str, user_id: int,
+) -> tuple[Any, Any, dict[str, Any] | None]:
+    """等待单场圆桌终态；团队停止或超时时直接给出团队任务结果。"""
+    from app.models.roundtable import RoundtableSession
+
     deadline = time.monotonic() + int(settings.agent_full_validation_wait_seconds)
     while True:
         db.rollback()
@@ -338,7 +392,9 @@ def run_team_roundtable(
         except agent_team_service.AgentTeamLeaseError:
             db.rollback()
             bus.request_stop(session_id, "所属团队任务已停止")
-            return _roundtable_result(row, status="cancelled", summary="团队任务已停止，圆桌讨论随之停止")
+            return row, None, _roundtable_result(
+                row, status="cancelled", summary="团队任务已停止，圆桌讨论随之停止",
+            )
         session = bus.get_session(session_id, owner_user_id=user_id)
         live_status = str(getattr(session, "status", "") or getattr(row, "status", "") or "")
         if live_status in _ROUNDTABLE_TERMINAL:
@@ -346,10 +402,10 @@ def run_team_roundtable(
             row = db.get(RoundtableSession, session_id) or session
             if row is not None and str(getattr(row, "status", "") or "") not in _ROUNDTABLE_TERMINAL:
                 row = session
-            return _roundtable_result(row)
+            return row, session, None
         if time.monotonic() >= deadline:
             bus.request_stop(session_id, "团队等待圆桌讨论超时")
-            return _roundtable_result(
+            return row, session, _roundtable_result(
                 row or session, status="failed", summary="圆桌讨论未在团队等待期限内完成，已请求停止并保留已有发言",
             )
         db.rollback()
