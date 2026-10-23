@@ -135,6 +135,104 @@ describe('streamResponses', () => {
     expect(onError).toHaveBeenCalledWith(error)
   })
 
+  it.each(['user', 'admin'])('accepts matching start Mesh deferred EOF on %s without completing a task', async (surface) => {
+    const deferred = {
+      type: 'response.deferred', message_id: 'mesh-message-1',
+      reason: 'session_busy', retry_after_seconds: 5,
+    }
+    const frame = `event: response.deferred\r\ndata: ${JSON.stringify(deferred)}\r\n\r\n`
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(streamResponse([
+      'data: {"type":"response.created","response":{"id":"pending-mesh-run"}}\n\n',
+      frame.slice(0, 24), frame.slice(24, -1), frame.slice(-1),
+    ])))
+    const events: ResponseStreamEvent[] = []
+    const onError = vi.fn()
+    const dispatch = vi.spyOn(window, 'dispatchEvent')
+
+    await expect(streamResponses({
+      action: 'start', surface, mesh_message_id: 'mesh-message-1',
+    }, { onEvent: event => events.push(event), onError }).done).resolves.toBeUndefined()
+
+    expect(events.map(event => event.type)).toEqual(['response.created', 'response.deferred'])
+    expect(events[1]).toEqual(deferred)
+    expect(onError).not.toHaveBeenCalled()
+    expect(dispatch.mock.calls.map(([event]) => event.type)).not.toContain('prism:agent-task-complete')
+  })
+
+  it.each([
+    { label: 'mismatched message', body: { action: 'start', mesh_message_id: 'other-message' }, messageId: 'mesh-message-1' },
+    { label: 'empty event message', body: { action: 'start', mesh_message_id: 'mesh-message-1' }, messageId: '' },
+    { label: 'missing event message', body: { action: 'start', mesh_message_id: 'mesh-message-1' }, messageId: undefined },
+    { label: 'empty request message', body: { action: 'start', mesh_message_id: '' }, messageId: '' },
+    { label: 'blank message binding', body: { action: 'start', mesh_message_id: '   ' }, messageId: '   ' },
+    { label: 'non-Mesh start', body: { action: 'start' }, messageId: 'mesh-message-1' },
+    { label: 'missing action', body: { mesh_message_id: 'mesh-message-1' }, messageId: 'mesh-message-1' },
+    { label: 'resume action', body: { action: 'resume', mesh_message_id: 'mesh-message-1' }, messageId: 'mesh-message-1' },
+    { label: 'approve action', body: { action: 'approve', mesh_message_id: 'mesh-message-1' }, messageId: 'mesh-message-1' },
+    { label: 'cancel action', body: { action: 'cancel', mesh_message_id: 'mesh-message-1' }, messageId: 'mesh-message-1' },
+  ])('rejects Mesh deferred EOF for $label', async ({ body, messageId }) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(streamResponse([
+      'data: {"type":"response.created","response":{"id":"pending-mesh-run"}}\n\n',
+      `data: ${JSON.stringify({ type: 'response.deferred', message_id: messageId, reason: 'session_busy', retry_after_seconds: 5 })}\n\n`,
+    ])))
+    const onError = vi.fn()
+    const dispatch = vi.spyOn(window, 'dispatchEvent')
+
+    const error = await streamResponses(body, { onEvent: vi.fn(), onError }).done
+      .catch((reason: unknown) => reason)
+
+    expect(error).toBeInstanceOf(ResponsesStreamProtocolError)
+    expect(onError).toHaveBeenCalledExactlyOnceWith(error)
+    expect(dispatch.mock.calls.map(([event]) => event.type)).not.toContain('prism:agent-task-complete')
+  })
+
+  it('rejects Mesh deferred EOF with an unsupported reason', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(streamResponse([
+      'data: {"type":"response.deferred","message_id":"mesh-message-1","reason":"other","retry_after_seconds":5}\n\n',
+    ])))
+
+    await expect(streamResponses({ action: 'start', mesh_message_id: 'mesh-message-1' }, {
+      onEvent: vi.fn(),
+    }).done).rejects.toBeInstanceOf(ResponsesStreamProtocolError)
+  })
+
+  it('keeps ordinary completion and emits its task completion event only once', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(streamResponse([
+      'data: {"type":"response.completed","response":{"id":"normal-run","status":"completed"}}\n\n',
+      'data: {"type":"response.completed","response":{"id":"normal-run","status":"completed"}}\n\n',
+    ])))
+    const events: ResponseStreamEvent[] = []
+    const dispatch = vi.spyOn(window, 'dispatchEvent')
+
+    await expect(streamResponses({ action: 'start', surface: 'user' }, {
+      onEvent: event => events.push(event),
+    }).done).resolves.toBeUndefined()
+
+    expect(events.map(event => event.type)).toEqual(['response.completed', 'response.completed'])
+    const completions = dispatch.mock.calls.filter(([event]) => event.type === 'prism:agent-task-complete')
+    expect(completions).toHaveLength(1)
+    expect(completions[0]?.[0]).toMatchObject({ detail: { surface: 'user' } })
+  })
+
+  it('keeps current-token auth_expired routing and completion boundary', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(streamResponse([
+      'data: {"type":"auth_expired","code":40102,"message":"登录已失效"}\n\n',
+    ])))
+    const events: ResponseStreamEvent[] = []
+    const onError = vi.fn()
+    const dispatch = vi.spyOn(window, 'dispatchEvent')
+
+    await expect(streamResponses({ action: 'start', surface: 'admin' }, {
+      onEvent: event => events.push(event), onError,
+    }).done).resolves.toBeUndefined()
+
+    expect(events.map(event => event.type)).toEqual(['auth_expired'])
+    expect(onError).not.toHaveBeenCalled()
+    expect(dispatch.mock.calls.map(([event]) => event.type)).toEqual([
+      'prism:auth-expired', 'prism:agent-task-complete',
+    ])
+  })
+
   it('accepts approval and input events as explicit pause boundaries', async () => {
     const pauseEvents = [
       {

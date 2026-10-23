@@ -156,7 +156,7 @@ def _isolated_event_history():
             bus._history.append(event)
 
 
-def test_get_situation_shape():
+def test_get_situation_shape(_isolated_event_history):
     """态势数据结构符合 AgentSituationOut Schema"""
     db = _FakeSituationDb([])
     data = agent_service.get_situation(db, user_id=None, minutes=60)

@@ -345,6 +345,8 @@ async def test_coordinator_waits_for_real_page_member_and_verifier_before_return
                                         lease_token=verifier["lease_token"], result=verified, success=True)
         returned = await asyncio.wait_for(waiting, timeout=2)
         assert returned.status == "success"
+        assert returned.output["status"] == "completed"
+        assert {task["status"] for task in returned.output["tasks"]} == {"completed"}
         assert db.get(AgentTeam, team.id).status == "completed"
         assert db.query(AgentBrowserAction).count() == 1
         # 相同 call_id 恢复时只读取账本，不再组队或创建页面动作。
@@ -478,4 +480,72 @@ async def test_page_team_captures_login_before_creation_refresh(db, owner, monke
     lease = agent_team_service.claim_next_task(db, created["team_id"], lease_seconds=60)
     result = await asyncio.wait_for(execute(db, owner, created, lease), timeout=2)
     assert result["status"] == "blocked"
+    assert db.query(AgentBrowserAction).count() == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal", ["failed", "blocked", "cancelled", "expired"])
+async def test_browser_team_terminal_result_and_cached_ledger_are_truthful(db, owner, monkeypatch, terminal):
+    from app.models.agent_response_run import AgentToolExecution
+    from app.services.agent_responses_service import PrismToolExecutor
+    from app.services.deepseek_responses_runtime import ToolCall
+
+    monkeypatch.setattr(browser, "POLL_SECONDS", .001)
+    executor = PrismToolExecutor(
+        db, owner, surface="user", session_key="page-team-session", run_id="page-team-run",
+        mcp_provider=SimpleNamespace(has_tool=lambda _name: False), tool_scope="xiaoling_coordinator",
+    )
+    assert (await executor.execute(ToolCall("discover-terminal", "list_agents", {}, "{}"))).status == "success"
+    plan = payload().model_dump(mode="json", exclude={"surface", "session_id", "trace_id"})
+    call = ToolCall("create-terminal", "create_agent_team", plan, json.dumps(plan, ensure_ascii=False))
+    waiting = asyncio.create_task(executor.execute(call))
+    try:
+        team = None
+        for _ in range(100):
+            team = db.query(AgentTeam).first()
+            if team:
+                break
+            await asyncio.sleep(.001)
+        assert team is not None
+        assert not waiting.done()
+        team.status = terminal
+        db.commit()
+        returned = await asyncio.wait_for(waiting, timeout=2)
+        assert returned.status == "error"
+        assert returned.output["status"] == terminal
+        assert str(team.id) in returned.error
+        assert returned.failure_kind == ("timeout" if terminal == "expired" else terminal)
+        ledger = db.query(AgentToolExecution).filter_by(call_id=call.call_id).one()
+        stored = json.loads(ledger.result_json)
+        assert ledger.status == "failed"
+        assert stored["status"] == "error" and stored["output"]["status"] == terminal
+        replay = await executor.execute(call)
+        assert replay.status == "error" and replay.output == returned.output
+        assert db.query(AgentTeam).count() == 1 and db.query(AgentBrowserAction).count() == 0
+    finally:
+        if not waiting.done():
+            waiting.cancel()
+            await asyncio.gather(waiting, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_browser_team_wait_timeout_returns_cancelled_snapshot(db, owner, monkeypatch):
+    from app.services import agent_responses_service as responses
+    from app.services.deepseek_responses_runtime import ToolCall
+
+    created = create(db, owner)
+    ticks = iter([0, browser.ACTION_TTL_SECONDS + 31])
+    clock = SimpleNamespace(time=lambda: next(ticks))
+    monkeypatch.setattr(responses, "asyncio", SimpleNamespace(
+        **{**vars(asyncio), "get_running_loop": lambda: clock},
+    ))
+    executor = responses.PrismToolExecutor(
+        db, owner, surface="user", session_key="page-team-session", run_id="page-team-run",
+        mcp_provider=SimpleNamespace(), tool_scope="xiaoling_coordinator",
+    )
+    call = ToolCall("wait-timeout", "create_agent_team", payload().model_dump(mode="json"), "{}")
+    state = await executor._wait_for_browser_team(call, created)
+    assert state["status"] == "cancelled"
+    assert db.get(AgentTeam, created["team_id"]).status == "cancelled"
+    assert agent_team_service.claim_next_task(db, created["team_id"], lease_seconds=60) is None
     assert db.query(AgentBrowserAction).count() == 0

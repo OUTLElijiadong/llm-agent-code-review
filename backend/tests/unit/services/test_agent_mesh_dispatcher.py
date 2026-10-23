@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.agents.base import AgentResult
 from app.models.agent_mesh import AgentMeshConversation, AgentMeshMessage, AgentMeshMessageEvent
+from app.models.agent_response_run import AgentResponseRun
 from app.models.rbac import Role, UserRole
 from app.models.user import User
 from app.schemas.agent_mesh import AgentMeshMessageIn
@@ -220,6 +221,7 @@ def _factory(tmp_path):
     AgentMeshConversation.__table__.create(engine)
     AgentMeshMessage.__table__.create(engine)
     AgentMeshMessageEvent.__table__.create(engine)
+    AgentResponseRun.__table__.create(engine)
     User.__table__.create(engine)
     Role.__table__.create(engine)
     UserRole.__table__.create(engine)

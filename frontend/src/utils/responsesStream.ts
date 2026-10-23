@@ -10,6 +10,7 @@ const DEFAULT_ENDPOINT = '/api/agent-responses/stream'
 
 const SUPPORTED_EVENTS = new Set<ResponseStreamEventType>([
   'response.created',
+  'response.deferred',
   'response.output_text.delta',
   'response.output_item.added',
   'response.output_item.done',
@@ -222,8 +223,14 @@ export function streamResponses(
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
     let hasCompletionBoundary = false
+    let hasDeferredBoundary = false
     const parser = new SseParser((event) => {
       assertCurrent()
+      if (event.type === 'response.deferred'
+        && typeof event.message_id === 'string' && Boolean(event.message_id.trim())
+        && (body as Record<string, unknown>).action === 'start'
+        && (body as Record<string, unknown>).mesh_message_id === event.message_id
+        && event.reason === 'session_busy') hasDeferredBoundary = true
       if (event.type === 'auth_expired') window.dispatchEvent(new Event('prism:auth-expired'))
       if (isCompletionBoundary(event)) {
         // 每个流只派发一次:小菱完成任务,让相关页面刷新数据
@@ -245,7 +252,7 @@ export function streamResponses(
     }
     parser.push(decoder.decode())
     parser.finish()
-    if (!hasCompletionBoundary) throw new ResponsesStreamProtocolError()
+    if (!hasCompletionBoundary && !hasDeferredBoundary) throw new ResponsesStreamProtocolError()
   })()
     .catch((error: unknown) => {
       if (!isAbortError(error)) options.onError?.(error)

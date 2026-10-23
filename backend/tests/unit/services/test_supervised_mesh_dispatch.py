@@ -10,6 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models.agent_mesh import AgentMeshConversation, AgentMeshMessage, AgentMeshMessageEvent
+from app.models.agent_response_run import AgentResponseRun
 from app.schemas.agent_mesh import AgentMeshMessageIn
 from app.services import agent_mesh_service
 
@@ -25,6 +26,7 @@ def db():
     AgentMeshConversation.__table__.create(engine)
     AgentMeshMessage.__table__.create(engine)
     AgentMeshMessageEvent.__table__.create(engine)
+    AgentResponseRun.__table__.create(engine)
     session = sessionmaker(bind=engine, expire_on_commit=False)()
     try:
         yield session

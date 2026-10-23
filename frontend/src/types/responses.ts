@@ -1,5 +1,6 @@
 export type ResponseStreamEventType =
   | 'response.created'
+  | 'response.deferred'
   | 'response.output_text.delta'
   | 'response.output_item.added'
   | 'response.output_item.done'
@@ -27,6 +28,13 @@ export interface ResponseStreamEventBase {
   type: ResponseStreamEventType
   sequence_number?: number
   [key: string]: unknown
+}
+
+export interface ResponseDeferredEvent extends ResponseStreamEventBase {
+  type: 'response.deferred'
+  message_id: string
+  reason: 'session_busy'
+  retry_after_seconds: number
 }
 
 export interface ResponseCreatedEvent extends ResponseStreamEventBase {
@@ -196,6 +204,7 @@ export interface ResponseAuthExpiredEvent extends ResponseStreamEventBase {
 
 export type ResponseStreamEvent =
   | ResponseCreatedEvent
+  | ResponseDeferredEvent
   | ResponseOutputTextDeltaEvent
   | ResponseOutputItemAddedEvent
   | ResponseFunctionCallArgumentsDeltaEvent

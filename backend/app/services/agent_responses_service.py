@@ -1992,12 +1992,21 @@ class PrismToolExecutor:
         async def invoke_team_tool():
             result = self._agent_result(call, self._orch.invoke_tool(call.name, call.arguments, agent_context))
             if call.name == "create_agent_team" and result.status == "success":
-                await self._wait_for_browser_team(call, result.output)
+                state = await self._wait_for_browser_team(call, result.output)
+                if state is not None:
+                    if state["status"] == "completed":
+                        return ToolExecutionResult.success(state)
+                    return ToolExecutionResult(
+                        status="error", output=state,
+                        error=(f"页面团队 {state.get('team_id', state.get('id'))} 已进入 {state['status']}，"
+                               "请按账本核验未完成部分"),
+                        failure_kind="timeout" if state["status"] == "expired" else state["status"],
+                    )
             return result
 
         return await self._execute_once(call, invoke_team_tool)
 
-    async def _wait_for_browser_team(self, call: ToolCall, output: Any) -> None:
+    async def _wait_for_browser_team(self, call: ToolCall, output: Any) -> Optional[dict[str, Any]]:
         """页面成员依赖当前浏览器；保持父运行活跃直至团队交回或明确停止。"""
         page_tasks = [task for task in call.arguments.get("tasks", [])
                       if isinstance(task, Mapping) and isinstance(task.get("input"), Mapping)
@@ -2027,12 +2036,11 @@ class PrismToolExecutor:
                 agent_team_service.cancel_team(self._db, self._user, team_id, reason="父运行已停止或权限已变更")
                 raise
             if team.status in {"completed", "failed", "blocked", "cancelled", "expired"}:
-                return
+                return agent_team_service.get_team(self._db, self._user, team_id)
             if asyncio.get_running_loop().time() >= deadline:
-                agent_team_service.cancel_team(
+                return agent_team_service.cancel_team(
                     self._db, self._user, team_id, reason="等待页面团队真实回执超时，不自动重放",
                 )
-                return
             await asyncio.sleep(agent_browser_service.POLL_SECONDS)
 
     async def _record_supervisor_review(self, call: ToolCall, review: Mapping[str, Any]) -> None:
@@ -3136,8 +3144,10 @@ class PrismToolExecutor:
             return ToolExecutionResult.failure("工具执行账本结果损坏，已阻止重复执行")
         if payload.get("status") == "success":
             return ToolExecutionResult.success(payload.get("output"))
-        return ToolExecutionResult.failure(
-            str(payload.get("error") or row.error or "工具执行失败"),
+        return ToolExecutionResult(
+            status="error",
+            output=payload.get("output"),
+            error=str(payload.get("error") or row.error or "工具执行失败"),
             failure_kind=str(payload.get("failure_kind") or ""),
         )
 
