@@ -71,7 +71,7 @@ def _team_call(call_id: str, title: str) -> ToolCall:
         ],
         "tasks": [
             {"task_key": "t1", "member_key": "researcher", "title": "调研资料",
-                "instructions": "并行调研并输出要点", "depends_on": []},
+                "instructions": "并行调研并输出要点", "depends_on": [], "input": {"project_id": 1}},
             {"task_key": "t2", "member_key": "verifier", "title": "核验结论",
                 "instructions": "核验调研结论", "depends_on": ["t1"]},
         ],

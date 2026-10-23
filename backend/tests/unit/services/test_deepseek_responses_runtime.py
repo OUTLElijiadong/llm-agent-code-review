@@ -1486,6 +1486,49 @@ async def test_completion_guard_discards_unverified_text_and_forces_tool_retry()
 
 
 @pytest.mark.asyncio
+async def test_completion_guard_wording_fallback_completes_with_server_text_after_retries() -> None:
+    """团队终态已由服务端确定时，模型措辞反复矛盾只换成服务端文本收口，不再整轮失败。"""
+    from app.services.deepseek_responses_runtime import (
+        COMPLETION_GUARD_FALLBACK_OUTPUT_KEY,
+        COMPLETION_GUARD_RETRY_LIMIT,
+    )
+
+    transport = ScriptedTransport(
+        [_message_response("团队 9 已完成") for _ in range(COMPLETION_GUARD_RETRY_LIMIT + 1)]
+    )
+
+    def guard(checkpoint: RunCheckpoint, _output_text: str) -> str | None:
+        checkpoint.context_metadata[COMPLETION_GUARD_FALLBACK_OUTPUT_KEY] = "团队 9 执行失败。\n未完成的节点：…"
+        return "团队 9 的服务端终态为 failed，回复却声称团队已成功完成。"
+
+    result = await _runtime(transport, RecordingExecutor(), completion_guard=guard).start(
+        "汇总团队 9", run_id="run_guard_wording_fallback",
+    )
+
+    assert result.status == "completed"
+    assert result.output_text.startswith("团队 9 执行失败。")
+    # 措辞纠错不强制再调工具：事实已确定，只需改写。
+    assert all(payload.get("tool_choice") != "required" for payload in transport.payloads)
+    projected_text = json.dumps(transport.payloads[-1]["input"], ensure_ascii=False)
+    assert "只需按回执中的团队终态如实改写" in projected_text
+
+
+@pytest.mark.asyncio
+async def test_completion_guard_without_fallback_still_fails_closed() -> None:
+    from app.services.deepseek_responses_runtime import COMPLETION_GUARD_RETRY_LIMIT
+
+    transport = ScriptedTransport(
+        [_message_response("已删除") for _ in range(COMPLETION_GUARD_RETRY_LIMIT + 1)]
+    )
+    result = await _runtime(
+        transport, RecordingExecutor(), completion_guard=lambda _c, _t: "缺少真实写工具证据",
+    ).start("删除", run_id="run_guard_no_fallback")
+
+    assert result.status == "failed"
+    assert "缺少真实写工具证据" in (result.error or "")
+
+
+@pytest.mark.asyncio
 async def test_completion_guard_retry_preserves_required_for_deepseek_thinking_models() -> None:
     transport = ScriptedTransport(
         [

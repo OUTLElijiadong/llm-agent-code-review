@@ -473,6 +473,12 @@ _TEAM_TASK_CONTRACTS: dict[str, dict[str, Any]] = {
         "readonly_operation": "inspect_project",
         "allowed_operations": frozenset({"inspect_project"}),
     },
+    # 团队内项目管理只读；list_projects/search 等别名统一归一为 list，避免被当作写操作拒绝。
+    "project_manager": {
+        "default_operation": "list",
+        "readonly_operation": None,
+        "allowed_operations": frozenset({"list", "get"}),
+    },
     "code_file_manager": {
         "default_operation": "list",
         "readonly_operation": "list",
@@ -657,6 +663,41 @@ def _normalize_verification_graph(payload: AgentTeamCreateIn) -> AgentTeamCreate
         target = verification_tasks[-1]
         target.depends_on = list(dict.fromkeys([*target.depends_on, *uncovered]))
     return payload.model_copy(update={"members": members, "tasks": tasks})
+
+
+# 团队任务执行时不会从会话上下文补 project_id/file_id；成员 handler 只读 task.input。
+# 小菱 create_agent_team 入口按与 agent_mesh_dispatcher 相同的必填规则拒绝，让模型在本轮改参重试，
+# 而不是派发后 missing_fields 不可重试失败并按 fail-fast 拖垮整支团队。
+# 值为 (必填字段组, 示例)；组内任一字段即满足。
+TEAM_REQUIRED_TASK_INPUTS: dict[str, tuple[tuple[tuple[str, ...], ...], str]] = {
+    "language_detector": ((("project_name",),), '{"project_name": "项目名", "description": "可选描述"}'),
+    "project_analyzer": ((("project_id",),), '{"project_id": 123}'),
+    "security_sentinel": ((("file_id", "task_id", "project_id"),), '{"project_id": 123, "scan_mode": "full"}'),
+    "code_reviewer": ((("code",),), '{"code": "待审查代码片段"}'),
+    "code_file_manager": ((("project_id",),), '{"project_id": 123}'),
+    "ai_prompt": ((("issue_id", "task_id", "project_id"),), '{"project_id": 123}'),
+    "supervisor": ((("action",),), '{"action": "site.pentest.list", "resource": "/pentests"}'),
+}
+
+
+def required_task_input_error(code: str, raw: Mapping[str, Any], task_key: str) -> Optional[str]:
+    spec = TEAM_REQUIRED_TASK_INPUTS.get(code)
+    if spec is None:
+        return None
+    if code == "project_analyzer" and str(raw.get("operation") or "inspect_project") != "inspect_project":
+        return None
+    groups, example = spec
+    missing = [
+        "|".join(group) for group in groups
+        if not any(raw.get(field) not in (None, "", [], {}) for field in group)
+    ]
+    if not missing:
+        return None
+    return (
+        f"任务 {task_key} 的成员 agent:{code} 缺少必填输入：{', '.join(missing)}。"
+        f"请在 tasks[].input 中直接提供（团队执行不会从会话补全），例如 input={example}；"
+        "项目编号可先用 agent:project_manager 的 list 任务或当前账号项目列表查得。"
+    )
 
 
 def _validate_task_scope(db: Session, user: User, task_input: Any, address: str) -> None:
@@ -1500,9 +1541,11 @@ def _create_team(db: Session, user: User, payload: AgentTeamCreateIn) -> dict[st
             .with_for_update()
             .first()
         )
+        # approving/answering 是运行时执行已批准调用或用户答复时的活跃认领态：
+        # 被批准的 create_agent_team 正是在 approving 状态下执行的。
         if (
             parent_run is None
-            or parent_run.status != "running"
+            or parent_run.status not in {"running", "approving", "answering"}
             or response_run_stop_requested(parent_run)
         ):
             raise AgentTeamValidationError("父级小菱运行已结束，不能再启动子 Agent 团队")
@@ -1846,9 +1889,24 @@ def get_team_result_page(db: Session, user: User, team_id: int, task_id: Optiona
                 not isinstance(result_indices, list) or len(result_indices) > 32 or result_path
                 or any(type(index) is not int or not 0 <= index <= 2147483647 for index in result_indices))
             or result_part == "key" and not result_indices):
-        raise AgentTeamValidationError("结果路径或分页参数无效")
+        raise AgentTeamValidationError(
+            "结果路径或分页参数无效：result_path 须为以 / 开头的 JSON Pointer（如 /evidence/0）或留空；"
+            "result_indices 与 result_path 互斥、最多 32 个非负整数；limit 取 1-20；"
+            "result_part 只能为 value 或 key（key 需配合 result_indices）。"
+        )
     value = redact_agent_model_context_value(_unjson(stored_result, {}))
     indices: list[int] = []
+
+    def _path_hint(container: Any) -> str:
+        # 只给出当前层可用键/长度，帮助模型改正路径；不泄露任何值。
+        if isinstance(container, dict):
+            keys = [str(key) for key in list(container)[:20]]
+            more = "…" if len(container) > 20 else ""
+            return f"；该层可用键：{', '.join(keys) or '（空对象）'}{more}"
+        if isinstance(container, list):
+            return f"；该层是长度为 {len(container)} 的数组，索引范围 0-{max(0, len(container) - 1)}"
+        return "；该层已是标量值，不能继续下钻"
+
     try:
         for token in result_path.split("/")[1:] if result_path else []:
             if re.search(r"~(?![01])", token):
@@ -1874,7 +1932,9 @@ def get_team_result_page(db: Session, user: User, team_id: int, task_id: Optiona
         if len(indices) > 32:
             raise ValueError("引用深度超限")
     except (KeyError, IndexError, ValueError):
-        raise AgentTeamValidationError("结果路径不存在") from None
+        raise AgentTeamValidationError(
+            f"结果路径不存在{_path_hint(value)}。请先不带 result_path/result_indices 读取上一层再定位"
+        ) from None
     output = {**source, "result_path": result_path,
               "result_indices": indices, "result_part": result_part}
     if isinstance(value, str):

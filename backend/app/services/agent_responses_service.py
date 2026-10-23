@@ -85,6 +85,7 @@ from app.services.deepseek_provider_compat import prepare_deepseek_responses_pay
 from app.services.deepseek_responses_runtime import (
     CANCELLED,
     COMPLETED,
+    COMPLETION_GUARD_FALLBACK_OUTPUT_KEY,
     COMPLETION_GUARD_FORCED_OUTPUT_KEY,
     FAILED,
     INCOMPLETE,
@@ -1775,6 +1776,26 @@ class PrismToolExecutor:
                         "核验任务用 operation:'verify_results' 并依赖实际执行任务。"
                         "纯页面跳转使用已核实路由的 PRISM_NAVIGATE，不能伪造站点业务能力。",
                     )
+            from app.services.agent_team_service import required_task_input_error
+
+            member_roles = {
+                item.get("member_key"): item.get("role", "worker") for item in call.arguments.get("members", [])
+            }
+            for task in call.arguments.get("tasks", []):
+                address = member_addresses.get(task.get("member_key"), "")
+                # verifier/summarizer 及有前置依赖的节点会消费依赖结果；只校验无依赖的
+                # 起点 worker——它们只能从 tasks[].input 取业务参数。
+                if (
+                    not address.startswith("agent:")
+                    or member_roles.get(task.get("member_key")) not in {None, "worker"}
+                    or task.get("depends_on")
+                ):
+                    continue
+                input_error = required_task_input_error(
+                    address.split(":", 1)[1], task.get("input") or {}, str(task.get("task_key") or ""),
+                )
+                if input_error:
+                    return await self._failed_attempt(call, input_error)
             team_supervision = agent_supervisor_service.review_agent_team_plan(call.arguments)
             # 普通团队创建只登记计划；页面团队保留现有桥的控件动作审批合同。
             page_team_requires_confirmation = bool(
@@ -3302,10 +3323,28 @@ class PrismToolExecutor:
         async def discover() -> ToolExecutionResult:
             from app.main import app
 
-            rows = describe_user_capabilities(app.openapi(), page=page, query=query)
+            openapi = app.openapi()
+            rows = describe_user_capabilities(openapi, page=page, query=query)
+            match_note = ""
+            if not rows and query.strip():
+                # 子串匹配对中文改写很脆弱：按空白/标点拆词逐个匹配后合并，再退到仅按 page。
+                seen: set[str] = set()
+                for term in [item for item in re.split(r"[\s,，、/;；]+", query) if item.strip()]:
+                    for row in describe_user_capabilities(openapi, page=page, query=term):
+                        if row["capability"] not in seen:
+                            seen.add(row["capability"])
+                            rows.append(row)
+                if rows:
+                    match_note = "按查询词拆分匹配"
+                elif page:
+                    rows = describe_user_capabilities(openapi, page=page, query="")
+                    match_note = "查询词无匹配，已返回该页面全部能力" if rows else ""
             if not rows:
+                pages = sorted({row["page"] for row in describe_user_capabilities(openapi)})
                 return ToolExecutionResult.failure(
-                    "没有找到匹配的页面能力；请仅指定 page，并移除 query 后重新查询。"
+                    ("页面 " + page + " 没有已登记能力" if page else "没有找到匹配的页面能力")
+                    + "；可用页面：" + ", ".join(pages[:60])
+                    + "。请改用其中一个 page 重新查询；若目标不在清单内，说明缺少执行合同并如实阻塞。"
                 )
             is_admin_actor = _is_admin_actor(self._db, self._user)
             available = [
@@ -3321,7 +3360,10 @@ class PrismToolExecutor:
             ]
             if not available:
                 return ToolExecutionResult.failure("当前用户无权使用匹配的页面能力")
-            return ToolExecutionResult.success({"count": len(available), "items": available})
+            payload: dict[str, Any] = {"count": len(available), "items": available}
+            if match_note:
+                payload["match_note"] = match_note
+            return ToolExecutionResult.success(payload)
 
         return await self._execute_once(call, discover)
 
@@ -3826,6 +3868,10 @@ class AgentResponsesService:
                     "team_id": team_id,
                     "status": status,
                 }
+                fallback_text = trusted_terminal_team_snapshot.get("fallback_text")
+                if isinstance(fallback_text, str) and fallback_text.strip():
+                    # 服务端渲染，仅在模型措辞纠错耗尽后作为最终答复。
+                    context_metadata["trusted_terminal_team_fallback"] = fallback_text.strip()[:6000]
         if coordinator_has_images:
             context_metadata["coordinator_input_has_images"] = True
         result = await runtime.start(
@@ -4190,6 +4236,9 @@ class AgentResponsesService:
                 verified_team_statuses=trusted_team_statuses,
             )
             if reason:
+                fallback = checkpoint.context_metadata.get("trusted_terminal_team_fallback")
+                if isinstance(fallback, str) and fallback.strip():
+                    checkpoint.context_metadata[COMPLETION_GUARD_FALLBACK_OUTPUT_KEY] = fallback
                 return reason
             label = {
                 "completed": "已完成", "failed": "执行失败", "blocked": "已阻塞",

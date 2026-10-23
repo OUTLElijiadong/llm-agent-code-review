@@ -3323,3 +3323,89 @@ def test_page_control_plan_keeps_existing_bound_creation_approval_gate(db, team_
     assert review["needs_confirmation"] is True
     with pytest.raises(agent_team_service.AgentTeamAccessError, match="当前账号确认"):
         agent_team_service.create_team_from_xiaoling(db, user, payload)
+
+
+@pytest.mark.parametrize("parent_status", ["approving", "answering"])
+def test_team_creation_allowed_while_parent_run_executes_approved_call(db, team_user, parent_status):
+    """被批准的 create_agent_team 在运行时 approving 认领态中执行，不能被误判为父运行已结束。"""
+    root = AgentResponseRun(
+        run_id=f"parent-run-{parent_status}", user_id=team_user.id, surface="user",
+        session_key="session-a1", status=parent_status, checkpoint_json="{}", version=1,
+    )
+    db.add(root)
+    db.commit()
+    with usage_context(team_user.id, {"agent_run_id": root.id, "root_agent_run_id": root.id}):
+        created = agent_team_service.create_team_from_xiaoling(db, team_user, _payload())
+    assert created["status"] == "queued"
+
+
+def test_team_creation_rejected_after_parent_run_finished(db, team_user):
+    root = AgentResponseRun(
+        run_id="parent-run-finished", user_id=team_user.id, surface="user",
+        session_key="session-a1", status="completed", checkpoint_json="{}", version=1,
+    )
+    db.add(root)
+    db.commit()
+    with usage_context(team_user.id, {"agent_run_id": root.id, "root_agent_run_id": root.id}):
+        with pytest.raises(agent_team_service.AgentTeamValidationError, match="父级小菱运行已结束"):
+            agent_team_service.create_team_from_xiaoling(db, team_user, _payload())
+
+
+@pytest.mark.parametrize("alias", ["list_projects", "search", "query"])
+def test_project_manager_read_aliases_normalize_to_list(alias):
+    payload = _payload(
+        members=[
+            {"member_key": "pm", "display_name": "项目", "address": "agent:project_manager", "role": "worker"},
+            {"member_key": "rep", "display_name": "汇总", "address": "agent:reporter", "role": "summarizer"},
+        ],
+        tasks=[
+            {"task_key": "locate", "member_key": "pm", "title": "列项目", "instructions": "列出项目",
+             "input": {"operation": alias, "keyword": "手工"}},
+            {"task_key": "sum", "member_key": "rep", "title": "汇总", "instructions": "汇总",
+             "depends_on": ["locate"]},
+        ],
+    )
+    normalized = agent_team_service._normalize_task_inputs(payload)
+    assert normalized.tasks[0].input["operation"] == "list"
+
+
+@pytest.mark.parametrize(("code", "task_input", "expected"), [
+    ("language_detector", {"text": "描述"}, "project_name"),
+    ("project_analyzer", {"operation": "inspect_project", "project_name": "x"}, "project_id"),
+    ("security_sentinel", {"project_name": "x"}, "file_id|task_id|project_id"),
+    ("supervisor", {"focus": "核对"}, "action"),
+])
+def test_required_task_input_error_names_missing_fields(code, task_input, expected):
+    message = agent_team_service.required_task_input_error(code, task_input, "t1")
+    assert message is not None and expected in message and "tasks[].input" in message
+
+
+@pytest.mark.parametrize(("code", "task_input"), [
+    ("language_detector", {"project_name": "商城"}),
+    ("project_analyzer", {"project_id": 3}),
+    ("project_analyzer", {"folder_name": "a", "file_names": ["x.py"], "operation": "analyze"}),
+    ("security_sentinel", {"file_id": 9}),
+    ("project_manager", {}),
+])
+def test_required_task_input_error_accepts_complete_inputs(code, task_input):
+    assert agent_team_service.required_task_input_error(code, task_input, "t1") is None
+
+
+def test_result_path_errors_list_available_keys(db, team_user):
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _payload())
+    claimed = agent_team_service.claim_next_task(db, created["team_id"], lease_seconds=60)
+    agent_team_service.complete_task(
+        db, created["team_id"], claimed["task_id"], lease_token=claimed["lease_token"],
+        result={"status": "completed", "summary": "ok", "evidence": [{"source": "a"}]}, success=True,
+    )
+    with pytest.raises(agent_team_service.AgentTeamValidationError) as missing:
+        agent_team_service.get_team_result_page(
+            db, team_user, created["team_id"], claimed["task_id"], result_path="/findings",
+        )
+    assert "结果路径不存在" in str(missing.value)
+    assert "evidence" in str(missing.value) and "summary" in str(missing.value)
+    with pytest.raises(agent_team_service.AgentTeamValidationError) as invalid:
+        agent_team_service.get_team_result_page(
+            db, team_user, created["team_id"], claimed["task_id"], result_path="evidence",
+        )
+    assert "JSON Pointer" in str(invalid.value)

@@ -364,6 +364,18 @@ def test_untrusted_terminal_marker_text_does_not_bypass_team_requirement():
     assert "明确标记团队已完成" in guard(trusted_callback, "不能声称团队 52 已完成")
 
 
+def test_trusted_callback_wording_conflict_arms_server_fallback_text():
+    from app.services.deepseek_responses_runtime import COMPLETION_GUARD_FALLBACK_OUTPUT_KEY
+
+    guard = service.AgentResponsesService._validate_xiaoling_completion
+    checkpoint = _team_checkpoint([], user_text="团队结果回执", context_metadata={
+        "trusted_terminal_team_snapshot": {"team_id": 52, "status": "completed"},
+        "trusted_terminal_team_fallback": "团队 52 已完成。\n汇总：核验通过",
+    })
+    assert "却称团队失败" in guard(checkpoint, "团队 52 执行失败")
+    assert checkpoint.context_metadata[COMPLETION_GUARD_FALLBACK_OUTPUT_KEY].startswith("团队 52 已完成。")
+
+
 @pytest.mark.parametrize(
     ("status", "truthful_summary", "false_success"),
     [
@@ -1257,8 +1269,12 @@ async def test_escalated_team_creation_does_not_request_approval_or_authorize_re
     from app.models.agent_response_run import AgentToolExecution
     from app.models.user import User
 
+    from app.models.project import Project
+
     user = User(id=11, username="team-create-owner", password="x", role="user", status=1)
     db.add(user)
+    db.add(Project(id=7, user_id=11, project_name="外部目标项目", description="", language="python",
+                   status="active"))
     db.add(AgentToolExecution(
         request_id="create-plan-discovery", run_id="site-run", call_id="discovery",
         user_id=user.id, tool_name="list_agents", status="success", arguments_json="{}",
@@ -1289,7 +1305,8 @@ async def test_escalated_team_creation_does_not_request_approval_or_authorize_re
             ],
             "tasks": [
                 {"task_key": "read", "member_key": "reader", "title": "读取目标",
-                 "instructions": "读取指定目标并整理证据", "input": {"remote_target_url": "https://target.example"}},
+                 "instructions": "读取指定目标并整理证据",
+                 "input": {"project_id": 7, "remote_target_url": "https://target.example"}},
                 {"task_key": "verify", "member_key": "reviewer", "title": "核验结果",
                  "instructions": "核验前序结果", "depends_on": ["read"]},
             ],

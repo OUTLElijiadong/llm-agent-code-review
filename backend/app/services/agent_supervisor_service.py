@@ -287,6 +287,10 @@ def _review_team_task(
             review = review_response_tool("operate_current_page", task_input)
             return SupervisionReview(**{key: review[key] for key in SupervisionReview.__dataclass_fields__})
         risk = declared_capability_risk(spec.risk)
+        if risk == LOW and str(spec.method).upper() == "GET":
+            # 注册表登记为 READ 的 GET 能力（如 pentest.list / pentest.rules）不产生副作用；
+            # 名称里的领域词（pentest/role/permission）不代表写入，执行时仍按注册权限码鉴权。
+            return SupervisionReview(ALLOW, LOW, "服务端能力注册表登记为只读查询", False, "server_registry_read")
         return review_action("site." + spec.code, spec.page, declared_risk=risk)
     if code in {"operations", "incident_responder"}:
         from app.services.ops_service import TEAM_READ_ONLY_ACTIONS

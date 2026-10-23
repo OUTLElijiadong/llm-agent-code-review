@@ -1059,6 +1059,19 @@ def list_agents(db: Session, user: User, surface: str = "") -> dict[str, Any]:
                 "verify_results": {"depends_on": "site_execution_nodes",
                                    "execution": "persisted_receipt_readback_only"},
             }
+        from app.services.agent_team_service import TEAM_REQUIRED_TASK_INPUTS
+
+        if code in TEAM_REQUIRED_TASK_INPUTS and "team_input_contract" not in item:
+            # 与建队校验同源，让模型组队前就知道必须直接写入 tasks[].input 的字段。
+            groups, example = TEAM_REQUIRED_TASK_INPUTS[code]
+            item["team_input_contract"] = {
+                "required": ["|".join(group) for group in groups],
+                "example_input": example,
+                "context_fallback": "none",
+            }
+        if code == "project_manager":
+            item["team_input_contract"] = {"operation": ["list", "get"], "get": {"required": ["project_id"]},
+                                           "list": {"optional": ["keyword", "language", "status"]}}
         if code == "operations":
             from app.services.ops_service import TEAM_READ_ONLY_ACTIONS
 
@@ -2417,8 +2430,44 @@ def prepare_message_run(
         system_input["_server_verified_terminal_team_snapshot"] = {
             "team_id": int(terminal_snapshot["team_id"]),
             "status": str(terminal_snapshot["status"]),
+            "fallback_text": render_terminal_team_fallback(terminal_snapshot),
         }
     return row, system_input
+
+
+_TERMINAL_TEAM_LABELS = {
+    "completed": "已完成", "failed": "执行失败", "blocked": "已阻塞",
+    "cancelled": "已取消", "expired": "已超时",
+}
+
+
+def render_terminal_team_fallback(snapshot: Mapping[str, Any]) -> str:
+    """由服务端账本渲染团队终态答复；模型措辞反复不合规时作为最终回复。
+
+    只使用已脱敏的快照字段：终态、最终汇总摘要和失败节点的错误预览。
+    """
+    team_id = int(snapshot.get("team_id") or 0)
+    status = str(snapshot.get("status") or "")
+    label = _TERMINAL_TEAM_LABELS.get(status, status or "状态未知")
+    lines = [f"团队 {team_id} {label}。"]
+    final_result = snapshot.get("final_result")
+    summary = final_result.get("summary") if isinstance(final_result, Mapping) else None
+    if isinstance(summary, str) and summary.strip():
+        lines.append(f"汇总：{summary.strip()[:800]}")
+    samples = snapshot.get("failed_task_samples")
+    if isinstance(samples, list) and samples:
+        lines.append("未完成的节点：")
+        for sample in samples:
+            if not isinstance(sample, Mapping):
+                continue
+            reasons = [str(item) for item in sample.get("error_previews") or [] if str(item).strip()]
+            reason = "；".join(reasons) or str(sample.get("summary_preview") or "").strip() or "未提供原因"
+            lines.append(f"- {sample.get('task_key') or '未知节点'}（{sample.get('status') or 'unknown'}）：{reason}")
+        omitted = int(snapshot.get("omitted_failed_task_count") or 0)
+        if omitted:
+            lines.append(f"- 另有 {omitted} 个未完成节点，可在团队详情中查看。")
+    lines.append(f"完整结果可通过团队 {team_id} 的详情查看。")
+    return "\n".join(lines)
 
 
 def _verified_terminal_team_snapshot(

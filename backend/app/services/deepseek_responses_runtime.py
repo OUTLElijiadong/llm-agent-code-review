@@ -73,6 +73,9 @@ MAX_SEMANTIC_COMPACTION_CALLS_PER_RUN = 64
 _COMPLETION_GUARD_CORRECTION_PREFIX = "[runtime_completion_guard]"
 # 完成门可写入此键，要求运行时以服务端固定文本作为最终回复（如团队仍在执行时的进度说明）。
 COMPLETION_GUARD_FORCED_OUTPUT_KEY = "completion_guard_forced_output"
+# 完成门拒绝措辞但事实（如团队终态）已由服务端回执确定时写入此键；
+# 纠错重试耗尽后以该服务端渲染文本收口，而不是让整轮失败、用户无任何答复。
+COMPLETION_GUARD_FALLBACK_OUTPUT_KEY = "completion_guard_fallback_output"
 
 
 def _semantic_compaction_json_schema(source_ids: Sequence[str]) -> Dict[str, Any]:
@@ -1690,22 +1693,44 @@ class DeepSeekResponsesRuntime:
                 checkpoint.output_text = ""
                 if guard_retries < COMPLETION_GUARD_RETRY_LIMIT:
                     checkpoint.context_metadata["completion_guard_retries"] = guard_retries + 1
-                    checkpoint.context_metadata["force_tool_rounds"] = 1
+                    wording_only = bool(checkpoint.context_metadata.get(COMPLETION_GUARD_FALLBACK_OUTPUT_KEY))
+                    if not wording_only:
+                        checkpoint.context_metadata["force_tool_rounds"] = 1
                     checkpoint.transcript.append(
                         {
                             "role": "system",
                             "content": (
                                 f"{_COMPLETION_GUARD_CORRECTION_PREFIX} {guard_error} "
-                                "不要复述或猜测执行结果；现在必须调用能产生真实证据的工具。"
+                                + (
+                                    "事实已由服务端回执确定；只需按回执中的团队终态如实改写答复，"
+                                    "不要重建团队，也不要用“完成/失败”描述与回执不同的团队状态。"
+                                    if wording_only else
+                                    "不要复述或猜测执行结果；现在必须调用能产生真实证据的工具。"
+                                )
                             ),
                         }
                     )
                     await self._store.save(checkpoint)
                     continue
+                fallback_text = checkpoint.context_metadata.pop(COMPLETION_GUARD_FALLBACK_OUTPUT_KEY, None)
+                if isinstance(fallback_text, str) and fallback_text.strip():
+                    # 事实已由服务端回执确定，只是模型措辞反复不合规：以服务端
+                    # 渲染的回执文本完成本轮，丢弃模型的矛盾措辞。
+                    checkpoint.context_metadata["completion_guard_fallback_reason"] = guard_error
+                    candidate_text = fallback_text.strip()
+                    output_items = [
+                        item for item in output_items if str(item.get("type") or "") != "message"
+                    ] + [_assistant_message_item(candidate_text)]
+                    checkpoint.transcript.extend(copy.deepcopy(output_items))
+                    checkpoint.output_text = candidate_text
+                    checkpoint.status = COMPLETED
+                    await self._store.save(checkpoint)
+                    return self._result(checkpoint, events=events)
                 checkpoint.status = FAILED
                 checkpoint.error = f"运行时执行证据校验失败: {guard_error}"
                 await self._store.save(checkpoint)
                 return self._result(checkpoint, events=events)
+            checkpoint.context_metadata.pop(COMPLETION_GUARD_FALLBACK_OUTPUT_KEY, None)
 
             forced_text = checkpoint.context_metadata.pop(COMPLETION_GUARD_FORCED_OUTPUT_KEY, None)
             if isinstance(forced_text, str) and forced_text.strip():

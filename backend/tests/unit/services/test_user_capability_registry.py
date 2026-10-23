@@ -275,9 +275,11 @@ async def test_user_discovery_unmatched_query_can_retry_without_losing_page_scop
             "{}",
         )
     )
-    assert missed.status == "error"
-    assert "没有找到匹配" in missed.error
-    assert "移除 query" in missed.error
+    # 查询词无匹配时服务端直接退回该页面全部能力，不再让模型额外重试一轮。
+    assert missed.status == "success"
+    assert {row["page"] for row in missed.output["items"]} == {"/profile"}
+    assert "profile.get" in {row["capability"] for row in missed.output["items"]}
+    assert missed.output["match_note"]
     recovered = await executor.execute(
         ToolCall("call_profile_page_retry", "user_describe_capabilities", {"page": "/profile"}, "{}")
     )
