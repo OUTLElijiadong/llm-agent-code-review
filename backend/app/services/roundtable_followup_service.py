@@ -106,7 +106,7 @@ def _answer(session: DiscussionSession, turns: list[DiscussionTurn], question: D
                 compressed_histories[target_tokens] = _compress_roundtable_history(
                     records, agent=agent, task_id=session.report_task_id,
                     user_id=session.owner_user_id, file_id=session.file_id,
-                    target_tokens=target_tokens,
+                    target_tokens=target_tokens, allow_concluded=True,
                 )
             history = compressed_histories[target_tokens]
             user_prompt = build_user_prompt(history)
@@ -120,6 +120,7 @@ def _answer(session: DiscussionSession, turns: list[DiscussionTurn], question: D
                 agent, session.report_task_id, session.owner_user_id,
                 usage_file_id=session.file_id,
                 usage_chunk_index=9300 + question.seq * 3 + attempt,
+                allow_concluded=True,
                 system_prompt=prompt, user_prompt=user_prompt,
                 agent_label="general", json_mode=False, max_tokens=budget,
             )

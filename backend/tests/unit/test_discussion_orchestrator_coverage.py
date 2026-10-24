@@ -3621,3 +3621,51 @@ async def test_roundtable_checkpoint_preserves_call_timestamps_across_resume(mon
         assert entry["meta"] == meta
         assert isinstance(entry["meta"]["create_time"], datetime)
     assert checkpoint["deferred_logs"][0]["meta"]["create_time"] == timestamp.isoformat()
+
+
+@pytest.mark.parametrize(("task_status", "allow_concluded", "allowed"), [
+    ("success", True, True),
+    ("failed", True, True),
+    ("cancelled", True, False),
+    ("success", False, False),
+    ("running", False, True),
+])
+def test_followup_model_call_allowed_after_report_concluded(
+    db: Any, monkeypatch: pytest.MonkeyPatch, task_status: str, allow_concluded: bool, allowed: bool,
+) -> None:
+    """结论后的追问必须能调用模型；被取消的任务及非追问路径仍按原规则拒绝。"""
+    task = ReviewTask(
+        user_id=2, project_id=3, task_name="追问", review_type="discuss",
+        status=task_status, total_files=1, processed_files=1,
+    )
+    _seed_execution_actor(db, task.user_id, task.project_id)
+    db.add(task)
+    db.commit()
+
+    class _Session:
+        """复用测试库但不真正关闭，模拟 SessionLocal 的上下文与 close。"""
+        def __getattr__(self, name: str) -> Any:
+            return getattr(db, name)
+        def close(self) -> None:
+            pass
+        def __enter__(self) -> Any:
+            return db
+        def __exit__(self, *_exc: Any) -> None:
+            pass
+
+    monkeypatch.setattr(module, "SessionLocal", _Session)
+    agent = RecordingAgent(responses=[("主持人回答", {"model_name": "m"})])
+
+    def call() -> Any:
+        return _REAL_CALL_FOR_TASK(
+            agent, task.id, task.user_id, allow_concluded=allow_concluded,
+            system_prompt="s", user_prompt="u", agent_label="general", json_mode=False, max_tokens=256,
+        )
+
+    if allowed:
+        call()
+        assert len(agent.calls) == 1
+    else:
+        with pytest.raises(RuntimeError, match="圆桌任务已终止"):
+            call()
+        assert agent.calls == []

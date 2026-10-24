@@ -514,6 +514,8 @@ class DiscussionOrchestrator:
         self._steering_inputs: list[tuple[int, str]] = []
         self._steering_version = 0
         self._steering_event = asyncio.Event()
+        # 小菱主持人按用户插话确定的当前讨论方向；之后每位专家的提示都会带上。
+        self._host_direction = ""
         self._user_id = user_id
         self._file_id = file_id
         self._task_id = int(resume_task_id or 0)
@@ -1170,7 +1172,8 @@ class DiscussionOrchestrator:
             "你是本次代码审查圆桌的唯一主持人小菱。用户刚刚插话，必须据此决定剩余专家的优先顺序；"
             "只能从给定 remaining_turns 中选择并排序，不得新增专家、伪造进度或修改固定 roster。"
             "可以省略与新方向无关的剩余发言。只输出 JSON："
-            '{"remaining_turn_ids":["轮次:agent_code"],"host_message":"用中文说明你如何调整后续重点"}。'
+            '{"remaining_turn_ids":["轮次:agent_code"],"direction":"后续专家必须围绕的讨论方向（一句话）",'
+            '"host_message":"用中文说明你如何调整后续重点"}。'
         )
         user_prompt = (
             f"文件：{file_name}（{language}）\n用户新指示：\n"
@@ -1215,6 +1218,9 @@ class DiscussionOrchestrator:
                 raise ValueError("主持人规划包含重复或不属于本次 roster 的任务")
             remaining_plan = [turn_ids[item] for item in requested]
             host_message = str(data.get("host_message") or "").strip()[:1200]
+            direction = str(data.get("direction") or "").strip()[:400]
+            # 主持人改向对后续所有专家生效，而不仅是下一位发言者。
+            self._host_direction = direction or "；".join(steering)[-400:]
             if meta:
                 deferred_logs.append({
                     "meta": meta,
@@ -1228,6 +1234,7 @@ class DiscussionOrchestrator:
             # 主持模型规划失败时保留已登记的剩余专家顺序，仍把用户插话留在共享历史中。
             logger.warning(f"[Discussion] 主持人重规划失败，保留原剩余计划: {exc}")
             host_message = "我已收到你的补充。主持规划暂不可用，我会按原 roster 继续，并把该要求纳入后续判断。"
+            self._host_direction = "；".join(steering)[-400:]
             remaining_plan = list(turn_ids.values())
 
         if self._steering_version == version:
@@ -1413,6 +1420,11 @@ class DiscussionOrchestrator:
             user_text = "\n## ⚡ 用户最新指示\n" + "\n".join(
                 f"- {u}" for u in user_inputs
             ) + "\n请优先回应用户的指示。"
+        if getattr(self, "_host_direction", ""):
+            user_text += (
+                f"\n## 🧭 主持人小菱确定的当前讨论方向\n{self._host_direction}\n"
+                "本轮发言必须围绕该方向；与方向无关的旧议题不要展开。"
+            )
 
         stance_hint = (
             "你是第一位有效发言者;有独立发现时用 propose 发言,未发现问题也可静音。"
@@ -2254,9 +2266,19 @@ def _restore_deferred_logs(logs: list[dict]) -> list[dict]:
     return restored
 
 
+# 结论后的追问窗口：报告任务已收口（success/failed），仍允许主持人回答追问。
+_FOLLOWUP_TASK_STATUSES = frozenset({"running", "success", "failed"})
+
+
 def _call_raw_for_task(agent: DeepSeekAgent, task_id: int, user_id: int, *,
-                       usage_file_id: Optional[int] = None, usage_chunk_index: Optional[int] = None, **kwargs):
-    """线程池从持久任务恢复来源；独立提交用量，不被报告解析失败回滚。"""
+                       usage_file_id: Optional[int] = None, usage_chunk_index: Optional[int] = None,
+                       allow_concluded: bool = False, **kwargs):
+    """线程池从持久任务恢复来源；独立提交用量，不被报告解析失败回滚。
+
+    allow_concluded 仅供结论后的追问使用：报告已生成后任务不再是 running，
+    但归属、项目执行权与调用预算仍逐次校验；被取消的任务仍拒绝。
+    """
+    allowed_statuses = _FOLLOWUP_TASK_STATUSES if allow_concluded else frozenset({"running"})
     call_budget = _roundtable_call_budget.get()
     if not task_id:
         if call_budget:
@@ -2267,7 +2289,7 @@ def _call_raw_for_task(agent: DeepSeekAgent, task_id: int, user_id: int, *,
         task = log_db.get(ReviewTask, task_id)
         if task is None or task.user_id != user_id:
             raise RuntimeError("圆桌模型调用缺少可信任务来源")
-        if task.status != "running":
+        if task.status not in allowed_statuses:
             raise RuntimeError("圆桌任务已终止，不能继续派发模型请求")
         _require_discussion_actor(log_db, user_id, int(task.project_id))
         used = int((task.coverage or {}).get("model_calls_used") or 0)
@@ -2288,7 +2310,7 @@ def _call_raw_for_task(agent: DeepSeekAgent, task_id: int, user_id: int, *,
                 with SessionLocal() as auth_db:
                     _require_discussion_actor(auth_db, user_id, int(task.project_id))
                     current = auth_db.get(ReviewTask, task_id)
-                    if current is None or current.status != "running":
+                    if current is None or current.status not in allowed_statuses:
                         raise RuntimeError("圆桌任务已终止，丢弃迟到的模型结果")
                 return result
             finally:
@@ -2775,6 +2797,7 @@ def _compress_roundtable_history(
     task_id: int,
     user_id: int,
     file_id: int,
+    allow_concluded: bool = False,
     target_tokens: int,
     attempt_callback: Optional[Callable[[str], None]] = None,
     task_guard: Optional[Callable[[], None]] = None,
@@ -2905,6 +2928,7 @@ def _compress_roundtable_history(
                     agent, task_id, user_id,
                     usage_file_id=file_id,
                     usage_chunk_index=9200 + request_count,
+                    allow_concluded=allow_concluded,
                     system_prompt=level_prompt,
                     user_prompt=payload,
                     agent_label="general",

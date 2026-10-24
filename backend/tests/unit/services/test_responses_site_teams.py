@@ -175,8 +175,10 @@ async def test_coordinator_only_exposes_team_and_capability_discovery_tools(db, 
 
     assert names == {
         "list_agents", "create_agent_team", "get_agent_team", "cancel_agent_team", "cancel_agent_team_task",
-        "retry_agent_team", "user_describe_capabilities",
+        "retry_agent_team", "user_describe_capabilities", "operate_current_page",
     }
+    page_tool = next(item for item in await actor.tool_schemas() if item["name"] == "operate_current_page")
+    assert page_tool["parameters"]["properties"]["action"]["enum"] == ["inspect", "navigate", "scroll"]
     monkeypatch.setattr(
         actor, "_failed_attempt",
         lambda call, error: _async_failure(error),
@@ -186,6 +188,10 @@ async def test_coordinator_only_exposes_team_and_capability_discovery_tools(db, 
     ))
     assert result.status == "error"
     assert "业务工作必须交给 Agent 团队成员" in result.error
+    click = await actor.execute(ToolCall(
+        "direct-click", "operate_current_page", {"action": "click", "args": {"control_handle": "x"}}, "{}",
+    ))
+    assert click.status == "error" and "site_operator" in click.error
 
 
 @pytest.mark.asyncio
@@ -1605,3 +1611,21 @@ def test_terminal_count_summary_keeps_explicit_state_guard(status, text):
     })
 
     assert service.AgentResponsesService._validate_xiaoling_completion(checkpoint, text) is not None
+
+
+def test_pure_page_navigation_completes_without_team():
+    """“带我去项目页”由小菱直接 navigate，完成门不要求组队；点击等操作仍要团队。"""
+    guard = service.AgentResponsesService._validate_xiaoling_completion
+    navigated = _team_checkpoint([
+        ("nav", "operate_current_page", {"action": "navigate", "args": {"route": "/projects"}},
+         {"status": "completed", "completed": True}),
+    ], user_text="带我去项目管理页面")
+    assert guard(navigated, "已为你打开项目管理页面。") is None
+
+    clicked = _team_checkpoint([
+        ("nav", "operate_current_page", {"action": "navigate", "args": {"route": "/projects"}},
+         {"status": "completed", "completed": True}),
+        ("click", "operate_current_page", {"action": "click", "args": {"control_handle": "h"}},
+         {"status": "completed", "completed": True}),
+    ], user_text="打开项目页并点新建项目")
+    assert guard(clicked, "已完成") is not None

@@ -93,6 +93,19 @@ progress::-moz-progress-bar { background: #6d61ce; }
   :deep(.agent-team-refresh) { margin-left: auto; }
 }
 /* 窗口不够高时星图只保留“成员 · 状态 · 任务”清单，SVG 拓扑留给拉大后的窗口，消息区优先。 */
+/* 信息密度：同一版面多放内容，减少上下翻动。 */
+.chat-body { gap: 10px; padding: 10px 12px; }
+.copilot-messages { row-gap: 10px; padding: 10px 12px; }
+.msg-row { gap: 8px; }
+.msg-bubble { padding: 8px 12px; line-height: 1.55; max-width: calc(100% - 40px); }
+.message-bubble { padding: 8px 12px; line-height: 1.55; }
+.msg-avatar, .message-avatar { flex: none; }
+.chat-input-hint { margin: 0; }
+@container floating-chat (max-height: 720px) {
+  .chat-input-hint, .copilot-input-hint { display: none; }
+  .chat-header, .copilot-header { padding: 6px 10px; }
+  .chat-progress, .copilot-progress { padding: 4px 12px; }
+}
 @container floating-chat (max-height: 600px) {
   .live-team-graph-region :deep(.live-map-scroll), .copilot-team-graph :deep(.live-map-scroll) { display: none; }
   .live-team-graph-region :deep(.live-controls), .copilot-team-graph :deep(.live-controls) { display: none; }

@@ -130,7 +130,11 @@ _RELEASE_HEALTH_TOOL = "admin_release_health"
 _XIAOLING_COORDINATOR_TOOL_NAMES = frozenset({
     "list_agents", "create_agent_team", "get_agent_team", "cancel_agent_team", "cancel_agent_team_task",
     "retry_agent_team", "user_describe_capabilities", "admin_describe_capabilities",
+    "operate_current_page",
 })
+# 小菱本人只做无业务副作用的页面引导：跳转、滚动、观察当前页面（虚拟鼠标照常演示）。
+# 点击、填写、勾选等改变页面状态的动作仍必须派给 site_operator 团队成员执行并核验。
+_XIAOLING_COORDINATOR_PAGE_ACTIONS = frozenset({"navigate", "scroll", "inspect"})
 _PENDING_SITE_SUBMISSION_REASON = "页面任务仅已提交团队，尚无执行与核验终态；请报告等待状态，不能声称业务完成"
 
 
@@ -1268,6 +1272,18 @@ class PrismToolExecutor:
             tools.append(user_discovery_tool_schema())
             if self._surface == "admin" and self._is_admin:
                 tools.append(discovery_tool_schema())
+            tools.append({
+                "type": "function", "name": "operate_current_page",
+                "description": (
+                    "小菱直接引导当前账号打开的本站页面（虚拟鼠标可见）：navigate={route} 跳转到已核实的站内路由，"
+                    "scroll={direction:up/down} 滚动，inspect={} 观察当前页面控件。用户要求“打开/跳到/带我去某页面”时"
+                    "直接调用 navigate，不必组队。点击、填写、勾选等改变页面状态的操作必须交给 site_operator 团队成员。"
+                ),
+                "parameters": {"type": "object", "properties": {
+                    "action": {"type": "string", "enum": sorted(_XIAOLING_COORDINATOR_PAGE_ACTIONS)},
+                    "args": {"type": "object"},
+                }, "required": ["action", "args"], "additionalProperties": False},
+            })
             return tools
         if self._tool_scope == "release_health":
             return [{
@@ -1476,6 +1492,13 @@ class PrismToolExecutor:
             allowed = call.name in _XIAOLING_COORDINATOR_TOOL_NAMES
             if call.name == "admin_describe_capabilities":
                 allowed = allowed and self._surface == "admin" and self._is_admin
+            if call.name == "operate_current_page" and (
+                call.arguments.get("action") not in _XIAOLING_COORDINATOR_PAGE_ACTIONS
+            ):
+                return await self._failed_attempt(
+                    call,
+                    "小菱本人只能跳转、滚动或观察当前页面；点击、填写、勾选请创建含 agent:site_operator 成员的团队执行。",
+                )
             if not allowed:
                 return await self._failed_attempt(
                     call,
@@ -4323,6 +4346,14 @@ class AgentResponsesService:
             ((call, output) for call, output in successful if call.get("name") == "create_agent_team"),
             None,
         )
+        if create_call is None and any(
+            call.get("name") == "operate_current_page"
+            and call_arguments(call).get("action") in _XIAOLING_COORDINATOR_PAGE_ACTIONS
+            for call, _result in successful
+        ) and not any(call.get("name") == "operate_current_page" and call_arguments(call).get("action")
+                      not in _XIAOLING_COORDINATOR_PAGE_ACTIONS for call in calls.values()):
+            # 纯页面引导（跳转/滚动/观察）由小菱直接完成，回执即客户端观察，无需组队。
+            return None
         if create_call is None:
             tracking_request = re.search(
                 r"(?:团队|任务|执行).{0,12}(?:进度|状态|运行到|执行到|怎么样|如何)|"
@@ -5028,6 +5059,11 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
         "涉及具体页面操作步骤时，先调用 recall_knowledge 检索对应页面指南。"
         "小菱全任务团队硬规则（优先级高于本提示中的其他任何旧规则）：小菱只负责理解、规划、查询成员/能力合同、组队、派发、跟踪、停止、核验和汇总；"
         "普通问答、解释、翻译、总结、报告查询和页面任务都必须由当前账号当前会话的 Agent 团队成员实际执行。"
+        "唯一例外是纯页面引导：用户说“打开/跳到/带我去/切到某页面”时，小菱直接调用 operate_current_page "
+        "action=navigate（args.route 为站内真实路由，如 /projects、/reviews、/reports、/pentests、/sandbox、"
+        "/agent-workbench），虚拟鼠标会带用户过去；滚动和观察当前页同理可直接做。点击、填写、提交仍派给 site_operator。"
+        "不要自己尝试调用业务工具：小菱只拥有组队工具，直接调用业务、管理或服务器工具一定会被权限驳回；"
+        "看到任何需要读数据、审查、测试、运维的请求，第一步就是 list_agents 然后 create_agent_team。"
         "每条新用户请求先调用 list_agents 读取真实可用成员；匹配到明确 executable 合同就按其 input 合同分派。"
         "没有适配成员但任务可由模型知识回答时，创建仅当前团队有效的 temporary Agent，定义其职责为 answer_question，"
         "任务 input={operation:'answer_question',text:'用户原始问题'}；临时成员只给答案，"
