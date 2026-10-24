@@ -236,6 +236,34 @@ def run_team_review(
 _ROUNDTABLE_TERMINAL = {"concluded", "partial", "failed", "cancelled", "interrupted"}
 
 
+_ROUNDTABLE_FINDING_LIMIT = 20
+
+
+def _with_roundtable_findings(db: Session, result: dict[str, Any]) -> dict[str, Any]:
+    """挂上圆桌报告任务已落库的问题，终态汇总才能列出具体问题。"""
+    if result.get("status") != "completed":
+        return result
+    evidence = result.get("evidence") or [{}]
+    task_id = int((evidence[0].get("data") or {}).get("report_task_id") or 0)
+    if task_id <= 0:
+        return result
+    rows = (
+        db.query(ReviewIssue)
+        .filter(ReviewIssue.task_id == task_id)
+        .order_by(ReviewIssue.id)
+        .limit(_ROUNDTABLE_FINDING_LIMIT + 1)
+        .all()
+    )
+    findings = [
+        {"issue_id": row.id, "task_id": task_id, "file_id": row.file_id,
+         "file_name": row.file_name, "line_number": row.line_number,
+         "title": row.title, "severity": row.severity, "issue_type": row.issue_type}
+        for row in rows[:_ROUNDTABLE_FINDING_LIMIT]
+    ]
+    return {**result, "findings": findings,
+            "findings_truncated": len(rows) > _ROUNDTABLE_FINDING_LIMIT}
+
+
 def _roundtable_result(row: Any, *, status: str | None = None, summary: str = "",
                        extra_error: dict[str, Any] | None = None) -> dict[str, Any]:
     """把圆桌会话终态转换成团队任务结果；只有已结论的圆桌算完成。"""
@@ -337,7 +365,7 @@ def run_team_roundtable(
         if result is not None:
             return result
         if not _is_deepseek_network_failure(row, session):
-            return _roundtable_result(row)
+            return _with_roundtable_findings(db, _roundtable_result(row))
         if network_retries >= ROUNDTABLE_NETWORK_RETRY_LIMIT:
             return _roundtable_result(
                 row, status="failed",

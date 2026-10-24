@@ -518,6 +518,32 @@ def test_concluded_roundtable_does_not_expose_failure_progress():
     assert result["status"] == "completed"
     assert result["errors"] == []
     assert "phase" not in result["evidence"][0]["data"]
+
+
+def test_concluded_roundtable_result_carries_persisted_findings(db):
+    """生产回归：圆桌收口只给出“已完成”，终态汇总无法列出具体问题。"""
+    db.add_all([
+        ReviewIssue(task_id=232, file_id=512, file_name="1.py", line_number=9,
+                    title="SQL 注入", description="拼接查询", severity="high", issue_type="security"),
+        ReviewIssue(task_id=232, file_id=512, file_name="1.py", line_number=3,
+                    title="明文密码", description="明文存储", severity="medium", issue_type="security"),
+        ReviewIssue(task_id=999, file_id=1, file_name="other.py", line_number=1,
+                    title="其他任务的问题", description="无关", severity="low", issue_type="style"),
+    ])
+    db.commit()
+    row = SimpleNamespace(
+        session_id="disc-concluded", status="concluded", project_id=13, file_id=512,
+        file_name="1.py", report_task_id=232, progress={},
+    )
+
+    result = agent_team_review._with_roundtable_findings(db, agent_team_review._roundtable_result(row))
+
+    assert [item["title"] for item in result["findings"]] == ["SQL 注入", "明文密码"]
+    assert result["findings"][0]["line_number"] == 9
+    assert result["findings_truncated"] is False
+
+    failed = agent_team_review._roundtable_result(SimpleNamespace(**{**vars(row), "status": "failed"}))
+    assert "findings" not in agent_team_review._with_roundtable_findings(db, failed)
     assert "terminal_error" not in result["evidence"][0]["data"]
 
 

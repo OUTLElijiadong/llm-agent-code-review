@@ -155,6 +155,22 @@ class _FakeDb:
     def get(self, _model, _key):
         return self.row
 
+    # 圆桌收口会按报告任务读取已落库问题；这里没有问题行。
+    def query(self, *_args):
+        return self
+
+    def filter(self, *_args):
+        return self
+
+    def order_by(self, *_args):
+        return self
+
+    def limit(self, _count):
+        return self
+
+    def all(self):
+        return []
+
     def commit(self):
         pass
 
