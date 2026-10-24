@@ -1193,6 +1193,19 @@ function eventErrorMessage(event: ResponseStreamEvent): string {
   return ''
 }
 
+// 团队终态结论（“团队 N 已完成。…”）以结论样式突出，首行即状态。
+const TEAM_CONCLUSION = /^\s*\**\s*团队\s*\d+\s*(?:已完成|执行失败|已阻塞|已取消|已超时)/
+function isTeamConclusion(content: string): boolean {
+  return TEAM_CONCLUSION.test(content)
+}
+const TEAM_PROGRESS = /^任务已派发给团队成员执行，(?:当前排队中|成员已交付结果，当前核验中|当前进行中)/
+function isSupersededProgress(index: number): boolean {
+  const content = String(messages.value[index]?.payload?.content ?? '')
+  if (!TEAM_PROGRESS.test(content)) return false
+  return messages.value.slice(index + 1).some(item => item.role === 'assistant'
+    && isTeamConclusion(String(item.payload?.content ?? '')))
+}
+
 // 星图可收起为一行，给消息区让位；偏好按端保存。
 // 团队执行中默认展开星图；全部团队收口后自动收起，把空间让给小菱结论。用户手动切换优先。
 const graphManualState = ref<boolean | null>(null)
@@ -2297,14 +2310,7 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
 
 
       <section v-if="liveGraphTeams.length || teamForming || agentTeamError" class="copilot-team-graph" :class="{ 'is-collapsed': graphCollapsed }" aria-label="团队实时进度">
-        <button
-          class="live-graph-toggle"
-          type="button"
-          :aria-expanded="!graphCollapsed"
-          :title="graphCollapsed ? '展开团队星图' : '收起团队星图，给对话让出空间'"
-          @click="toggleGraphCollapsed"
-        >{{ graphCollapsed ? '展开星图' : '收起星图' }}</button>
-        <AgentTeamLiveGraph v-show="!graphCollapsed" :teams="liveGraphTeams" :forming="teamForming" :error="agentTeamError" @open-detail="openTeamPanel($event.team_id)" />
+        <AgentTeamLiveGraph collapsible :collapsed="graphCollapsed" @toggle-collapse="toggleGraphCollapsed" :teams="liveGraphTeams" :forming="teamForming" :error="agentTeamError" @open-detail="openTeamPanel($event.team_id)" />
       </section>
 
       <div ref="messageArea" class="copilot-messages" :class="{ 'is-restoring': sessionRestoring }" aria-live="polite" @click="onMessageClick">
@@ -2347,6 +2353,7 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
           />
         </template>
         <article
+          v-show="!isSupersededProgress(entryIndex)"
           class="message-row"
           :class="[`is-${entry.role}`, { 'has-timeline': entry.toolCalls?.length || entry.auditPhases?.length, 'has-error': entry.payload.type === 'error' }]"
         >
@@ -2357,6 +2364,7 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
             <div
               v-if="entry.payload.type === 'text' && entry.payload.content && entry.role === 'assistant'"
               class="message-bubble markdown-body"
+              :class="{ 'is-conclusion': isTeamConclusion(entry.payload.content) }"
               v-html="renderAuthorizedAgentMarkdown(entry.payload.content, router, userStore)"
             />
             <!-- 助手消息 hover 复制按钮(与用户端对齐) -->
@@ -2948,8 +2956,6 @@ input { font: inherit; }
 .copilot-team-graph.is-collapsed { max-height: none; overflow: visible; }
 .copilot-team-graph :deep(.live-map-scroll) { max-height: clamp(72px, 20cqh, 240px); }
 .copilot-team-graph :deep(.live-work-list) { max-height: clamp(40px, 8cqh, 120px); }
-.live-graph-toggle { position: sticky; top: 0; z-index: 2; float: right; min-height: 28px; padding: 0 10px; margin: 4px 4px 0 0; border: 1px solid rgba(91, 88, 232, 0.2); border-radius: 999px; background: #fff; color: var(--brand-600, #4b47d6); font-size: 12px; cursor: pointer; }
-.copilot-team-graph.is-collapsed .live-graph-toggle { float: none; display: block; width: 100%; margin: 0; text-align: left; }
 .copilot-messages { grid-area: messages; min-height: 0; min-width: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 16px 14px;
   /* 极淡品牌氛围底 + 滚动渐隐,替代平涂灰 */
   background:
@@ -3059,6 +3065,9 @@ input { font: inherit; }
   flex-direction: column;
   gap: 6px;
 }
+.message-bubble.markdown-body.is-conclusion { border-left: 3px solid var(--brand-500, #5b58e8); }
+.message-bubble.markdown-body.is-conclusion :deep(p:first-child) { font-weight: 600; color: var(--gray-900, #1d1f2c); margin-bottom: 4px; }
+.message-bubble.markdown-body.is-conclusion :deep(ul) { margin: 4px 0 0; padding-left: 18px; }
 .message-bubble.markdown-body :deep(table) {
   display: block;
   width: max-content;

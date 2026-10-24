@@ -2332,6 +2332,19 @@ function onMessageClick(event: MouseEvent): void {
   followNavigation({ action: 'navigate', route: href, label })
 }
 
+// 团队终态结论（“团队 N 已完成。…”）以结论样式突出，首行即状态。
+const TEAM_CONCLUSION = /^\s*\**\s*团队\s*\d+\s*(?:已完成|执行失败|已阻塞|已取消|已超时)/
+function isTeamConclusion(content: string): boolean {
+  return TEAM_CONCLUSION.test(content)
+}
+// 服务端固定的“排队/执行中/核验中”进度回复：之后已出现团队结论时折叠，避免旧进度压在结论上方。
+const TEAM_PROGRESS = /^任务已派发给团队成员执行，(?:当前排队中|成员已交付结果，当前核验中|当前进行中)/
+function isSupersededProgress(index: number): boolean {
+  const content = messages.value[index]?.content ?? ''
+  if (!TEAM_PROGRESS.test(content)) return false
+  return messages.value.slice(index + 1).some(item => item.role === 'assistant' && isTeamConclusion(item.content ?? ''))
+}
+
 // 星图可收起为一行，给消息区让位；偏好按端保存。
 // 团队执行中默认展开星图；全部团队收口后自动收起，把空间让给小菱结论。用户手动切换优先。
 const graphManualState = ref<boolean | null>(null)
@@ -2849,15 +2862,10 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
               aria-label="团队实时状态区域"
               tabindex="0"
             >
-              <button
-                class="live-graph-toggle"
-                type="button"
-                :aria-expanded="!graphCollapsed"
-                :title="graphCollapsed ? '展开团队星图' : '收起团队星图，给对话让出空间'"
-                @click="toggleGraphCollapsed"
-              >{{ graphCollapsed ? '展开星图' : '收起星图' }}</button>
               <AgentTeamLiveGraph
-                v-show="!graphCollapsed"
+                collapsible
+                :collapsed="graphCollapsed"
+                @toggle-collapse="toggleGraphCollapsed"
                 :teams="liveGraphTeams"
                 :forming="teamForming"
                 :error="agentTeamError"
@@ -2869,7 +2877,7 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
             <button v-if="historyHasMore" class="history-load-button" type="button"
               :disabled="historyLoading || loading || sessionRestoring || sessionBusy"
               @click="loadOlderHistory">{{ historyLoading ? '正在读取…' : '加载更早消息' }}</button>
-            <div v-for="(msg, i) in messages" :key="msg.id ?? i" class="msg-row" :class="[msg.role, { 'has-timeline': msg.toolCalls?.length || msg.auditPhases?.length }]">
+            <div v-for="(msg, i) in messages" v-show="!isSupersededProgress(i)" :key="msg.id ?? i" class="msg-row" :class="[msg.role, { 'has-timeline': msg.toolCalls?.length || msg.auditPhases?.length }]">
               <div class="msg-avatar">
                 <template v-if="msg.role === 'user'">U</template>
                 <PrismMascot v-else :size="26" :status="'idle'" />
@@ -2978,6 +2986,7 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
                 <div
                   v-if="msg.role === 'assistant' && msg.content"
                   class="msg-content markdown-body"
+                  :class="{ 'is-conclusion': isTeamConclusion(msg.content) }"
                   v-html="renderAuthorizedAgentMarkdown(msg.content, router, userStore)"
                 />
                 <div v-else-if="msg.role === 'user'" class="msg-content">
@@ -3622,30 +3631,9 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
   max-height: none;
   overflow: visible;
 }
+.live-team-graph-region.is-collapsed :deep(.agent-team-live) { padding-block: 4px; }
 
-.live-graph-toggle {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  float: right;
-  min-height: 28px;
-  padding: 0 10px;
-  margin: 4px 4px 0 0;
-  border: 1px solid rgba(91, 88, 232, 0.2);
-  border-radius: 999px;
-  background: #fff;
-  color: var(--brand-600, #4b47d6);
-  font-size: 12px;
-  cursor: pointer;
-}
 
-.live-team-graph-region.is-collapsed .live-graph-toggle {
-  float: none;
-  display: block;
-  width: 100%;
-  margin: 0;
-  text-align: left;
-}
 
 .live-team-graph-region :deep(.agent-team-live) {
   margin: 0;
@@ -3990,6 +3978,18 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
 }
 
 .msg-content.markdown-body { white-space: normal; }
+/* 小菱最终结论：首行状态加粗、左侧强调条，和执行过程明显区分。 */
+.msg-content.markdown-body.is-conclusion {
+  padding: 2px 0 2px 10px;
+  border-left: 3px solid var(--brand-500, #5b58e8);
+}
+.msg-content.markdown-body.is-conclusion :deep(p:first-child) {
+  font-weight: 600;
+  color: var(--gray-900, #1d1f2c);
+  margin-bottom: 4px;
+}
+.msg-content.markdown-body.is-conclusion :deep(ul) { margin: 4px 0 0; padding-left: 18px; }
+.msg-content.markdown-body.is-conclusion :deep(li) { margin: 2px 0; }
 .msg-content.markdown-body :deep(p)        { margin: 0; }
 /* 表格在任何窗口宽度下都横向滚动，单元格不换成竖排。 */
 .msg-content.markdown-body :deep(table) {

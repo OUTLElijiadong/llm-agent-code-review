@@ -2458,12 +2458,29 @@ def render_terminal_team_fallback(snapshot: Mapping[str, Any]) -> str:
         label = "已完成（部分完成）"
     lines = [f"团队 {team_id} {label}。"]
     final_result = snapshot.get("final_result")
-    summary = final_result.get("summary") if isinstance(final_result, Mapping) else None
-    if isinstance(summary, str) and summary.strip():
-        lines.append(f"汇总：{summary.strip()[:800]}")
+    final_result = final_result if isinstance(final_result, Mapping) else {}
+    findings = snapshot.get("finding_brief") if isinstance(snapshot.get("finding_brief"), list) else []
+    findings = findings or (final_result.get("findings") if isinstance(final_result.get("findings"), list) else [])
+    if findings:
+        # 结论优先：直接列出成员返回的问题，不复述内部核验字段。
+        lines.append(f"发现 {final_result.get('unique_finding_count') or len(findings)} 个问题：")
+        for item in findings[:6]:
+            if not isinstance(item, Mapping):
+                continue
+            where = str(item.get("file_path") or item.get("file_name") or "").strip()
+            line = item.get("line_number")
+            location = f"（{where}{f' 第 {line} 行' if line else ''}）" if where else ""
+            severity = str(item.get("severity") or "").strip()
+            lines.append(f"- {f'[{severity}] ' if severity else ''}{str(item.get('title') or '未命名问题')[:80]}{location}")
+        if len(findings) > 6:
+            lines.append(f"- 其余 {len(findings) - 6} 个见团队详情。")
+    else:
+        summary = final_result.get("summary")
+        if isinstance(summary, str) and summary.strip() and "claim_checks" not in summary:
+            lines.append(summary.strip()[:600])
     samples = snapshot.get("failed_task_samples")
     if isinstance(samples, list) and samples:
-        lines.append("未完成的节点：")
+        lines.append("未完成部分：")
         for sample in samples:
             if not isinstance(sample, Mapping):
                 continue
@@ -2473,7 +2490,6 @@ def render_terminal_team_fallback(snapshot: Mapping[str, Any]) -> str:
         omitted = int(snapshot.get("omitted_failed_task_count") or 0)
         if omitted:
             lines.append(f"- 另有 {omitted} 个未完成节点，可在团队详情中查看。")
-    lines.append(f"完整结果可通过团队 {team_id} 的详情查看。")
     return "\n".join(lines)
 
 
@@ -2550,6 +2566,11 @@ def _verified_terminal_team_snapshot(
     final_task = verifier_tasks[-1] if verifier_tasks else None
     summary = detail.get("summary") if isinstance(detail.get("summary"), dict) else {}
     final_result = summary.get("final_result") if isinstance(summary, dict) else None
+    raw_findings = final_result.get("findings") if isinstance(final_result, dict) else None
+    finding_brief = [
+        {key: str(item.get(key) or "")[:120] for key in ("title", "severity", "file_path", "line_number")}
+        for item in (raw_findings if isinstance(raw_findings, list) else [])[:12] if isinstance(item, dict)
+    ]
     final_result = agent_team_service.project_team_result(
         final_result if isinstance(final_result, (dict, list, str, int, float, bool)) else {},
         team_id=team_id,
@@ -2591,6 +2612,7 @@ def _verified_terminal_team_snapshot(
         "counts": detail.get("counts", {}),
         "task_statuses": task_statuses,
         "final_result": final_result,
+        "finding_brief": finding_brief,
         "partial": bool(isinstance(summary, dict) and summary.get("partial")),
         "failed_task_samples": failed_tasks[:failure_sample_limit],
         "omitted_failed_task_count": max(0, len(failed_tasks) - failure_sample_limit),

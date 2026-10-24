@@ -92,6 +92,12 @@ progress::-moz-progress-bar { background: #6d61ce; }
   .quick-question { min-height: 32px; padding: 6px 10px; }
   :deep(.agent-team-refresh) { margin-left: auto; }
 }
+/* 窗口不够高时星图只保留“成员 · 状态 · 任务”清单，SVG 拓扑留给拉大后的窗口，消息区优先。 */
+@container floating-chat (max-height: 600px) {
+  .live-team-graph-region :deep(.live-map-scroll), .copilot-team-graph :deep(.live-map-scroll) { display: none; }
+  .live-team-graph-region :deep(.live-controls), .copilot-team-graph :deep(.live-controls) { display: none; }
+  .live-team-graph-region, .copilot-team-graph { max-height: clamp(84px, 24cqh, 200px); }
+}
 @container floating-chat (max-height: 480px) {
   /* 极矮窗口：星图只保留一行，进度条压缩，把高度全部让给对话。 */
   .live-team-graph-region, .copilot-team-graph { max-height: 72px; }

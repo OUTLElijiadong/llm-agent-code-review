@@ -6,8 +6,11 @@ const props = withDefaults(defineProps<{
   teams: AgentTeamDetail[]
   forming?: boolean
   error?: string
-}>(), { forming: false, error: '' })
-const emit = defineEmits<{ 'open-detail': [team: AgentTeamDetail] }>()
+  /** 收起后只显示一行标题（成员数与执行数），把高度让给对话。 */
+  collapsed?: boolean
+  collapsible?: boolean
+}>(), { forming: false, error: '', collapsed: false, collapsible: false })
+const emit = defineEmits<{ 'open-detail': [team: AgentTeamDetail]; 'toggle-collapse': [] }>()
 const rootRef = ref<HTMLElement | null>(null)
 const containerWidth = ref(600)
 const zoom = ref(1)
@@ -90,7 +93,15 @@ watch(rootRef, (root, _previous, onCleanup) => {
       <span v-if="forming" role="status">{{ teams.length ? '正在组建新团队 · 新成员以服务端账本确认为准' : '正在组建团队 · 等待服务端确认成员' }}</span>
       <span v-if="teams.length" role="status">{{ memberCount }} 个子 Agent · {{ runningCount }} 个执行中</span>
       <span v-else-if="!forming" role="status">等待团队账本更新</span>
-      <div v-if="teams.length" class="live-controls" role="group" aria-label="星图缩放控制">
+      <button
+        v-if="collapsible"
+        class="live-collapse"
+        type="button"
+        :aria-expanded="!collapsed"
+        :title="collapsed ? '展开团队星图' : '收起团队星图，给对话让出空间'"
+        @click="emit('toggle-collapse')"
+      >{{ collapsed ? '展开' : '收起' }}</button>
+      <div v-if="teams.length && !collapsed" class="live-controls" role="group" aria-label="星图缩放控制">
         <button type="button" aria-label="缩小星图" title="缩小星图" :disabled="zoom <= minZoom" @click="zoomOut">−</button>
         <span aria-live="polite">{{ Math.round(zoom * 100) }}%</span>
         <button type="button" aria-label="放大星图" title="放大星图" :disabled="zoom >= maxZoom" @click="zoomIn">+</button>
@@ -98,7 +109,7 @@ watch(rootRef, (root, _previous, onCleanup) => {
       </div>
     </header>
     <p v-if="error" class="live-error" role="status">{{ error }}，保留上次确认的进度</p>
-    <div v-for="graph in graphs" :key="graph.team.team_id" class="live-team">
+    <div v-for="graph in graphs" v-show="!collapsed" :key="graph.team.team_id" class="live-team">
       <div class="live-team-heading">
         <span>{{ graph.team.title }} · {{ labels[graph.team.status] ?? graph.team.status }}</span>
         <button type="button" @click="emit('open-detail', graph.team)">查看详情</button>
@@ -129,6 +140,7 @@ watch(rootRef, (root, _previous, onCleanup) => {
 .agent-team-live { margin: 12px 0; padding: 14px; border: 1px solid var(--el-border-color-light, #dddfe8); border-radius: 14px; background: var(--el-fill-color-blank, #fff); color: var(--el-text-color-primary, #303346); }
 .live-heading, .live-team-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 13px; }
 .live-heading > span { font-size: 12px; color: var(--el-text-color-secondary, #626579); }
+.live-collapse { order: 9; min-height: 26px; padding: 0 10px; border: 1px solid var(--el-border-color-light, #dddfe8); border-radius: 999px; background: var(--el-fill-color-blank, #fff); color: var(--el-color-primary, #6658d9); font-size: 12px; cursor: pointer; }
 .live-controls { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; }
 .live-controls button { min-width: 32px; min-height: 32px; padding: 0 8px; border: 1px solid var(--el-border-color-light, #dddfe8); border-radius: 6px; background: var(--el-fill-color-blank, #fff); color: var(--el-text-color-primary, #303346); cursor: pointer; }
 .live-controls button:disabled { cursor: not-allowed; opacity: .45; }

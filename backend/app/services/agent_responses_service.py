@@ -5216,6 +5216,17 @@ def _team_terminal_assertions(text: str) -> list[tuple[Optional[int], str, bool]
                 identifier.start() <= quantity.start(1) < identifier.end()
                 for identifier in _TEAM_ID_PATTERN.finditer(prefix)
             )) or bool(count_after.match(suffix))
+            # 无团队主语的“失败/阻塞/超时”常是业务结论（如“登录失败次数未限制”），
+            # 不当作团队状态声明；无主语的“完成”仍需核对，防止虚报成功。
+            status_clause = bool(re.search(
+                r"(?:最终|整体|当前|团队)?状态\s*(?:[:：]|是|为)|\b(?:final |overall )?status\b", prefix, re.I,
+            ))
+            if (
+                match.lastgroup in {"failed", "blocked", "expired"}
+                and subject != "team" and not teams and not status_clause
+            ):
+                previous_end = match.end()
+                continue
             if subject != "local" and not local_result and not counted:
                 predicate_start = max(previous_end, teams[-1].end()) if teams else previous_end
                 denied = bool(negation.search(prefix[predicate_start:]))
