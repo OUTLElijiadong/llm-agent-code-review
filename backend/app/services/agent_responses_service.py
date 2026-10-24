@@ -1477,6 +1477,39 @@ class PrismToolExecutor:
             return ""
         return _latest_user_message_text(transcript)
 
+    def _active_duplicate_roundtable(self, arguments: Mapping[str, Any]) -> int:
+        """返回同账号同会话里仍在运行、且讨论同一文件的圆桌团队编号；没有则 0。"""
+        file_ids = {
+            int((task.get("input") or {}).get("file_id") or 0)
+            for task in arguments.get("tasks", []) or []
+            if isinstance(task, Mapping)
+            and (task.get("input") or {}).get("operation") == "start_roundtable"
+        } - {0}
+        if not file_ids:
+            return 0
+        from app.models.agent_team import AgentTeam, AgentTeamTask
+
+        rows = (
+            self._db.query(AgentTeamTask.team_id, AgentTeamTask.input_json)
+            .join(AgentTeam, AgentTeam.id == AgentTeamTask.team_id)
+            .filter(
+                AgentTeam.user_id == int(self._user.id),
+                AgentTeam.surface == self._surface,
+                AgentTeam.session_key == self._session_key,
+                AgentTeam.status.notin_(("completed", "failed", "blocked", "cancelled", "expired")),
+                AgentTeamTask.input_json.contains("start_roundtable"),
+            )
+            .all()
+        )
+        for team_id, raw in rows:
+            try:
+                data = json.loads(raw or "{}")
+            except (TypeError, ValueError):
+                continue
+            if data.get("operation") == "start_roundtable" and int(data.get("file_id") or 0) in file_ids:
+                return int(team_id)
+        return 0
+
     def _has_successful_agent_discovery(self) -> bool:
         """读取同一用户、同一 Responses 运行里真实成功落账的成员清单调用。"""
         return self._db.query(AgentToolExecution.id).filter(
@@ -1773,6 +1806,16 @@ class PrismToolExecutor:
             )
 
         if call.name == "create_agent_team":
+            duplicate = self._active_duplicate_roundtable(call.arguments)
+            if duplicate:
+                # 生产团队 433/434：前置团队的终态回执唤醒新一轮，模型又建了一个
+                # 同文件圆桌，两个圆桌并行且后者被取消。同会话同文件已有进行中的
+                # 圆桌时不再新建，引导模型跟踪既有团队。
+                return await self._failed_attempt(
+                    call,
+                    f"团队 {duplicate} 已在为同一文件运行圆桌讨论；不要重复创建，"
+                    f"用 get_agent_team(team_id={duplicate}) 跟踪进度即可。",
+                )
             # 缺失合同是可修正的参数错误，审批不能赋予一个未定义动作可执行语义。
             # 在风险审批前校验；合法高风险合同仍走下面的指纹绑定审批。
             from app.services.site_agent_service import resolve_site_input

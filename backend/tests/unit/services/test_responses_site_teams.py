@@ -1629,3 +1629,47 @@ def test_pure_page_navigation_completes_without_team():
          {"status": "completed", "completed": True}),
     ], user_text="打开项目页并点新建项目")
     assert guard(clicked, "已完成") is not None
+
+
+def _roundtable_team(db, *, status, file_id, session_key="site_session_123"):
+    import json
+
+    from app.models.agent_team import AgentTeam, AgentTeamMember, AgentTeamTask
+
+    team = AgentTeam(user_id=11, surface="user", session_key=session_key, title="圆桌",
+                     objective="讨论", status=status, trace_id=f"trace-{status}-{file_id}-{session_key}")
+    db.add(team)
+    db.flush()
+    member = AgentTeamMember(team_id=team.id, member_key="rt", display_name="圆桌主持",
+                             address="agent:review_orchestrator", kind="builtin", role="worker",
+                             capabilities_json="{}", status="running")
+    db.add(member)
+    db.flush()
+    db.add(AgentTeamTask(team_id=team.id, member_id=member.id, task_key="roundtable", title="圆桌",
+                         instructions="讨论", status="running",
+                         input_json=json.dumps({"operation": "start_roundtable", "project_id": 1, "file_id": file_id})))
+    db.commit()
+    return team.id
+
+
+def test_duplicate_roundtable_for_same_file_is_detected_only_while_active(db, monkeypatch):
+    """生产团队 433/434：同会话同文件圆桌仍在运行时，不能再建第二个。"""
+    actor = executor(db, monkeypatch, [])
+    plan = {"tasks": [{"task_key": "rt", "member_key": "rt",
+                       "input": {"operation": "start_roundtable", "project_id": 1, "file_id": 1910}}]}
+    assert actor._active_duplicate_roundtable(plan) == 0
+
+    running = _roundtable_team(db, status="running", file_id=1910)
+    assert actor._active_duplicate_roundtable(plan) == running
+
+    other_file = {"tasks": [{"input": {"operation": "start_roundtable", "file_id": 77}}]}
+    assert actor._active_duplicate_roundtable(other_file) == 0
+    assert actor._active_duplicate_roundtable({"tasks": [{"input": {"operation": "execute_capability"}}]}) == 0
+
+
+def test_finished_or_other_session_roundtable_does_not_block_new_one(db, monkeypatch):
+    actor = executor(db, monkeypatch, [])
+    plan = {"tasks": [{"input": {"operation": "start_roundtable", "file_id": 1910}}]}
+    _roundtable_team(db, status="completed", file_id=1910)
+    _roundtable_team(db, status="running", file_id=1910, session_key="another_session_9")
+    assert actor._active_duplicate_roundtable(plan) == 0
