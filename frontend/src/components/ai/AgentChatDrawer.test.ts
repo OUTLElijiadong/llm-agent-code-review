@@ -2292,7 +2292,7 @@ describe('小菱账号切换隔离', () => {
 
 
 describe('实时星图布局', () => {
-  it('固定在消息列表上方独立区域，账本更新不改变消息阅读位置', async () => {
+  it('星图随消息流滚动而不是钉在消息区上方，账本更新不改变阅读位置，收口后隐藏', async () => {
     const wrapper = await mountReadyDrawer()
     try {
       const area = wrapper.get('.chat-body').element as HTMLElement
@@ -2321,9 +2321,7 @@ describe('实时星图布局', () => {
       expect(graphRegion.getAttribute('role')).toBe('region')
       expect(graphRegion.getAttribute('tabindex')).toBe('0')
       expect(graphRegion.contains(graph)).toBe(true)
-      expect(graphRegion.parentElement).toBe(area.parentElement)
-      expect(graphRegion.nextElementSibling).toBe(area)
-      expect(area.contains(graph)).toBe(false)
+      expect(area.contains(graphRegion)).toBe(true)
 
       area.scrollTop = 100
       vm.agentTeams = [{
@@ -2341,6 +2339,10 @@ describe('实时星图布局', () => {
       await flushPromises()
       expect(wrapper.get('[aria-label="实时团队星图"]').text()).toContain('2 个子 Agent · 2 个执行中')
       expect(area.scrollTop).toBe(100)
+
+      vm.agentTeams = [{ ...vm.agentTeams[0], status: 'completed' }]
+      await flushPromises()
+      expect(wrapper.find('.live-team-graph-region').exists()).toBe(false)
     } finally {
       wrapper.unmount()
     }

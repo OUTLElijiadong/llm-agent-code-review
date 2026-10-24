@@ -2351,6 +2351,8 @@ const graphManualState = ref<boolean | null>(null)
 const graphTeamsRunning = computed(() => teamForming.value
   || liveGraphTeams.value.some(team => !TERMINAL_TEAM_STATUSES.has(team.status)))
 const graphCollapsed = computed(() => graphManualState.value ?? !graphTeamsRunning.value)
+// 只在团队执行/组建期间出现在消息流末尾；收口后隐藏，结果由消息内团队卡片承载。
+const showLiveGraph = computed(() => graphTeamsRunning.value && (liveGraphTeams.value.length > 0 || teamForming.value))
 watch(graphTeamsRunning, () => { graphManualState.value = null })
 function toggleGraphCollapsed(): void {
   graphManualState.value = !graphCollapsed.value
@@ -2854,25 +2856,6 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
               </div>
             </Transition>
 
-            <div
-              v-if="liveGraphTeams.length || teamForming"
-              class="live-team-graph-region"
-              :class="{ 'is-collapsed': graphCollapsed }"
-              role="region"
-              aria-label="团队实时状态区域"
-              tabindex="0"
-            >
-              <AgentTeamLiveGraph
-                collapsible
-                :collapsed="graphCollapsed"
-                @toggle-collapse="toggleGraphCollapsed"
-                :teams="liveGraphTeams"
-                :forming="teamForming"
-                :error="agentTeamError"
-                @open-detail="openTeamWindow"
-              />
-            </div>
-
             <div ref="chatBody" class="chat-body" :class="{ 'is-restoring': sessionRestoring }" @click="onMessageClick">
             <button v-if="historyHasMore" class="history-load-button" type="button"
               :disabled="historyLoading || loading || sessionRestoring || sessionBusy"
@@ -3201,6 +3184,26 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
               :error="index === 0 ? agentTeamError : ''"
               @open-detail="openTeamWindow"
             />
+
+            <!-- 星图随消息流滚动，不再钉在消息区上方挤占对话；团队全部收口后隐藏，结果见消息内团队卡片。 -->
+            <div
+              v-if="showLiveGraph"
+              class="live-team-graph-region"
+              :class="{ 'is-collapsed': graphCollapsed }"
+              role="region"
+              aria-label="团队实时状态区域"
+              tabindex="0"
+            >
+              <AgentTeamLiveGraph
+                collapsible
+                :collapsed="graphCollapsed"
+                @toggle-collapse="toggleGraphCollapsed"
+                :teams="liveGraphTeams"
+                :forming="teamForming"
+                :error="agentTeamError"
+                @open-detail="openTeamWindow"
+              />
+            </div>
 
             <div v-if="thinkingCityActive" class="msg-row assistant">
               <div class="msg-avatar">
@@ -3616,21 +3619,10 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
 
 .live-team-graph-region {
   position: relative;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   min-width: 0;
-  min-height: 0;
-  /* 星图随窗口高度让位：最多占消息区约三成，窗口越矮占比越小。 */
-  max-height: clamp(96px, 30cqh, 320px);
-  margin: 0 12px 6px;
-  overflow: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
 }
 
-.live-team-graph-region.is-collapsed {
-  max-height: none;
-  overflow: visible;
-}
 .live-team-graph-region.is-collapsed :deep(.agent-team-live) { padding-block: 4px; }
 
 

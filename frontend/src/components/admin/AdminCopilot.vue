@@ -1212,6 +1212,9 @@ const graphManualState = ref<boolean | null>(null)
 const graphTeamsRunning = computed(() => teamForming.value
   || liveGraphTeams.value.some(team => !TERMINAL_TEAM_STATUSES.has(team.status)))
 const graphCollapsed = computed(() => graphManualState.value ?? !graphTeamsRunning.value)
+// 只在团队执行/组建期间出现在消息流末尾；收口后隐藏，结果由团队卡片承载。
+const showLiveGraph = computed(() => graphTeamsRunning.value
+  && (liveGraphTeams.value.length > 0 || teamForming.value || Boolean(agentTeamError.value)))
 watch(graphTeamsRunning, () => { graphManualState.value = null })
 function toggleGraphCollapsed(): void {
   graphManualState.value = !graphCollapsed.value
@@ -2309,9 +2312,6 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
       </div>
 
 
-      <section v-if="liveGraphTeams.length || teamForming || agentTeamError" class="copilot-team-graph" :class="{ 'is-collapsed': graphCollapsed }" aria-label="团队实时进度">
-        <AgentTeamLiveGraph collapsible :collapsed="graphCollapsed" @toggle-collapse="toggleGraphCollapsed" :teams="liveGraphTeams" :forming="teamForming" :error="agentTeamError" @open-detail="openTeamPanel($event.team_id)" />
-      </section>
 
       <div ref="messageArea" class="copilot-messages" :class="{ 'is-restoring': sessionRestoring }" aria-live="polite" @click="onMessageClick">
         <Transition name="mascot-float" :css="false">
@@ -2547,6 +2547,11 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
           />
         </template>
 
+
+        <!-- 星图随消息流滚动，不再钉在消息区上方挤占对话；团队全部收口后隐藏，结果见团队卡片。 -->
+        <section v-if="showLiveGraph" class="copilot-team-graph" :class="{ 'is-collapsed': graphCollapsed }" aria-label="团队实时进度">
+          <AgentTeamLiveGraph collapsible :collapsed="graphCollapsed" @toggle-collapse="toggleGraphCollapsed" :teams="liveGraphTeams" :forming="teamForming" :error="agentTeamError" @open-detail="openTeamPanel($event.team_id)" />
+        </section>
 
         <div v-if="thinkingCityActive" class="typing-row">
           <div class="message-avatar">
@@ -2952,8 +2957,7 @@ input { font: inherit; }
 @keyframes session-restoring-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .session-restoring-spinner { animation: none; } }
 
-.copilot-team-graph { position: relative; grid-area: graph; min-width: 0; min-height: 0; max-height: clamp(96px, 30cqh, 320px); overflow: auto; overscroll-behavior: contain; padding: 0 12px 8px; }
-.copilot-team-graph.is-collapsed { max-height: none; overflow: visible; }
+.copilot-team-graph { position: relative; min-width: 0; }
 .copilot-team-graph :deep(.live-map-scroll) { max-height: clamp(72px, 20cqh, 240px); }
 .copilot-team-graph :deep(.live-work-list) { max-height: clamp(40px, 8cqh, 120px); }
 .copilot-messages { grid-area: messages; min-height: 0; min-width: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 16px 14px;
