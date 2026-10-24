@@ -294,3 +294,36 @@ def test_business_receipt_preserves_explicit_failure_and_partial_evidence(
     assert json.loads(ledger.result_json) == first
     if expected != "completed":
         assert first["errors"] and first["result_receipt"]["page_action"]["phase"] != "completed"
+
+
+def test_strip_invented_site_input_fields_keeps_contract_and_authorization_keys():
+    """生产 4.1.38：intent/focus/depends_on/text 之类杜撰字段让整次组队失败；契约键与授权类键不动。"""
+    from app.services.site_agent_service import strip_invented_site_input_fields
+
+    base = {"operation": "execute_capability", "scope": "user", "capability": "projects.list", "params": {"page": 1}}
+    cleaned, stripped = strip_invented_site_input_fields({**base, "intent": "列项目", "focus": "x", "depends_on": ["a"]})
+    assert cleaned == base and stripped == ["depends_on", "focus", "intent"]
+    assert strip_invented_site_input_fields({"operation": "verify_results", "text": "核对"}) == (
+        {"operation": "verify_results"}, ["text"],
+    )
+    # 内部下划线键不属于模型字段，保持原样由原有逻辑处理。
+    keep, none = strip_invented_site_input_fields({**base, "_internal": 1})
+    assert keep == {**base, "_internal": 1} and none == []
+
+
+@pytest.mark.parametrize("danger", ["approved", "authorized", "url", "origin", "user_id", "session_id", "token", "password"])
+def test_strip_invented_site_input_fields_never_strips_authorization_or_identity_keys(danger):
+    from app.services.site_agent_service import strip_invented_site_input_fields
+
+    value = {"operation": "execute_capability", "scope": "user", "capability": "projects.list", "params": {}, danger: "x", "intent": "y"}
+    cleaned, stripped = strip_invented_site_input_fields(value)
+    assert cleaned == value and stripped == []
+    with pytest.raises(ValueError, match="不接受参数"):
+        site_agent_service.resolve_site_input(value)
+
+
+def test_strip_invented_site_input_fields_leaves_page_operations_untouched():
+    from app.services.site_agent_service import strip_invented_site_input_fields
+
+    value = {"operation": "operate_current_page", "action": "inspect", "args": {}, "intent": "x"}
+    assert strip_invented_site_input_fields(value) == (value, [])

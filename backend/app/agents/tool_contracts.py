@@ -521,6 +521,31 @@ class GetAgentTeamArguments(FixedToolArguments):
     offset: int = Field(default=0, ge=0)
     limit: int = Field(default=20, ge=1, le=20)
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_lenient_inputs(cls, value: Any) -> Any:
+        """读取类工具对“明显笔误”宽进：失败卡片对用户是噪声，且模型下一轮必然改成同样的值。
+
+        - limit 超出 1-20 夹到边界（分页大小本就由服务端兜底）
+        - team_id/task_id 以纯数字字符串给出时转整数
+        - result_path 缺少前导 / 时补上（"evidence" -> "/evidence"）
+        其余类型/范围错误仍严格拒绝。
+        """
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+        limit = data.get("limit")
+        if isinstance(limit, int) and not isinstance(limit, bool):
+            data["limit"] = max(1, min(20, limit))
+        for key in ("team_id", "task_id", "offset", "limit"):
+            raw = data.get(key)
+            if isinstance(raw, str) and raw.strip().isdigit():
+                data[key] = int(raw.strip())
+        path = data.get("result_path")
+        if isinstance(path, str) and path.strip() and not path.startswith("/"):
+            data["result_path"] = "/" + path.strip()
+        return data
+
     @model_validator(mode="after")
     def validate_result_scope(self) -> "GetAgentTeamArguments":
         if self.result_scope != "task" and self.task_id is not None:
@@ -839,14 +864,85 @@ def fixed_tool_accepts_ctx(tool_name: str) -> bool:
     return _get_contract(tool_name).inject_ctx
 
 
+# 只允许剥除“模型自己杜撰的无害字段”的位置。会话、账号、范围等所有权字段永远不在此列：
+# 它们一旦出现就是越权尝试，必须整体拒绝。键为工具名，值为允许容错的 JSON 路径前缀（数字下标记为 *）。
+_TOLERANT_EXTRA_PREFIXES: Dict[str, Tuple[str, ...]] = {
+    "create_agent_team": ("tasks.*", "members.*", "members.*.definition"),
+    "get_agent_team": ("",),
+}
+# 即使位于容错位置，这些名字也绝不剥除。
+_NEVER_STRIPPED_FIELDS = frozenset({
+    "session_id", "session_key", "surface", "user_id", "owner_id", "user", "account", "role_id",
+    "token", "authorization", "ctx", "trace_id", "execution_token", "lease_token",
+})
+_MAX_TOLERANT_ROUNDS = 6
+
+
 def validate_fixed_tool_arguments(tool_name: str, arguments: Any) -> Dict[str, Any]:
-    """严格校验固定工具参数并返回 canonical、仅显式字段字典。"""
+    """严格校验固定工具参数并返回 canonical、仅显式字段字典。
+
+    Studio 发布校验、Planner 等需要“字段必须精确”的调用方使用本函数；
+    只有面向模型实时调用的 Responses 路径使用 validate_fixed_tool_arguments_tolerant。
+    """
     contract = _get_contract(tool_name)
     try:
         validated = contract.arguments_model.model_validate(arguments)
     except ValidationError as exc:
         raise FixedToolArgumentError(tool_name, _sanitize_validation_errors(exc)) from exc
     return validated.model_dump(exclude_unset=True)
+
+
+def validate_fixed_tool_arguments_tolerant(
+    tool_name: str, arguments: Any,
+) -> Tuple[Dict[str, Any], List[str]]:
+    """同 validate_fixed_tool_arguments，但剥除白名单位置上模型杜撰的无害额外字段。
+
+    生产里 `tasks.1.role`、`tasks.1._dep` 之类的杜撰字段占 create_agent_team 失败的四分之一，
+    且模型总在下一轮去掉它们后成功。这里把“失败→重试”折叠成一次成功调用，
+    被剥除的字段名返回给调用方记录，其余任何错误仍然严格拒绝。
+    """
+    contract = _get_contract(tool_name)
+    prefixes = _TOLERANT_EXTRA_PREFIXES.get(tool_name)
+    working: Any = deepcopy(arguments) if prefixes and isinstance(arguments, dict) else arguments
+    stripped: List[str] = []
+    for _round in range(_MAX_TOLERANT_ROUNDS):
+        try:
+            validated = contract.arguments_model.model_validate(working)
+            return validated.model_dump(exclude_unset=True), stripped
+        except ValidationError as exc:
+            issues = _sanitize_validation_errors(exc)
+            if not prefixes or not _strip_tolerated_extras(working, issues, prefixes, stripped):
+                raise FixedToolArgumentError(tool_name, issues) from exc
+    raise FixedToolArgumentError(tool_name, [{"field": "参数", "message": "多余参数过多", "type": "extra_forbidden"}])
+
+
+def _strip_tolerated_extras(
+    arguments: Any, issues: List[Dict[str, str]], prefixes: Tuple[str, ...], stripped: List[str],
+) -> bool:
+    """只有当所有问题都是白名单位置上的额外字段时才剥除；否则返回 False，保持整体拒绝。"""
+    if not issues or any(item["type"] != "extra_forbidden" for item in issues):
+        return False
+    targets: List[List[str]] = []
+    for item in issues:
+        path = item["field"].split(".")
+        if not path or path[-1] in _NEVER_STRIPPED_FIELDS:
+            return False
+        parent = ".".join("*" if part.isdigit() else part for part in path[:-1])
+        if parent not in prefixes:
+            return False
+        targets.append(path)
+    for path in targets:
+        node = arguments
+        try:
+            for part in path[:-1]:
+                node = node[int(part)] if isinstance(node, list) else node[part]
+        except (KeyError, IndexError, ValueError, TypeError):
+            return False
+        if not isinstance(node, dict) or path[-1] not in node:
+            return False
+        del node[path[-1]]
+        stripped.append(".".join(path))
+    return True
 
 
 def _get_contract(tool_name: str) -> FixedToolContract:

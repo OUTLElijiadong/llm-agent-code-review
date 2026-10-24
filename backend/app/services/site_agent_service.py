@@ -44,6 +44,39 @@ def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
 
 
+# 站点任务 input 的契约字段；除此之外的键都是模型杜撰的，不参与任何执行语义。
+_SITE_CONTRACT_KEYS = {
+    "verify_results": frozenset({"operation"}),
+    "execute_capability": frozenset({"operation", "scope", "capability", "params"}),
+}
+# 即使在容错范围内，这些键也不剥除：它们一旦出现就可能是在试图改写授权/身份/执行结果。
+_SITE_NEVER_STRIPPED = frozenset({
+    "approved", "authorized", "confirmed", "url", "origin", "user_id", "account", "session_id", "surface",
+    "token", "password", "api_key", "secret", "authorization", "execution_token", "lease_token",
+    "remote_target_url", "remote_target_authorized",
+})
+
+
+def strip_invented_site_input_fields(value: Mapping[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """剥除站点任务 input 中模型杜撰的无害字段（如 intent/focus/depends_on/text），返回 (input, 被剥键)。
+
+    只处理 execute_capability / verify_results；operate_current_page 的 action/args 契约和
+    授权、身份、URL 类键保持原样，交给 resolve_site_input 整体拒绝。
+    """
+    if not isinstance(value, Mapping):
+        return dict(value) if isinstance(value, dict) else value, []  # type: ignore[return-value]
+    contract = _SITE_CONTRACT_KEYS.get(str(value.get("operation") or ""))
+    if contract is None:
+        return dict(value), []
+    extras = [
+        str(key) for key in value
+        if not str(key).startswith("_") and key not in contract
+    ]
+    if not extras or any(str(key).lower() in _SITE_NEVER_STRIPPED for key in extras):
+        return dict(value), []
+    return {key: item for key, item in value.items() if key not in extras}, sorted(extras)
+
+
 def resolve_site_input(value: Mapping[str, Any]):
     """指令文本和模型的 approved/URL/身份覆盖均不能改变执行契约。"""
     if not isinstance(value, Mapping):

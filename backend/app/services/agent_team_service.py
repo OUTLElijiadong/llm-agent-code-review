@@ -1862,6 +1862,66 @@ def get_team(db: Session, user: User, team_id: int) -> dict[str, Any]:
     return _team_out(db, _team_or_raise(db, user, team_id), include_events=True)
 
 
+def _redacted_root(stored_result: Any, redact: Any) -> Any:
+    """重新取一份完整脱敏后的根结果，供越界定位后回退使用。"""
+    return redact(_unjson(stored_result, {}))
+
+
+def _walk_valid_prefix(
+    root: Any, result_path: str, result_indices: Optional[list[int]], result_part: str,
+) -> tuple[Any, list[int], str]:
+    """沿请求的路径/索引尽量往下走，在第一处无法解析的位置停在最深的有效上一层。
+
+    返回 (该层的值, 到达该层的索引引用, 到达该层的 JSON Pointer)。
+    """
+    value = root
+    indices: list[int] = []
+    tokens: list[str] = []
+    steps: list[tuple[str, Optional[int]]] = []
+    if result_path:
+        steps = [(token, None) for token in result_path.split("/")[1:]]
+    else:
+        steps = [("", index) for index in (result_indices or [])]
+    for position, (token, index) in enumerate(steps):
+        try:
+            if index is not None:
+                if isinstance(value, dict):
+                    key = list(value)[index]
+                    child = value[key]
+                    token_text = str(key).replace("~", "~0").replace("/", "~1")
+                elif isinstance(value, list):
+                    child = value[index]
+                    token_text = str(index)
+                else:
+                    break
+                if not isinstance(child, (dict, list)):
+                    break
+                value, indices = child, indices + [index]
+                tokens.append(token_text)
+                continue
+            if re.search(r"~(?![01])", token):
+                break
+            key = token.replace("~1", "/").replace("~0", "~")
+            if isinstance(value, dict) and key in value:
+                child = value[key]
+                if not isinstance(child, (dict, list)):
+                    break
+                indices.append(list(value).index(key))
+                value = child
+            elif isinstance(value, list) and key.isdecimal() and int(key) < len(value):
+                child = value[int(key)]
+                if not isinstance(child, (dict, list)):
+                    break
+                indices.append(int(key))
+                value = child
+            else:
+                break
+            tokens.append(token)
+        except (IndexError, KeyError, ValueError):
+            break
+    return value, indices[:32], ("/" + "/".join(tokens)) if tokens else ""
+
+
 def get_team_result_page(db: Session, user: User, team_id: int, task_id: Optional[int] = None, *,
                          result_scope: str = "task",
                          result_path: str = "", result_indices: Optional[list[int]] = None,
@@ -1874,6 +1934,13 @@ def get_team_result_page(db: Session, user: User, team_id: int, task_id: Optiona
             or (result_scope == "task") != (task_id is not None)):
         raise AgentTeamValidationError("结果作用域与task_id不匹配")
     source = {"team_id": int(team.id), "result_scope": result_scope}
+    notes: list[str] = []
+    if result_path and result_indices:
+        # 两种定位方式互斥；模型同时给出时以更精确的 JSON Pointer 为准，不让一次笔误变成失败。
+        result_indices = None
+        if result_part == "key":
+            result_part = "value"
+        notes.append("同时给出 result_path 与 result_indices，已按 result_path 读取")
     if result_scope == "task":
         task = db.query(AgentTeamTask).filter_by(team_id=team.id, id=task_id).first()
         if task is None:
@@ -1907,6 +1974,7 @@ def get_team_result_page(db: Session, user: User, team_id: int, task_id: Optiona
             return f"；该层是长度为 {len(container)} 的数组，索引范围 0-{max(0, len(container) - 1)}"
         return "；该层已是标量值，不能继续下钻"
 
+    resolved_path = result_path
     try:
         for token in result_path.split("/")[1:] if result_path else []:
             if re.search(r"~(?![01])", token):
@@ -1932,11 +2000,21 @@ def get_team_result_page(db: Session, user: User, team_id: int, task_id: Optiona
         if len(indices) > 32:
             raise ValueError("引用深度超限")
     except (KeyError, IndexError, ValueError):
-        raise AgentTeamValidationError(
-            f"结果路径不存在{_path_hint(value)}。请先不带 result_path/result_indices 读取上一层再定位"
-        ) from None
-    output = {**source, "result_path": result_path,
+        # 指向不存在的位置时不报错：回到能解析到的最深一层，并列出该层可用键/长度，
+        # 让这一次读取就带回有用内容，而不是多一轮“失败→重试”。
+        value = _redacted_root(stored_result, redact_agent_model_context_value)
+        indices = []
+        resolved_path = ""
+        walked = _walk_valid_prefix(value, result_path, result_indices, result_part)
+        value, indices, resolved_path = walked
+        notes.append(
+            f"请求的位置不存在，已改为读取最近的有效上一层{_path_hint(value)}"
+        )
+        result_part = "value"
+    output = {**source, "result_path": resolved_path,
               "result_indices": indices, "result_part": result_part}
+    if notes:
+        output["notes"] = notes
     if isinstance(value, str):
         end = min(len(value), offset + 2000)
         output.update(text=value[offset:end], total=len(value))

@@ -55,6 +55,8 @@ const STATUS_NOTES: Record<ResponseToolCallStatus, string> = {
   failed: '没做成',
   rejected: '已按你的要求取消',
 }
+/** 同一工具随后成功重试：早先的失败已被自动修正，只作为低调记录保留。 */
+const RECOVERED_NOTE = '已自动修正'
 
 const ACTIVE_STATUSES = new Set<ResponseToolCallStatus>([
   'streaming', 'queued', 'delivered', 'acknowledged', 'processing', 'running',
@@ -82,6 +84,8 @@ interface StepView {
   running: boolean
   done: boolean
   failed: boolean
+  /** 失败但同一工具之后已成功：不再红色报错。 */
+  recovered: boolean
   waiting: boolean
   supervision?: {
     label: string
@@ -92,35 +96,52 @@ interface StepView {
   result?: string
 }
 
-function stepView(call: ResponseToolCall): StepView {
+function stepView(call: ResponseToolCall, recoveredKeys: ReadonlySet<string>): StepView {
   const info = toolDisplayInfo(call.name)
   const subject = call.subject?.trim()
   const status = call.status
   return {
     key: call.key,
     action: subject || info.label,
-    note: STATUS_NOTES[status] ?? '处理中',
+    note: status === 'failed' && recoveredKeys.has(call.key) ? RECOVERED_NOTE : STATUS_NOTES[status] ?? '处理中',
     status,
     isRag: info.isRag,
     isPageAction: info.isPageAction,
     running: ACTIVE_STATUSES.has(status),
     done: status === 'completed',
-    failed: status === 'failed',
+    failed: status === 'failed' && !recoveredKeys.has(call.key),
+    recovered: status === 'failed' && recoveredKeys.has(call.key),
     waiting: status === 'waiting_approval' || status === 'waiting_input',
     supervision: call.supervision ? {
       label: supervisionLabel(call.supervision.decision, call.supervision.riskLevel),
       riskLevel: call.supervision.riskLevel,
       reason: call.supervision.reason,
     } : undefined,
-    error: status === 'failed' ? formatResponseValue(call.error) || undefined : undefined,
+    error: status === 'failed' && !recoveredKeys.has(call.key) ? formatResponseValue(call.error) || undefined : undefined,
     // Mesh 的 preview 是传输元数据，不是用户请求的工具输出。
     result: status === 'completed' && !call.direction ? formatResponseValue(call.resultPreview) || undefined : undefined,
   }
 }
 
-const steps = computed<StepView[]>(() => visibleCalls.value.map(stepView))
+/**
+ * 同一工具先失败、之后又成功的调用：模型常把参数写错一次再自己改对（生产 4.1.38 中
+ * 失败的读取类调用 95% 在同一轮内随后成功）。这类失败已经被修正，红色“出错”只会吓到用户，
+ * 因此降为低调记录；最终仍未成功的失败保持红色。
+ */
+const recoveredKeys = computed<Set<string>>(() => {
+  const recovered = new Set<string>()
+  const laterSuccess = new Set<string>()
+  for (let index = visibleCalls.value.length - 1; index >= 0; index -= 1) {
+    const call = visibleCalls.value[index]
+    if (call.status === 'completed' || call.status === 'submitted') laterSuccess.add(call.name)
+    else if (call.status === 'failed' && laterSuccess.has(call.name)) recovered.add(call.key)
+  }
+  return recovered
+})
+
+const steps = computed<StepView[]>(() => visibleCalls.value.map((call) => stepView(call, recoveredKeys.value)))
 const doneCount = computed(() => steps.value.filter((step) => step.done).length)
-const failedCount = computed(() => steps.value.filter((step) => step.status === 'failed').length)
+const failedCount = computed(() => steps.value.filter((step) => step.failed).length)
 const failedSteps = computed(() => steps.value.filter((step) => step.failed))
 /** 是否有 RAG 检索正在/曾经发生(顶部显示检索徽标)。 */
 const ragActive = computed(() => steps.value.some((step) => step.isRag && step.running))
@@ -215,6 +236,7 @@ function toggleTimeline(): void {
           :class="{
             'is-done': step.done,
             'is-failed': step.failed,
+            'is-recovered': step.recovered,
             'is-running': step.running,
             'is-waiting': step.waiting,
             'is-rag': step.isRag,
@@ -226,6 +248,9 @@ function toggleTimeline(): void {
             </template>
             <template v-else-if="step.failed">
               <el-icon class="xl-step-warn"><WarningFilled /></el-icon>
+            </template>
+            <template v-else-if="step.recovered">
+              <i class="xl-step-dot"></i>
             </template>
             <template v-else-if="step.isRag && step.running">
               <i class="xl-step-rag-dot"></i>
@@ -412,6 +437,8 @@ function toggleTimeline(): void {
 }
 .xl-step.is-running .xl-step-action { color: var(--brand-700); }
 .xl-step.is-failed .xl-step-action { color: var(--color-danger); }
+.xl-step.is-recovered .xl-step-action { color: var(--gray-500); font-weight: 500; }
+.xl-step.is-recovered .xl-step-note { color: var(--gray-400); }
 
 .xl-step-chip {
   flex: none;

@@ -86,8 +86,24 @@ def test_fixed_tool_contract_and_orchestrator_return_exact_business_leaf(db, act
     assert output.status == "success"
     assert output.output["items"] == [{"id": 44, "title": "真实业务标题"}]
     assert orch.get_agent_team(created["team_id"], result_path="/data").success is False
+    # limit 过大不再让一次读取失败：夹到上限 20（生产 4.1.38 的 limit 越界失败全部在下一轮改成合法值）。
+    assert validate_fixed_tool_arguments(
+        "get_agent_team", {"team_id": created["team_id"], "limit": 1000},
+    )["limit"] == 20
+    assert validate_fixed_tool_arguments(
+        "get_agent_team", {"team_id": created["team_id"], "limit": 0},
+    )["limit"] == 1
+    # 数字字符串转整数、缺前导 / 的路径补齐；真正的类型/必填错误仍然拒绝。
+    lenient = validate_fixed_tool_arguments(
+        "get_agent_team", {"team_id": "7", "task_id": "9", "result_path": "data/items"},
+    )
+    assert lenient["team_id"] == 7 and lenient["task_id"] == 9 and lenient["result_path"] == "/data/items"
     with pytest.raises(FixedToolArgumentError):
-        validate_fixed_tool_arguments("get_agent_team", {"team_id": created["team_id"], "limit": 1000})
+        validate_fixed_tool_arguments("get_agent_team", {"team_id": "abc"})
+    with pytest.raises(FixedToolArgumentError):
+        validate_fixed_tool_arguments("get_agent_team", {"limit": 5})
+    with pytest.raises(FixedToolArgumentError):
+        validate_fixed_tool_arguments("get_agent_team", {"team_id": created["team_id"], "limit": True})
 
 
 @pytest.mark.parametrize("path", ["/api_key", "/data/password", "/data/escaped~1key"])
@@ -152,14 +168,53 @@ def test_long_dictionary_keys_are_fully_retrievable_without_oversized_pointer(db
 
 
 @pytest.mark.parametrize("kwargs", [
-    {"result_indices": [-1]}, {"result_indices": [True]}, {"result_indices": [999]},
-    {"result_indices": [0] * 33}, {"result_indices": [0], "result_path": "/data"},
+    {"result_indices": [-1]}, {"result_indices": [True]},
+    {"result_indices": [0] * 33},
     {"result_part": "key"}, {"result_part": "unknown"},
 ])
 def test_index_result_locator_rejects_invalid_input(db, actor, kwargs):
+    """类型/范围/深度非法的输入仍然拒绝：这些不是可纠正的定位笔误。"""
     created, claim = claimed_team(db, actor)
     with pytest.raises(agent_team_service.AgentTeamValidationError):
         agent_team_service.get_team_result_page(db, actor, created["team_id"], claim["task_id"], **kwargs)
+
+
+def test_index_beyond_range_falls_back_to_nearest_valid_layer_with_hint(db, actor):
+    """生产 4.1.38：模型常把索引/路径写过界；一次失败卡片对用户是噪声，改为带提示的降级读取。"""
+    created, claim = claimed_team(db, actor)
+    row = db.get(AgentTeamTask, claim["task_id"])
+    row.result_json = json.dumps({"data": [{"a": 1}]})
+    db.commit()
+    output = agent_team_service.get_team_result_page(
+        db, actor, created["team_id"], row.id, result_indices=[999],
+    )
+    assert output["notes"] and "已改为读取最近的有效上一层" in output["notes"][0]
+    assert "data" in output["items"]
+    assert output["result_indices"] == []
+
+
+def test_path_and_indices_together_prefer_the_json_pointer(db, actor):
+    created, claim = claimed_team(db, actor)
+    row = db.get(AgentTeamTask, claim["task_id"])
+    row.result_json = json.dumps({"data": [{"a": 1}, {"a": 2}]})
+    db.commit()
+    output = agent_team_service.get_team_result_page(
+        db, actor, created["team_id"], row.id, result_indices=[0], result_path="/data",
+    )
+    assert any("已按 result_path 读取" in note for note in output["notes"])
+    assert output["result_path"] == "/data" and output["total"] == 2
+
+
+def test_missing_path_returns_deepest_valid_layer_instead_of_failing(db, actor):
+    created, claim = claimed_team(db, actor)
+    row = db.get(AgentTeamTask, claim["task_id"])
+    row.result_json = json.dumps({"data": {"items": [1, 2, 3]}})
+    db.commit()
+    output = agent_team_service.get_team_result_page(
+        db, actor, created["team_id"], row.id, result_path="/data/items/x/y",
+    )
+    assert output["result_path"] == "/data/items"
+    assert output["total"] == 3 and output["notes"]
 
 
 def test_key_reference_traverses_intermediate_arrays_and_rejects_foreign_owner(db, actor):

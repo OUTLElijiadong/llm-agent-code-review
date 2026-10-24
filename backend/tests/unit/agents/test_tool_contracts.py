@@ -360,3 +360,76 @@ def test_send_message_context_accepts_supervision_fields():
     })
     assert ctx.supervision_round == 2
     assert ctx.supervision_correlation_id == "msg-orig-1"
+
+
+def _team_payload_with_extra(task_extra=None, top_extra=None):
+    payload = {
+        "title": "t", "objective": "o",
+        "members": [
+            {"member_key": "reader", "display_name": "读取", "address": "agent:project_analyzer"},
+            {"member_key": "sum", "display_name": "汇总", "address": "agent:reporter", "role": "summarizer"},
+        ],
+        "tasks": [
+            {"task_key": "read", "member_key": "reader", "title": "读取", "instructions": "读取项目", **(task_extra or {})},
+            {"task_key": "sum", "member_key": "sum", "title": "汇总", "instructions": "汇总", "depends_on": ["read"],
+             **(task_extra or {})},
+        ],
+    }
+    payload.update(top_extra or {})
+    return payload
+
+
+def test_tolerant_validation_strips_invented_harmless_task_fields_and_reports_them() -> None:
+    """生产 4.1.38：tasks.N.role / _dep 之类杜撰字段占 create_agent_team 失败的四分之一，且下一轮必成功。"""
+    from app.agents.tool_contracts import validate_fixed_tool_arguments_tolerant
+
+    canonical, stripped = validate_fixed_tool_arguments_tolerant(
+        "create_agent_team", _team_payload_with_extra({"role": "worker", "_dep": "x"}),
+    )
+    assert "role" not in canonical["tasks"][0] and "_dep" not in canonical["tasks"][1]
+    assert sorted(stripped) == ["tasks.0._dep", "tasks.0.role", "tasks.1._dep", "tasks.1.role"]
+    # 严格版本保持原语义：仍然整体拒绝，不会悄悄改变既有调用方行为。
+    with pytest.raises(FixedToolArgumentError):
+        validate_fixed_tool_arguments("create_agent_team", _team_payload_with_extra({"role": "worker"}))
+
+
+@pytest.mark.parametrize("top_extra", [
+    {"session_id": "spoofed"}, {"surface": "admin"}, {"user_id": 1}, {"unknown_top_level": 1},
+])
+def test_tolerant_validation_never_strips_ownership_or_top_level_fields(top_extra) -> None:
+    from app.agents.tool_contracts import validate_fixed_tool_arguments_tolerant
+
+    with pytest.raises(FixedToolArgumentError):
+        validate_fixed_tool_arguments_tolerant("create_agent_team", _team_payload_with_extra(top_extra=top_extra))
+
+
+def test_tolerant_validation_does_not_strip_ownership_fields_even_inside_tasks() -> None:
+    from app.agents.tool_contracts import validate_fixed_tool_arguments_tolerant
+
+    with pytest.raises(FixedToolArgumentError):
+        validate_fixed_tool_arguments_tolerant("create_agent_team", _team_payload_with_extra({"session_id": "x"}))
+
+
+def test_tolerant_validation_does_not_mask_other_errors_alongside_extras() -> None:
+    from app.agents.tool_contracts import validate_fixed_tool_arguments_tolerant
+
+    payload = _team_payload_with_extra({"role": "worker"})
+    del payload["tasks"][0]["instructions"]
+    with pytest.raises(FixedToolArgumentError, match="instructions"):
+        validate_fixed_tool_arguments_tolerant("create_agent_team", payload)
+
+
+def test_tolerant_validation_only_applies_to_whitelisted_tools() -> None:
+    from app.agents.tool_contracts import validate_fixed_tool_arguments_tolerant
+
+    with pytest.raises(FixedToolArgumentError, match="不允许"):
+        validate_fixed_tool_arguments_tolerant("delete_project", {"project_id": 1, "note": "x"})
+
+
+def test_tolerant_get_agent_team_drops_invented_placeholder_arguments() -> None:
+    from app.agents.tool_contracts import validate_fixed_tool_arguments_tolerant
+
+    canonical, stripped = validate_fixed_tool_arguments_tolerant(
+        "get_agent_team", {"team_id": 5, "partition": "a", "result_indices_placeholder": []},
+    )
+    assert canonical == {"team_id": 5} and sorted(stripped) == ["partition", "result_indices_placeholder"]

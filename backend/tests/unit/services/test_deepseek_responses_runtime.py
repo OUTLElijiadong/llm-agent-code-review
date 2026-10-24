@@ -2425,10 +2425,16 @@ async def test_trusted_team_neutral_summary_without_id_persists_evidence_without
     ("blocked", "团队 360 的结果：\n" + "详细执行记录。" * 12 + "\n已完成全部任务。"),
     ("completed", "团队 360 的结果：团队 361 已完成。"),
 ])
-async def test_trusted_team_contradiction_fails_closed_without_persisting_claim(status, body):
+async def test_trusted_team_contradiction_never_persists_the_claim_and_closes_with_server_status(status, body):
+    """可信终态回执被矛盾措辞反复冲撞：模型的任何措辞都不落库，由服务端终态文本收口（不再整轮红字失败）。
+
+    旧语义是整轮 FAILED；生产 4.1.38 中这让用户在已确定的团队终态之后只看到“运行异常”。
+    安全目的不变——矛盾声明不被采纳——所以只替换收口方式，不放宽任何判定。
+    """
     from app.services.agent_responses_service import AgentResponsesService
     from app.services.deepseek_responses_runtime import COMPLETION_GUARD_RETRY_LIMIT
 
+    labels = {"completed": "已完成", "failed": "执行失败", "blocked": "已阻塞"}
     transport = ScriptedTransport([
         _message_response(body) for _ in range(COMPLETION_GUARD_RETRY_LIMIT + 1)
     ])
@@ -2438,13 +2444,19 @@ async def test_trusted_team_contradiction_fails_closed_without_persisting_claim(
         "团队结果回执", run_id=f"reject-team-{status}",
         context_metadata={"trusted_terminal_team_snapshot": {"team_id": 360, "status": status}},
     )
-    assert result.status == FAILED
-    assert result.output_text == ""
-    assert "执行证据校验失败" in result.error
+    assert result.status == COMPLETED
+    assert result.output_text == f"团队 360 {labels[status]}。详细结果可在团队详情中查看。"
+    # 模型的矛盾措辞一个字都不能进入账本或最终输出。
+    assert body[:20] not in result.output_text
     checkpoint = await runtime.get_checkpoint(f"reject-team-{status}")
-    assert checkpoint.output_text == ""
-    assert not any(item.get("role") == "assistant" for item in checkpoint.transcript)
+    assert checkpoint.output_text == result.output_text
+    assert checkpoint.transcript[-1]["content"][0]["text"] == result.output_text
+    assert not any(
+        body[:20] in json.dumps(item.get("content", ""), ensure_ascii=False)
+        for item in checkpoint.transcript if item.get("role") == "assistant"
+    )
     assert checkpoint.context_metadata["completion_guard_retries"] == COMPLETION_GUARD_RETRY_LIMIT
+    assert checkpoint.context_metadata.get("completion_guard_fallback_reason")
     assert len(transport.payloads) == COMPLETION_GUARD_RETRY_LIMIT + 1
     assert executor.calls == []
 

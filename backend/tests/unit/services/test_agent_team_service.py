@@ -3393,18 +3393,20 @@ def test_required_task_input_error_accepts_complete_inputs(code, task_input):
 
 
 def test_result_path_errors_list_available_keys(db, team_user):
+    """不存在的路径不再报错：降级读取有效上一层，并在 notes 里列出该层可用键。"""
     created = agent_team_service.create_team_from_xiaoling(db, team_user, _payload())
     claimed = agent_team_service.claim_next_task(db, created["team_id"], lease_seconds=60)
     agent_team_service.complete_task(
         db, created["team_id"], claimed["task_id"], lease_token=claimed["lease_token"],
         result={"status": "completed", "summary": "ok", "evidence": [{"source": "a"}]}, success=True,
     )
-    with pytest.raises(agent_team_service.AgentTeamValidationError) as missing:
-        agent_team_service.get_team_result_page(
-            db, team_user, created["team_id"], claimed["task_id"], result_path="/findings",
-        )
-    assert "结果路径不存在" in str(missing.value)
-    assert "evidence" in str(missing.value) and "summary" in str(missing.value)
+    output = agent_team_service.get_team_result_page(
+        db, team_user, created["team_id"], claimed["task_id"], result_path="/findings",
+    )
+    notes = " ".join(output["notes"])
+    assert "已改为读取最近的有效上一层" in notes
+    assert "evidence" in notes and "summary" in notes
+    # 格式本身非法（不以 / 开头）仍然拒绝，这是可预期的调用错误而不是定位笔误。
     with pytest.raises(agent_team_service.AgentTeamValidationError) as invalid:
         agent_team_service.get_team_result_page(
             db, team_user, created["team_id"], claimed["task_id"], result_path="evidence",

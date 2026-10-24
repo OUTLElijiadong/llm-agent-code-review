@@ -121,6 +121,43 @@ describe('真实步骤与结果动效的交互边界', () => {
     expect(wrapper.get('.xl-step-error').text()).toBe('finish_reason=length')
   })
 
+  it('同一工具失败后又成功：早先失败降为“已自动修正”，不再红色报错也不计入出错', async () => {
+    const wrapper = render([
+      call({ key: 'a', name: 'get_agent_team', status: 'failed', error: '结果路径不存在' }),
+      call({ key: 'b', name: 'get_agent_team', status: 'failed', error: '结果路径或分页参数无效' }),
+      call({ key: 'c', name: 'get_agent_team', status: 'completed' }),
+    ])
+    expect(wrapper.find('.xl-steps-collapsed-errors').exists()).toBe(false)
+    expect(wrapper.get('.xl-steps-summary').text()).not.toContain('出错')
+    await expand(wrapper)
+    expect(wrapper.find('.xl-step.is-failed').exists()).toBe(false)
+    expect(wrapper.findAll('.xl-step.is-recovered')).toHaveLength(2)
+    expect(wrapper.findAll('.xl-step-note').map((node) => node.text())).toEqual(['已自动修正', '已自动修正', '做好了'])
+    expect(wrapper.find('.xl-step-error').exists()).toBe(false)
+  })
+
+  it('失败之后没有同名成功：仍然红色报错；不同工具的成功不会掩盖失败', async () => {
+    const wrapper = render([
+      call({ key: 'a', name: 'get_agent_team', status: 'failed', error: '团队不存在' }),
+      call({ key: 'b', name: 'list_projects', status: 'completed' }),
+    ])
+    expect(wrapper.get('.xl-steps-summary').text()).toContain('1 步出错')
+    expect(wrapper.get('.xl-steps-collapsed-error').text()).toContain('出错')
+    await expand(wrapper)
+    expect(wrapper.findAll('.xl-step.is-failed')).toHaveLength(1)
+    expect(wrapper.find('.xl-step.is-recovered').exists()).toBe(false)
+  })
+
+  it('成功在失败之前不算修正：先成功后失败的同名调用保持报错', async () => {
+    const wrapper = render([
+      call({ key: 'a', name: 'get_agent_team', status: 'completed' }),
+      call({ key: 'b', name: 'get_agent_team', status: 'failed', error: '后来出错' }),
+    ])
+    await expand(wrapper)
+    expect(wrapper.findAll('.xl-step.is-failed')).toHaveLength(1)
+    expect(wrapper.find('.xl-step.is-recovered').exists()).toBe(false)
+  })
+
   it('历史审计阶段只标记记录，当前活动运行才显示进行中', async () => {
     const wrapper = render()
     await wrapper.setProps({ auditPhases: [{ phase: 'scout', label: '侦察员', message: '读取项目' }] })

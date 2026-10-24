@@ -123,13 +123,20 @@ def test_task_default_and_explicit_scope_remain_compatible(db, actor):
 @pytest.mark.parametrize("kwargs", [
     {"result_scope": "unknown"}, {"result_scope": "team_summary", "task_id": 1},
     {"result_scope": "team_error", "task_id": 1}, {"result_scope": "task"},
-    {"result_scope": "team_summary", "result_path": "/missing"},
     {"result_scope": "team_error", "result_indices": [-1]},
 ])
 def test_scope_service_rejects_invalid_or_ambiguous_locators(db, actor, kwargs):
     created, _claim = claimed_team(db, actor)
     with pytest.raises(agent_team_service.AgentTeamValidationError):
         agent_team_service.get_team_result_page(db, actor, created["team_id"], **kwargs)
+
+
+def test_scope_service_missing_path_degrades_to_the_scope_root(db, actor):
+    created, _claim = claimed_team(db, actor)
+    output = agent_team_service.get_team_result_page(
+        db, actor, created["team_id"], result_scope="team_summary", result_path="/missing",
+    )
+    assert output["result_path"] == "" and output["notes"]
 
 
 @pytest.mark.parametrize("kwargs", [

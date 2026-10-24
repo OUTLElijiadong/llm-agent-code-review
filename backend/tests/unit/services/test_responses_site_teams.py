@@ -1738,3 +1738,24 @@ def test_team_count_phrase_does_not_count_as_team_id_but_project_suffix_does():
     assert service._output_has_conflicting_team_id("团队 3 项检查通过", {444}) is False
     assert service._output_has_conflicting_team_id("团队 435 项目已定位", {444}) is True
     assert [team for _, team in service._team_ids_in_text("团队 2 个任务，团队 444 已完成")] == [444]
+
+
+def test_trusted_callback_without_snapshot_fallback_still_gets_a_minimal_server_text():
+    """生产 4.1.38：回调轮次模型措辞反复被拒、又没有兜底文本时整轮失败；现在必有保底答复。"""
+    from app.services.deepseek_responses_runtime import COMPLETION_GUARD_FALLBACK_OUTPUT_KEY
+
+    checkpoint = _team_checkpoint([], context_metadata={
+        "trusted_terminal_team_snapshot": {"team_id": 52, "status": "completed"},
+    })
+    reason = service.AgentResponsesService._validate_xiaoling_completion(checkpoint, "团队 52 执行失败")
+    assert reason and "却称团队失败" in reason
+    assert checkpoint.context_metadata[COMPLETION_GUARD_FALLBACK_OUTPUT_KEY] == (
+        "团队 52 已完成。详细结果可在团队详情中查看。"
+    )
+
+
+@pytest.mark.parametrize(("status", "label"), [
+    ("failed", "执行失败"), ("blocked", "已阻塞"), ("cancelled", "已取消"), ("expired", "已超时"),
+])
+def test_minimal_terminal_text_states_only_the_server_status(status, label):
+    assert service._minimal_terminal_team_text(9, status) == f"团队 9 {label}。详细结果可在团队详情中查看。"
