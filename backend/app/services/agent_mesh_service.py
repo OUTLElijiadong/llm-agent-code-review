@@ -2567,6 +2567,16 @@ def _verified_terminal_team_snapshot(
     summary = detail.get("summary") if isinstance(detail.get("summary"), dict) else {}
     final_result = summary.get("final_result") if isinstance(summary, dict) else None
     raw_findings = final_result.get("findings") if isinstance(final_result, dict) else None
+    if not isinstance(raw_findings, list) and final_task:
+        # 团队摘要里的 final_result 可能已被预算投影成结构摘要；从汇总节点原始结果取问题清单。
+        task_row = db.query(AgentTeamTask).filter(
+            AgentTeamTask.team_id == team_id, AgentTeamTask.id == int(final_task.get("task_id") or 0),
+        ).first()
+        try:
+            raw_result = json.loads(task_row.result_json or "{}") if task_row is not None else {}
+        except (TypeError, ValueError):
+            raw_result = {}
+        raw_findings = raw_result.get("findings") if isinstance(raw_result, dict) else None
     finding_brief = [
         {key: str(item.get(key) or "")[:120] for key in ("title", "severity", "file_path", "line_number")}
         for item in (raw_findings if isinstance(raw_findings, list) else [])[:12] if isinstance(item, dict)

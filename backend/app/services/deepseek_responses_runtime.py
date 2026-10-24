@@ -1689,6 +1689,10 @@ class DeepSeekResponsesRuntime:
                 return self._result(checkpoint, events=events)
             if guard_error:
                 guard_retries = int(checkpoint.context_metadata.get("completion_guard_retries") or 0)
+                # 审计：保留被完成门拒绝的草稿与原因（截断），便于定位误判；不进入模型上下文。
+                rejected = list(checkpoint.context_metadata.get("completion_guard_rejected") or [])[-4:]
+                rejected.append({"reason": str(guard_error)[:300], "text": str(candidate_text or "")[:1200]})
+                checkpoint.context_metadata["completion_guard_rejected"] = rejected
                 checkpoint.last_response = {}
                 checkpoint.output_text = ""
                 if guard_retries < COMPLETION_GUARD_RETRY_LIMIT:

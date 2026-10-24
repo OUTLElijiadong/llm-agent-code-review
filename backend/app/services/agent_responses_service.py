@@ -5222,7 +5222,7 @@ def _team_terminal_assertions(text: str) -> list[tuple[Optional[int], str, bool]
                 r"(?:最终|整体|当前|团队)?状态\s*(?:[:：]|是|为)|\b(?:final |overall )?status\b", prefix, re.I,
             ))
             if (
-                match.lastgroup in {"failed", "blocked", "expired"}
+                match.lastgroup in {"failed", "blocked", "expired", "cancelled", "running"}
                 and subject != "team" and not teams and not status_clause
             ):
                 previous_end = match.end()
