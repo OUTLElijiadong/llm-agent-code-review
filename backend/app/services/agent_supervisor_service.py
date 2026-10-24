@@ -90,7 +90,8 @@ def _registered_read_capability(action: str) -> bool:
     """action 形如 user.<code>/admin.<code>/site.<code>，且注册表登记为 READ 的 GET 能力。"""
     scope, _, code = str(action or "").partition(".")
     if scope not in {"user", "admin", "site"} or not code:
-        return False
+        # 监督子 Agent 收到的常是裸能力码（如 pentest.list）：按用户端注册表识别。
+        scope, code = "user", str(action or "")
     try:
         if scope in {"user", "site"}:
             from app.services.user_capability_registry import USER_CAPABILITIES as specs
@@ -115,7 +116,7 @@ def review_action(
     """以服务端动作和注册能力做风险复核，不信任模型给出的风险级别。"""
     context = context or {}
     text = _text(action, resource, context.get("target"), context.get("command"))
-    if declared_risk == LOW and _registered_read_capability(action):
+    if declared_risk in {None, LOW} and _registered_read_capability(action):
         # 注册表登记为 READ 的站点能力（如 user.pentest.list）只是 GET 查询；
         # 名称里的 pentest/permission 等关键词不代表执行危险动作，不升级确认。
         return SupervisionReview(ALLOW, LOW, "服务端能力注册表登记为只读查询", False, "server_registry_read")

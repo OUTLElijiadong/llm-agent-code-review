@@ -54,3 +54,9 @@ def test_policy_review_allows_registered_read_capability_despite_sensitive_name(
     assert review.decision == supervisor.ALLOW and review.needs_confirmation is False
     write = supervisor.review_action("user.pentest.list_typo", "/pentests", declared_risk=supervisor.LOW)
     assert write.needs_confirmation is True
+
+
+def test_supervisor_agent_review_of_bare_read_capability_is_not_escalated():
+    """生产团队 426：agent:supervisor 复核裸能力码 pentest.list 时不应要求确认。"""
+    assert supervisor.review_action("pentest.list", "/pentests").decision == supervisor.ALLOW
+    assert supervisor.review_action("pentest.create", "/pentests").needs_confirmation is True
