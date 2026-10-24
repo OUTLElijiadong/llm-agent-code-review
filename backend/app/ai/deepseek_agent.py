@@ -109,10 +109,12 @@ def _parse_completion_response(
             finish_reason=finish_reason,
         )
     if not content.strip():
-        raise DeepSeekResponseError(
-            "DeepSeek 响应 content 为空",
-            finish_reason=finish_reason,
-        )
+        # DeepSeek JSON 模式偶发返回空正文；按 JSON 输出错误走有限重试，文本模式仍直接失败。
+        error_cls = DeepSeekJsonOutputError if json_mode else DeepSeekResponseError
+        error = error_cls("DeepSeek 响应 content 为空", finish_reason=finish_reason)
+        error.usage = body.get("usage") if isinstance(body.get("usage"), dict) else {}
+        error.model_name = str(body.get("model") or "")
+        raise error
 
     usage = body.get("usage")
     if usage is None:

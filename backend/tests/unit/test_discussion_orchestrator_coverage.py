@@ -1718,6 +1718,37 @@ def test_history_compression_does_not_promote_agent_or_code_instructions() -> No
     assert "用户·reviewer" not in "\n".join(call["user_prompt"] for call in compressor.calls)
 
 
+def test_history_compression_recovers_when_first_attempt_returns_empty_json() -> None:
+    """压缩器 JSON 重试耗尽（如空正文）时换预算继续，不应中断追问。"""
+    from app.ai.deepseek_agent import DeepSeekJsonOutputError
+
+    class FlakyAgent(RecordingAgent):
+        def call_raw(self, **kwargs: Any) -> tuple[str, dict[str, Any]]:
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                raise DeepSeekJsonOutputError("DeepSeek 响应 content 为空", finish_reason="stop")
+            entries = [
+                {"source_id": source_id, "summary": "保留发言", "quotes": [body[:8]]}
+                for source_id, body in re.findall(
+                    r"【来源 ([^】]+)】\n(.*?)(?=\n\n【来源 |\Z)",
+                    kwargs["user_prompt"], re.S,
+                )
+            ]
+            return json.dumps({"entries": entries}, ensure_ascii=False), {"model_name": "compress"}
+
+    records = module._roundtable_history_records([_turn(
+        1, role="agent", agent_code="reviewer", agent_name="审查员",
+        content="分析结论：第九行存在注入。" + "背景证据。" * 300,
+    )])
+    compressor = FlakyAgent()
+    projected = module._compress_roundtable_history(
+        records, agent=compressor, task_id=11, user_id=12, file_id=13, target_tokens=500,
+    )
+
+    assert len(compressor.calls) >= 2
+    assert "保留发言" in projected
+
+
 def test_roundtable_agent_display_name_cannot_impersonate_user_role() -> None:
     """Agent 名称是展示数据；压缩器身份必须由服务端 turn.role 标注。"""
     class CapturingAgent(RecordingAgent):

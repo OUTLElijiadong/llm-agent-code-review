@@ -115,7 +115,6 @@ def test_call_raw_rejects_non_stop_terminal_reason_without_retry(monkeypatch, fi
         ({"choices": []}, "choices[0]"),
         (_completion(finish_reason=None), "finish_reason"),
         (_completion(content={"not": "text"}), "content"),
-        (_completion(content=""), "content 为空"),
         (_completion(usage=[]), "usage"),
         (ValueError("bad json"), "不是合法 JSON"),
     ],
@@ -132,6 +131,31 @@ def test_call_raw_rejects_malformed_success_response_without_retry(
         agent.call_raw("system", "user")
 
     assert message in str(exc_info.value)
+    assert len(calls) == 1
+
+
+def test_call_raw_retries_empty_json_content_then_returns(monkeypatch):
+    agent = _agent(max_retries=2)
+    monkeypatch.setattr("app.ai.deepseek_agent.time.sleep", lambda _seconds: None)
+    calls = _install_responses(monkeypatch, agent, [
+        _Response(200, _completion(content="")),
+        _Response(200, _completion(content='{"ok":true}')),
+    ])
+
+    content, _meta = agent.call_raw("system", "user")
+
+    assert json.loads(content) == {"ok": True}
+    assert len(calls) == 2
+
+
+def test_call_raw_rejects_empty_text_content_without_retry(monkeypatch):
+    agent = _agent(max_retries=3)
+    calls = _install_responses(monkeypatch, agent, [_Response(200, _completion(content=""))])
+
+    with pytest.raises(DeepSeekResponseError, match="content 为空") as exc_info:
+        agent.call_raw("system", "user", json_mode=False)
+
+    assert not isinstance(exc_info.value, DeepSeekJsonOutputError)
     assert len(calls) == 1
 
 

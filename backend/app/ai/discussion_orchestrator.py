@@ -2968,7 +2968,8 @@ def _compress_roundtable_history(
                 if attempt_callback is not None:
                     attempt_callback("output_truncated")
                 last_error = exc
-            except (ValueError, TypeError) as exc:
+            except (ValueError, TypeError, DeepSeekJsonOutputError) as exc:
+                # JSON 重试耗尽（含空正文）时换预算或拆分批次，不让单次坏输出中断追问。
                 last_error = exc
         if len(group) > 1:
             midpoint = len(group) // 2
