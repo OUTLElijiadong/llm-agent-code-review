@@ -2449,7 +2449,8 @@ _TERMINAL_TEAM_LABELS = {
 def render_terminal_team_fallback(snapshot: Mapping[str, Any]) -> str:
     """由服务端账本渲染团队终态答复；模型措辞反复不合规时作为最终回复。
 
-    只使用已脱敏的快照字段：终态、最终汇总摘要和失败节点的错误预览。
+    只使用已脱敏的快照字段：终态、成员返回的真实业务数据、问题清单和失败节点的错误预览。
+    结论先行；不复述“核验字段/来源路径”之类内部协议。
     """
     team_id = int(snapshot.get("team_id") or 0)
     status = str(snapshot.get("status") or "")
@@ -2461,6 +2462,7 @@ def render_terminal_team_fallback(snapshot: Mapping[str, Any]) -> str:
     final_result = final_result if isinstance(final_result, Mapping) else {}
     findings = snapshot.get("finding_brief") if isinstance(snapshot.get("finding_brief"), list) else []
     findings = findings or (final_result.get("findings") if isinstance(final_result.get("findings"), list) else [])
+    facts = snapshot.get("member_facts") if isinstance(snapshot.get("member_facts"), list) else []
     if findings:
         # 结论优先：直接列出成员返回的问题，不复述内部核验字段。
         lines.append(f"发现 {final_result.get('unique_finding_count') or len(findings)} 个问题：")
@@ -2469,11 +2471,29 @@ def render_terminal_team_fallback(snapshot: Mapping[str, Any]) -> str:
                 continue
             where = str(item.get("file_path") or item.get("file_name") or "").strip()
             line = item.get("line_number")
-            location = f"（{where}{f' 第 {line} 行' if line else ''}）" if where else ""
+            location = f"（{where}{f' 第 {line} 行' if line else ''}）" if where else (
+                f"（第 {line} 行）" if line else ""
+            )
             severity = str(item.get("severity") or "").strip()
             lines.append(f"- {f'[{severity}] ' if severity else ''}{str(item.get('title') or '未命名问题')[:80]}{location}")
         if len(findings) > 6:
             lines.append(f"- 其余 {len(findings) - 6} 个见团队详情。")
+    elif facts and status == "completed":
+        for fact in facts:
+            if not isinstance(fact, Mapping):
+                continue
+            title = str(fact.get("title") or fact.get("task_key") or "查询结果")[:60]
+            total = fact.get("total")
+            items = fact.get("items") if isinstance(fact.get("items"), list) else []
+            if total == 0 and not items:
+                lines.append(f"{title}：结果为空（共 0 条）。")
+                continue
+            lines.append(f"{title}：共 {total if total is not None else len(items)} 条。")
+            for row in items:
+                if isinstance(row, Mapping) and row:
+                    lines.append("- " + "，".join(f"{key}={value}" for key, value in row.items()))
+            if isinstance(total, int) and total > len(items) > 0:
+                lines.append(f"- 其余 {total - len(items)} 条见团队详情。")
     else:
         summary = final_result.get("summary")
         if isinstance(summary, str) and summary.strip() and "claim_checks" not in summary:
@@ -2491,6 +2511,64 @@ def render_terminal_team_fallback(snapshot: Mapping[str, Any]) -> str:
         if omitted:
             lines.append(f"- 另有 {omitted} 个未完成节点，可在团队详情中查看。")
     return "\n".join(lines)
+
+
+_MEMBER_FACT_ITEM_LIMIT = 8
+_MEMBER_FACT_TASK_LIMIT = 4
+_MEMBER_FACT_FIELD_LIMIT = 6
+
+
+def _scalar_fact(value: Any, limit: int = 60) -> Optional[str]:
+    if isinstance(value, bool):
+        return "是" if value else "否"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str) and value.strip():
+        return value.strip()[:limit]
+    return None
+
+
+def _member_business_facts(
+    tasks: list[Any], member_roles: Mapping[str, str],
+) -> list[dict[str, Any]]:
+    """从工作节点的结构化证据里取真实业务数据，终态答复才能给出结论而不是只说“已完成”。
+
+    只取 request_scoped_agent 一类带 data 的证据，字段与条数都有硬上限；
+    汇总/核验节点自身的复述不重复收录。
+    """
+    facts: list[dict[str, Any]] = []
+    for item in tasks:
+        if not isinstance(item, dict) or item.get("status") != "completed":
+            continue
+        if member_roles.get(item.get("member_key")) in {"verifier", "summarizer"}:
+            continue
+        result = item.get("result") if isinstance(item.get("result"), dict) else {}
+        evidence = result.get("evidence") if isinstance(result.get("evidence"), list) else []
+        for entry in evidence:
+            data = entry.get("data") if isinstance(entry, dict) else None
+            if not isinstance(data, dict) or "total" not in data and "items" not in data:
+                continue
+            rows = []
+            for row in (data.get("items") if isinstance(data.get("items"), list) else [])[:_MEMBER_FACT_ITEM_LIMIT]:
+                if not isinstance(row, dict):
+                    continue
+                fields = {
+                    key: text for key, value in row.items()
+                    if (text := _scalar_fact(value)) is not None
+                }
+                rows.append(dict(list(fields.items())[:_MEMBER_FACT_FIELD_LIMIT]))
+            total = data.get("total")
+            facts.append({
+                "task_key": str(item.get("task_key") or "")[:80],
+                "title": str(item.get("title") or "")[:80],
+                "total": total if isinstance(total, int) and not isinstance(total, bool) else None,
+                "items": rows,
+            })
+            break
+        if len(facts) >= _MEMBER_FACT_TASK_LIMIT:
+            break
+    return facts
+
 
 
 def _verified_terminal_team_snapshot(
@@ -2612,6 +2690,7 @@ def _verified_terminal_team_snapshot(
             ],
         })
     failure_sample_limit = 6
+    member_facts = _member_business_facts(tasks, member_roles)
     raw_error = detail.get("error") if isinstance(detail.get("error"), dict) else {}
     error_reason = str(raw_error.get("reason") or raw_error.get("code") or "").strip()[:160]
     return {
@@ -2623,6 +2702,7 @@ def _verified_terminal_team_snapshot(
         "task_statuses": task_statuses,
         "final_result": final_result,
         "finding_brief": finding_brief,
+        "member_facts": member_facts,
         "partial": bool(isinstance(summary, dict) and summary.get("partial")),
         "failed_task_samples": failed_tasks[:failure_sample_limit],
         "omitted_failed_task_count": max(0, len(failed_tasks) - failure_sample_limit),

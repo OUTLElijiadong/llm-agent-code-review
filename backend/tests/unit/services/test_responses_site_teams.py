@@ -1673,3 +1673,68 @@ def test_finished_or_other_session_roundtable_does_not_block_new_one(db, monkeyp
     _roundtable_team(db, status="completed", file_id=1910)
     _roundtable_team(db, status="running", file_id=1910, session_key="another_session_9")
     assert actor._active_duplicate_roundtable(plan) == 0
+
+
+# ---- 4.1.39：生产被拒草稿回放（团队 444/428/426/432/435 的真实措辞） ----
+
+@pytest.mark.parametrize(("team_id", "text"), [
+    (444, "- 团队两个任务均为 completed，没有失败或阻塞"),
+    (444, "- 团队终态为 `completed`，2/2 任务完成，无失败或阻塞；但核验状态为 `unverified`"),
+    (428, "圆桌讨论（2 轮）已经运行结束：团队 428 中的 2 个任务全部完成，没有失败、阻塞或取消。"),
+    (428, "圆桌讨论已结束：团队 428 的状态为 **completed**，2 个任务均完成，无失败、阻塞或未完成项。"),
+    (444, "- 这是数据事实，并非任务失败：只读团队 2 个任务（项目列表查询、最小值挑选）均为 completed。"),
+    (428, "- 团队任务：roundtable_2rounds、roundtable_summary 均完成，无失败、无阻塞、无未完成项"),
+])
+def test_enumerated_negations_and_task_counts_are_not_team_failure_claims(team_id, text):
+    """生产 444/428：“无失败或阻塞”“团队 2 个任务”不是团队失败声明，也不是团队编号。"""
+    checkpoint = _team_checkpoint([], context_metadata={
+        "trusted_terminal_team_snapshot": {"team_id": team_id, "status": "completed"},
+    })
+    assert service.AgentResponsesService._validate_xiaoling_completion(checkpoint, text) is None
+
+
+@pytest.mark.parametrize("text", [
+    "- 独立核验任务 verify_pentests 未完成（失败，重试 2 次后预算耗尽）：命中高风险操作边界",
+    "- list_projects 已执行完成，pick_min 因没有候选而未产出结论",
+])
+def test_member_node_status_is_not_a_team_status_claim(text):
+    """生产 426：成员节点 task_key（含下划线标识符）作主语时，状态词描述节点而非团队。"""
+    checkpoint = _team_checkpoint([], context_metadata={
+        "trusted_terminal_team_snapshot": {"team_id": 426, "status": "completed"},
+    })
+    assert service.AgentResponsesService._validate_xiaoling_completion(checkpoint, text) is None
+
+
+@pytest.mark.parametrize(("team_id", "status", "text", "needle", "clause"), [
+    (444, "completed", "团队 444 执行失败。", "却称团队失败", "团队 444 执行失败"),
+    (444, "completed", "团队 444 仍未完成，还在运行中。", "必须明确标记团队已完成", "团队 444 仍未完成"),
+    (444, "completed", "团队 444 没有完成。", "必须明确标记团队已完成", "团队 444 没有完成"),
+    (437, "failed", "团队 437 已完成，全部成功。", "却声称团队已成功完成", "团队 437 已完成"),
+])
+def test_real_team_status_contradictions_still_rejected_and_name_the_clause(team_id, status, text, needle, clause):
+    checkpoint = _team_checkpoint([], context_metadata={
+        "trusted_terminal_team_snapshot": {"team_id": team_id, "status": status},
+    })
+    reason = service.AgentResponsesService._validate_xiaoling_completion(checkpoint, text)
+    assert reason and needle in reason
+    assert f"触发语句：「{clause}」" in reason
+
+
+@pytest.mark.parametrize(("team_id", "text"), [
+    (432, "已派发（团队 434，排队中，尚未完成）"),
+    (435, "**进行中**：团队 436「圆桌讨论」不是完成态"),
+    (428, "圆桌讨论已结束：团队 429 中的 2 个任务均完成"),
+])
+def test_other_team_ids_are_still_rejected_with_the_offending_clause(team_id, text):
+    checkpoint = _team_checkpoint([], context_metadata={
+        "trusted_terminal_team_snapshot": {"team_id": team_id, "status": "completed"},
+    })
+    reason = service.AgentResponsesService._validate_xiaoling_completion(checkpoint, text)
+    assert reason and "绑定服务端回执" in reason and "触发语句" in reason
+
+
+def test_team_count_phrase_does_not_count_as_team_id_but_project_suffix_does():
+    assert service._output_has_conflicting_team_id("团队 2 个任务均完成", {444}) is False
+    assert service._output_has_conflicting_team_id("团队 3 项检查通过", {444}) is False
+    assert service._output_has_conflicting_team_id("团队 435 项目已定位", {444}) is True
+    assert [team for _, team in service._team_ids_in_text("团队 2 个任务，团队 444 已完成")] == [444]

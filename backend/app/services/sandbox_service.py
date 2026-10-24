@@ -5678,15 +5678,25 @@ def _has_complete_test_review_report(report_md: object) -> bool:
     """Require every promised section to contain more than an empty placeholder."""
     if not isinstance(report_md, str) or not report_md.strip():
         return False
-    from app.services.sandbox_report_summary import _heading_text, _markdown_h2_sections, _outside_fenced_lines
+    from app.services.sandbox_report_summary import (
+        _heading_text,
+        _markdown_h2_sections,
+        _matches_report_section,
+        _outside_fenced_lines,
+    )
 
     sections: dict[str, list[str]] = {}
     for section in _markdown_h2_sections(report_md):
         title = _heading_text(str(section["title"])).rstrip(":：").strip()
-        if title not in _TEST_REVIEW_REQUIRED_SECTIONS:
+        # 提示词要求模型写“问题清单(按严重度…)”，标题带括号说明属于合法写法，
+        # 与 _separate_unverified_ai_findings 一样按前缀+分隔符归一到必需章节。
+        canonical = next(
+            (name for name in _TEST_REVIEW_REQUIRED_SECTIONS if _matches_report_section(title, name)), None,
+        )
+        if canonical is None:
             continue
         start, end = int(section["body_start"]), int(section["end"])
-        sections.setdefault(title, []).extend(_outside_fenced_lines(report_md[start:end]))
+        sections.setdefault(canonical, []).extend(_outside_fenced_lines(report_md[start:end]))
 
     placeholder_only = re.compile(
         r"^(?:x{1,3}|test|todo|tbd|n/?a|none|null|placeholder|填充|占位(?:符)?|"

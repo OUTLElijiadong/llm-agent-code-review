@@ -1122,3 +1122,35 @@ def test_extract_prism_facts_logic() -> None:
     assert fn(log) == {"a": 1, "endpoints": [{"path": "/api"}]}
     assert fn("no facts") is None
     assert fn("PRISM_FACTS_BEGIN\n{bad json}\nPRISM_FACTS_END") is None
+
+
+def test_report_completeness_gate_accepts_parenthesized_section_titles() -> None:
+    """生产沙箱 207/203/202：提示词要求“问题清单(按严重度…)”，带括号说明的标题不应被判缺章节。"""
+    sections = {
+        "总体结论": "未通过，黑盒路由探测失败。",
+        "白盒结果": "白盒阶段自报通过，但无测试文件。",
+        "黑盒结果": "route_smoke 失败。",
+        "问题清单（按严重度）": "- [中] 未发现可访问路由",
+        "攻击面待验证清单": "- 入口为空，建议验证源码挂载。",
+        "下一步建议（按优先级）": "1. 修复源码挂载。",
+        "证据附录": "conclusion.passed=false",
+    }
+    report = "# 沙箱测试审查报告\n\n" + "\n\n".join(f"## {title}\n{body}" for title, body in sections.items())
+
+    assert sandbox_service._has_complete_test_review_report(report) is True
+
+
+def test_report_completeness_gate_still_rejects_missing_or_empty_sections() -> None:
+    report = "\n\n".join(f"## {name}\n内容" for name in sandbox_service._TEST_REVIEW_REQUIRED_SECTIONS[:-1])
+    assert sandbox_service._has_complete_test_review_report(report) is False
+    empty_issue_list = "\n\n".join(
+        f"## {name}（说明）\n{'TODO' if name == '问题清单' else '内容'}"
+        for name in sandbox_service._TEST_REVIEW_REQUIRED_SECTIONS
+    )
+    assert sandbox_service._has_complete_test_review_report(empty_issue_list) is False
+    # 前缀必须以分隔符结尾，“问题清单汇总”不能冒充“问题清单”。
+    lookalike = "\n\n".join(
+        f"## {'问题清单汇总' if name == '问题清单' else name}\n内容"
+        for name in sandbox_service._TEST_REVIEW_REQUIRED_SECTIONS
+    )
+    assert sandbox_service._has_complete_test_review_report(lookalike) is False

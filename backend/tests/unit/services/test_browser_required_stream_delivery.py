@@ -39,7 +39,11 @@ async def test_signed_browser_event_survives_complete_api_queue_and_encoding(mon
         def __init__(self, *_args, **_kwargs):
             pass
 
-        async def start(self, _messages, *, run_id, event_sink):
+        async def start(self, _messages, *, run_id, event_sink, on_created=None):
+            # 生产中 response.created 只由运行内核在检查点提交后经 on_created 发出；
+            # 上游事件流里的 response.created 会被 sink 丢弃（不能让模型伪造就绪通知）。
+            if on_created is not None:
+                await on_created()
             await event_sink({"type": "response.created", "response": {"id": "provider-response-id"}})
             await event_sink(required)
             # 未签名事件及篡改已有签名都不得因此得到执行权限。

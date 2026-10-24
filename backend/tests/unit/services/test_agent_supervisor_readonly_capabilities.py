@@ -60,3 +60,47 @@ def test_supervisor_agent_review_of_bare_read_capability_is_not_escalated():
     """生产团队 426：agent:supervisor 复核裸能力码 pentest.list 时不应要求确认。"""
     assert supervisor.review_action("pentest.list", "/pentests").decision == supervisor.ALLOW
     assert supervisor.review_action("pentest.create", "/pentests").needs_confirmation is True
+
+
+def test_terminal_fallback_uses_member_business_facts_instead_of_internal_protocol_text():
+    """生产 444/415：兜底不能只剩一句“已完成”或复述 claim_checks，要带上成员返回的真实数据。"""
+    text = render_terminal_team_fallback({
+        "team_id": 415, "status": "completed",
+        "final_result": {"summary": "汇总已完成：已核对 1 个子任务；逐项结论见 claim_checks"},
+        "member_facts": [{
+            "task_key": "list_projects", "title": "列举当前账号名下全部项目", "total": 14,
+            "items": [{"id": "174", "project_name": "本科答辩演示", "file_count": "1"},
+                      {"id": "172", "project_name": "Local-File-Inclusion-Demo", "file_count": "3"}],
+        }],
+    })
+    assert text.startswith("团队 415 已完成。")
+    assert "列举当前账号名下全部项目：共 14 条。" in text
+    assert "project_name=本科答辩演示" in text and "file_count=3" in text
+    assert "其余 12 条见团队详情" in text
+    assert "claim_checks" not in text
+
+
+def test_terminal_fallback_reports_an_empty_result_explicitly():
+    text = render_terminal_team_fallback({
+        "team_id": 444, "status": "completed", "final_result": {"summary": "汇总已完成"},
+        "member_facts": [{"task_key": "list_projects", "title": "枚举当前账号可见项目", "total": 0, "items": []}],
+    })
+    assert "枚举当前账号可见项目：结果为空（共 0 条）。" in text
+
+
+def test_member_business_facts_are_bounded_and_skip_summarizer_nodes():
+    from app.services.agent_mesh_service import _member_business_facts
+
+    big = {"status": "completed", "evidence": [{"data": {
+        "total": 99, "items": [{"id": n, "name": f"项目{n}", "a": 1, "b": 2, "c": 3, "d": 4, "e": 5, "f": 6, "g": 7}
+                               for n in range(30)],
+    }}]}
+    tasks = [
+        {"task_key": "list", "title": "列表", "member_key": "reader", "status": "completed", "result": big},
+        {"task_key": "sum", "title": "汇总", "member_key": "sum", "status": "completed", "result": big},
+        {"task_key": "bad", "title": "失败节点", "member_key": "reader", "status": "failed", "result": big},
+    ]
+    facts = _member_business_facts(tasks, {"reader": "worker", "sum": "summarizer"})
+    assert [item["task_key"] for item in facts] == ["list"]
+    assert facts[0]["total"] == 99 and len(facts[0]["items"]) == 8
+    assert all(len(row) <= 6 for row in facts[0]["items"])
