@@ -2333,14 +2333,14 @@ function onMessageClick(event: MouseEvent): void {
 }
 
 // 星图可收起为一行，给消息区让位；偏好按端保存。
-const GRAPH_COLLAPSED_KEY = 'prism-xiaoling-graph-collapsed:user'
-const graphCollapsed = ref(readGraphCollapsed())
-function readGraphCollapsed(): boolean {
-  try { return window.localStorage.getItem(GRAPH_COLLAPSED_KEY) === '1' } catch { return false }
-}
+// 团队执行中默认展开星图；全部团队收口后自动收起，把空间让给小菱结论。用户手动切换优先。
+const graphManualState = ref<boolean | null>(null)
+const graphTeamsRunning = computed(() => teamForming.value
+  || liveGraphTeams.value.some(team => !TERMINAL_TEAM_STATUSES.has(team.status)))
+const graphCollapsed = computed(() => graphManualState.value ?? !graphTeamsRunning.value)
+watch(graphTeamsRunning, () => { graphManualState.value = null })
 function toggleGraphCollapsed(): void {
-  graphCollapsed.value = !graphCollapsed.value
-  try { window.localStorage.setItem(GRAPH_COLLAPSED_KEY, graphCollapsed.value ? '1' : '0') } catch { /* 存储不可用仍可切换 */ }
+  graphManualState.value = !graphCollapsed.value
 }
 
 // 用户停在底部时跟随最新结论/询问；主动上翻阅读时不打断。尺寸变化时若在底部也重新贴底。
@@ -3991,18 +3991,28 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
 
 .msg-content.markdown-body { white-space: normal; }
 .msg-content.markdown-body :deep(p)        { margin: 0; }
-@media (max-width: 640px) {
-  .msg-content.markdown-body :deep(table) {
-    display: block;
-    width: max-content;
-    min-width: 100%;
-    max-width: 100%;
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
-    -webkit-overflow-scrolling: touch;
-    white-space: nowrap;
-  }
+/* 表格在任何窗口宽度下都横向滚动，单元格不换成竖排。 */
+.msg-content.markdown-body :deep(table) {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  border-collapse: collapse;
+  margin: 6px 0;
+  font-size: 12px;
 }
+.msg-content.markdown-body :deep(th),
+.msg-content.markdown-body :deep(td) {
+  padding: 4px 8px;
+  border: 1px solid var(--gray-200, #e6e8ef);
+  white-space: nowrap;
+  text-align: left;
+  vertical-align: top;
+}
+.msg-content.markdown-body :deep(th) { background: var(--gray-50, #f7f8fb); font-weight: 600; }
 .msg-content.markdown-body :deep(pre) {
   background: #1e1e2e; color: #cdd6f4;
   border-radius: 6px; padding: 12px;

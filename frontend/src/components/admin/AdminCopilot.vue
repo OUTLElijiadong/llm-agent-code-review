@@ -1194,14 +1194,14 @@ function eventErrorMessage(event: ResponseStreamEvent): string {
 }
 
 // 星图可收起为一行，给消息区让位；偏好按端保存。
-const GRAPH_COLLAPSED_KEY = 'prism-xiaoling-graph-collapsed:admin'
-const graphCollapsed = ref(readGraphCollapsed())
-function readGraphCollapsed(): boolean {
-  try { return window.localStorage.getItem(GRAPH_COLLAPSED_KEY) === '1' } catch { return false }
-}
+// 团队执行中默认展开星图；全部团队收口后自动收起，把空间让给小菱结论。用户手动切换优先。
+const graphManualState = ref<boolean | null>(null)
+const graphTeamsRunning = computed(() => teamForming.value
+  || liveGraphTeams.value.some(team => !TERMINAL_TEAM_STATUSES.has(team.status)))
+const graphCollapsed = computed(() => graphManualState.value ?? !graphTeamsRunning.value)
+watch(graphTeamsRunning, () => { graphManualState.value = null })
 function toggleGraphCollapsed(): void {
-  graphCollapsed.value = !graphCollapsed.value
-  try { window.localStorage.setItem(GRAPH_COLLAPSED_KEY, graphCollapsed.value ? '1' : '0') } catch { /* 存储不可用仍可切换 */ }
+  graphManualState.value = !graphCollapsed.value
 }
 
 // 用户停在底部时跟随最新结论/询问；主动上翻阅读时不打断。
@@ -3060,8 +3060,12 @@ input { font: inherit; }
   gap: 6px;
 }
 .message-bubble.markdown-body :deep(table) {
-  width: auto;
+  display: block;
+  width: max-content;
   min-width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
   border-collapse: collapse;
   white-space: nowrap;
 }
