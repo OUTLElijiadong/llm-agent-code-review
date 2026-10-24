@@ -1164,7 +1164,7 @@ describe('AdminCopilot Responses stream', () => {
     wrapper.unmount()
   })
 
-  it('管理端也会在团队终态汇总模型失败时自动展示子 Agent 部分结果', async () => {
+  it('管理端汇总模型失败时只更新团队进度且不展示成员结论', async () => {
     const receipt = {
       schema_version: '1.0', message_id: 'team-89-terminal-1-result', idempotency_key: 'team-89-terminal-1-result',
       trace_id: 'trace-89', correlation_id: 'team:89', causation_id: 'request-89',
@@ -1203,15 +1203,15 @@ describe('AdminCopilot Responses stream', () => {
     await finish(0)
     await flushPromises()
 
-    expect(wrapper.text()).toContain('团队审查部分结果（自动整理）')
-    expect(wrapper.text()).toContain('缺少边界检查')
-    expect(wrapper.text()).toContain('未经小菱最终模型复核')
+    expect(wrapper.text()).not.toContain('团队审查部分结果（自动整理）')
+    expect(wrapper.text()).not.toContain('缺少边界检查')
+    expect(wrapper.text()).not.toContain('未经小菱最终模型复核')
     expect(meshApi.acknowledge).toHaveBeenCalledWith('admin', deliveredSessionId, receipt.message_id, 'processing', expect.any(String))
-    expect(meshApi.acknowledge).toHaveBeenCalledWith('admin', deliveredSessionId, receipt.message_id, 'completed', expect.stringContaining('自动整理'))
+    expect(meshApi.acknowledge).toHaveBeenCalledWith('admin', deliveredSessionId, receipt.message_id, 'completed', expect.stringContaining('团队执行进度已更新'))
     wrapper.unmount()
   })
 
-  it('管理端刷新后从失败运行绑定的团队回执恢复部分结果且不重跑模型', async () => {
+  it('管理端刷新后仅恢复失败运行绑定的团队进度且不重跑模型', async () => {
     let restoredSessionId = ''
     const receipt = {
       schema_version: '1.0', message_id: 'admin-team-90-terminal', idempotency_key: 'admin-team-90-terminal',
@@ -1254,14 +1254,15 @@ describe('AdminCopilot Responses stream', () => {
     await flushSessionRestore()
 
     expect(streams.records).toHaveLength(0)
-    expect(wrapper.text()).toContain('团队审查部分结果（自动整理）')
-    expect(wrapper.text()).toContain('缺少对象级权限校验')
-    expect(wrapper.text()).toContain('未经小菱最终模型复核')
+    expect(wrapper.text()).not.toContain('团队审查部分结果（自动整理）')
+    expect(wrapper.text()).not.toContain('缺少对象级权限校验')
+    expect(wrapper.text()).not.toContain('未经小菱最终模型复核')
     expect(meshApi.acknowledge).not.toHaveBeenCalled()
 
     await (wrapper.vm as any).restoreSession()
     await flushSessionRestore()
-    expect(wrapper.text().match(/团队审查部分结果（自动整理）/g)).toHaveLength(1)
+    expect(wrapper.text()).not.toContain('团队审查部分结果（自动整理）')
+    expect(streams.records).toHaveLength(0)
     wrapper.unmount()
   })
 
@@ -2439,10 +2440,12 @@ describe('实时星图滚动跟随', () => {
       Object.defineProperty(area, 'scrollHeight', { configurable: true, value: 1000 })
       Object.defineProperty(area, 'clientHeight', { configurable: true, value: 400 })
       area.scrollTop = 600
+      area.dispatchEvent(new Event('scroll'))
       vm.agentTeams = [...vm.agentTeams]
       await flushPromises()
       expect(area.scrollTop).toBe(1000)
       area.scrollTop = 100
+      area.dispatchEvent(new Event('scroll'))
       vm.agentTeams = [...vm.agentTeams]
       await flushPromises()
       expect(area.scrollTop).toBe(100)

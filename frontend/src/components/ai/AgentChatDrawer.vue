@@ -2361,6 +2361,9 @@ function toggleGraphCollapsed(): void {
 // 用户停在底部时跟随最新结论/询问；主动上翻阅读时不打断。尺寸变化时若在底部也重新贴底。
 const { scrollToBottom: forceScrollToBottom, followIfPinned } = useChatAutoScroll(chatBody)
 
+// 星图在消息流里，团队账本变化会改变内容高度；仅在用户停在底部时跟随。
+watch(liveGraphTeams, () => { void nextTick().then(followIfPinned) })
+
 function scrollToBottom(): void {
   followIfPinned()
 }

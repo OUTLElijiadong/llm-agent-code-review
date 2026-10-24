@@ -194,7 +194,8 @@ describe('页面桥的运行创建与恢复时序', () => {
     expect(ElMessage.error).not.toHaveBeenCalled()
 
     committed = true
-    await vi.advanceTimersByTimeAsync(2080)
+    // 2s 重试轮询 + 跳转后最多 3s 等待目标页渲染（测试页无标题，会走满超时）。
+    await vi.advanceTimersByTimeAsync(2080 + 3200)
     expect(requests.map(request => request.url)).toEqual([
       '/agent-browser/pending',
       '/agent-browser/actions/9/claim', '/agent-browser/actions/9/ack',

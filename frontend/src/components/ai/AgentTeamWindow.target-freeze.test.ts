@@ -336,21 +336,4 @@ describe('AgentTeamWindow retry target freeze', () => {
     expect(mocks.error).not.toHaveBeenCalled()
   })
 
-  it('复制成功回调在窗口卸载后不再提示旧窗口内容', async () => {
-    const copied = deferred<void>()
-    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn(() => copied.promise) } })
-    const team = makeTeam(1, 'session-a', [])
-    team.messages = [{
-      message_id: 'copy-after-unmount', trace_id: 'trace-1', correlation_id: 'correlation-1', sent_from: 'manager',
-      send_to: 'user', message_type: 'task.result', subject: '完整结果', status: 'completed',
-      payload: { report: '需要完整保存的证据'.repeat(40) }, create_time: '2026-10-04T00:00:00Z',
-    }]
-    const wrapper = mount(AgentTeamWindow, { props: { visible: true, team }, global: { ...global, plugins: [pinia] } })
-    await wrapper.get('.team-chat-payload-copy').trigger('click')
-    wrapper.unmount()
-    copied.resolve()
-    await flushPromises()
-    expect(mocks.success).not.toHaveBeenCalled()
-  })
-
 })

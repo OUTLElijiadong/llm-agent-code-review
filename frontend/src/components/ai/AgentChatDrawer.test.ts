@@ -2324,6 +2324,7 @@ describe('实时星图布局', () => {
       expect(area.contains(graphRegion)).toBe(true)
 
       area.scrollTop = 100
+      area.dispatchEvent(new Event('scroll'))
       vm.agentTeams = [{
         ...team,
         counts: { total: 2, completed: 0, running: 2, queued: 0, failed: 0, blocked: 0 },
