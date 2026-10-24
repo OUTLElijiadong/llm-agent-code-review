@@ -117,6 +117,20 @@ export function createSiteBrowserBridge(options: Options) {
   let generation = 0
   let snapshot: Snapshot | null = null
   let queue = Promise.resolve()
+  /** 懒加载页面在 router.push 之后才渲染：等路由落定且主内容区出现新标题，最多 3 秒。 */
+  async function waitForRouteRender(route: string): Promise<void> {
+    const targetPath = route.split(/[?#]/)[0]!
+    const before = scopeRoots()[0]?.querySelector('h1,h2,[role="heading"]')?.textContent || ''
+    const deadline = Date.now() + 3000
+    while (Date.now() < deadline) {
+      await options.settle()
+      const onRoute = options.current().route.split(/[?#]/)[0] === targetPath
+      const heading = scopeRoots()[0]?.querySelector('h1,h2,[role="heading"]')?.textContent || ''
+      if (onRoute && heading && heading !== before) return
+      await new Promise(resolve => setTimeout(resolve, 120))
+    }
+  }
+
   function observe(id: string, context: SiteBrowserContext): SiteBrowserObservation {
     const roots = scopeRoots()
     const controls = new Map<string, { element: HTMLElement; signature: string }>()
@@ -188,6 +202,7 @@ export function createSiteBrowserBridge(options: Options) {
         const route = event.args.route || ''
         if (!isSafeXiaolingRoute(route) || !options.canNavigate(route)) throw new Error('目标不是当前账号可访问的站内业务页面')
         began = true; await options.navigate(route)
+        await waitForRouteRender(route)
       } else if (event.action !== 'inspect') {
         const element = event.action === 'scroll' && !event.args.client_handle ? scopeRoots()[0] : target(event, options.current())
         if (!element) throw new Error('当前业务页面不可用')
