@@ -104,9 +104,12 @@ def test_page_contract_is_discoverable_and_coordinator_stays_coordination_only(d
     assert "inspect" in contract["operate_current_page"]["actions"]
     executor = PrismToolExecutor(db, owner, surface="user", session_key="page-team-session", run_id="page-team-run",
                                  mcp_provider=SimpleNamespace(), tool_scope="xiaoling_coordinator")
-    names = {item["name"] for item in asyncio.run(executor.tool_schemas())}
+    schemas = asyncio.run(executor.tool_schemas())
+    names = {item["name"] for item in schemas}
     assert "list_agents" in names and "create_agent_team" in names
-    assert "operate_current_page" not in names
+    # 协调者只拿到无副作用的页面引导（跳转/滚动/观察）；改变页面状态的动作仍走 site_operator 团队。
+    page = next(item for item in schemas if item["name"] == "operate_current_page")
+    assert set(page["parameters"]["properties"]["action"]["enum"]) == {"navigate", "scroll", "inspect"}
 
 
 @pytest.mark.asyncio

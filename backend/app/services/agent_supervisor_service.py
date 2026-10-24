@@ -86,6 +86,25 @@ def maximum_risk(*levels: str) -> str:
     return max(valid or [LOW], key=lambda level: _RISK_ORDER[level])
 
 
+def _registered_read_capability(action: str) -> bool:
+    """action 形如 user.<code>/admin.<code>/site.<code>，且注册表登记为 READ 的 GET 能力。"""
+    scope, _, code = str(action or "").partition(".")
+    if scope not in {"user", "admin", "site"} or not code:
+        return False
+    try:
+        if scope in {"user", "site"}:
+            from app.services.user_capability_registry import USER_CAPABILITIES as specs
+        else:
+            from app.services.admin_capability_registry import CAPABILITY_BY_CODE as by_code
+            specs = list(by_code.values())
+    except ImportError:
+        return False
+    for spec in specs:
+        if spec.code == code:
+            return str(spec.risk).casefold() == "read" and str(spec.method).upper() == "GET"
+    return False
+
+
 def review_action(
     action: str,
     resource: str = "",
@@ -96,6 +115,10 @@ def review_action(
     """以服务端动作和注册能力做风险复核，不信任模型给出的风险级别。"""
     context = context or {}
     text = _text(action, resource, context.get("target"), context.get("command"))
+    if declared_risk == LOW and _registered_read_capability(action):
+        # 注册表登记为 READ 的站点能力（如 user.pentest.list）只是 GET 查询；
+        # 名称里的 pentest/permission 等关键词不代表执行危险动作，不升级确认。
+        return SupervisionReview(ALLOW, LOW, "服务端能力注册表登记为只读查询", False, "server_registry_read")
     if any(marker in text for marker in _HIGH_RISK_MARKERS):
         risk = maximum_risk(declared_risk or LOW, HIGH)
         return SupervisionReview(ESCALATE, risk, "命中高风险操作边界，等待当前账号确认", True, "classified_high")

@@ -46,3 +46,11 @@ def test_terminal_fallback_renders_status_summary_and_failed_nodes():
     assert "部分完成" in text
     assert "ops_status（failed）：存在阻断性生产故障" in text
     assert "另有 2 个" in text
+
+
+def test_policy_review_allows_registered_read_capability_despite_sensitive_name():
+    """生产回归：user.pentest.list 经策略引擎复核时不再因名称含 pentest 被升级确认。"""
+    review = supervisor.review_action("user.pentest.list", "/pentests", declared_risk=supervisor.LOW)
+    assert review.decision == supervisor.ALLOW and review.needs_confirmation is False
+    write = supervisor.review_action("user.pentest.list_typo", "/pentests", declared_risk=supervisor.LOW)
+    assert write.needs_confirmation is True
