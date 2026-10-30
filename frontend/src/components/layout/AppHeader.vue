@@ -62,6 +62,7 @@ const searchItems = computed<SearchItem[]>(() => {
     { title: '发起审查', description: '选择项目文件并启动 Agent 代码审查', path: '/reviews/start', roles: ['user', 'reviewer'] },
     { title: '审查任务', description: '查看历史审查任务和处理状态', path: '/reviews', roles: ['user', 'reviewer'], topNav: true },
     { title: '渗透测试', description: '发起授权渗透测试、审批授权并查看阶段与发现', path: '/pentests', roles: ['user', 'reviewer'] },
+    { title: '远程网站评估', description: '申请并批准远程目标授权，对已授权网站做受限只读评估', path: '/remote-pentests', roles: ['admin', 'user', 'reviewer'] },
     { title: '问题追踪', description: '查看并跟进未修复、待复查和已处理的问题', path: '/issues', roles: ['user', 'reviewer'] },
     { title: '代码沙箱', description: '创建隔离环境并运行代码验证', path: '/sandboxes', roles: ['user', 'reviewer', 'admin'] },
     { title: '安全与审查规则', description: '统一查看安全态势并配置审查维度', path: '/security', roles: ['user', 'reviewer'] },

@@ -14,8 +14,10 @@ import {
   type AgentTeamTask,
 } from '@/api/agentTeams'
 import AgentMemberWorkCard from '@/components/ai/AgentMemberWorkCard.vue'
+import AgentTeamRemoteAuthNotice from '@/components/ai/AgentTeamRemoteAuthNotice.vue'
 import { useFloatingChatPosition } from '@/composables/useFloatingChatPosition'
 import { useUserStore } from '@/stores/user'
+import { collectRemoteAuthIssues } from '@/utils/remoteTarget'
 
 /**
  * 子 Agent 团队独立悬浮窗。
@@ -47,6 +49,8 @@ let disposed = false
 
 const members = computed<AgentTeamMember[]>(() => props.team?.members ?? [])
 const tasks = computed<AgentTeamTask[]>(() => props.team?.tasks ?? [])
+/** 有任务因远程目标没有独立授权而停住时才挂载提示卡，避免其余场景多注入路由依赖。 */
+const hasRemoteAuthIssue = computed(() => collectRemoteAuthIssues(tasks.value).length > 0)
 
 /** 进度统计:优先用后端 counts,缺失时按任务状态本地统计。 */
 const counts = computed(() => {
@@ -395,6 +399,9 @@ async function cancelTeam(): Promise<void> {
         </div>
 
         <div class="team-window-body">
+          <!-- 远程目标未授权：告诉用户去哪里申请，而不是只剩通用的“确认高风险重试” -->
+          <AgentTeamRemoteAuthNotice v-if="hasRemoteAuthIssue" :tasks="tasks" />
+
           <!-- 成员实时工作卡片 -->
           <section v-if="members.length" class="team-window-section team-window-members-section" aria-label="团队成员实时状态">
             <AgentMemberWorkCard

@@ -22,7 +22,9 @@ import {
   Expand,
   ArrowDown,
   Close,
+  Connection,
 } from '@element-plus/icons-vue'
+import { usePendingRemoteApprovals } from '@/composables/usePendingRemoteApprovals'
 import { useUserStore } from '@/stores/user'
 import { APP_BUILD_TIME_DISPLAY, APP_DISPLAY_VERSION, APP_RELEASE_SHA } from '@/constants/buildInfo'
 import type { UserRole } from '@/utils/roleHome'
@@ -42,6 +44,8 @@ interface MenuGroup {
   title: string
   items: MenuItem[]
 }
+
+const REMOTE_PENTEST_PATH = '/remote-pentests'
 
 const route = useRoute()
 const router = useRouter()
@@ -63,6 +67,7 @@ const menuItems: MenuItem[] = [
   { path: '/code',      title: '代码中心',   icon: Document,         roles: ['user'] },
   { path: '/reviews',   title: '审查任务',   icon: DocumentChecked,  roles: ['user', 'reviewer'] },
   { path: '/pentests',  title: '渗透测试',   icon: Aim,              roles: ['user', 'reviewer'] },
+  { path: REMOTE_PENTEST_PATH, title: '远程网站评估', icon: Connection, roles: ['admin', 'user', 'reviewer'] },
   { path: '/issues',    title: '问题追踪',   icon: Warning,          roles: ['user', 'reviewer'] },
   { path: '/reports',   title: '审查报告',   icon: DataBoard,        roles: ['user', 'reviewer'] },
   { path: '/audit',     title: '操作审计',   icon: Operation,        roles: ['reviewer'] },
@@ -81,6 +86,8 @@ const adminItems: MenuItem[] = [
   { path: '/admin/security-center', title: '安全中心', icon: Lock, admin: true, superAdmin: true },
   { path: '/admin/access', title: '用户与权限', icon: User, admin: true },
   { path: '/admin/platform', title: '平台配置', icon: Tools, admin: true },
+  // 远程目标授权的审批入口：管理员也要能申请并批准（申请人与批准人仍须是不同账号）。
+  { path: REMOTE_PENTEST_PATH, title: '远程网站评估', icon: Connection, admin: true },
   { path: '/forum', title: '开发者论坛', icon: ChatLineSquare, admin: true },
   { path: '/support', title: '支持中心与反馈', icon: Tools, admin: true },
 ]
@@ -102,6 +109,26 @@ const visibleAdminItems = computed(() => (
   ))
 ))
 
+/** 待审批角标：入口可见且账号能批准时才统计，且不含自己提交的申请。 */
+const remoteEntryVisible = computed(() => (
+  (isAdmin.value ? visibleAdminItems.value : visibleMenuItems.value)
+    .some((item) => item.path === REMOTE_PENTEST_PATH)
+))
+const { count: pendingRemoteApprovals } = usePendingRemoteApprovals({
+  enabled: () => remoteEntryVisible.value && userStore.hasPermission('pentest:authorize'),
+  currentUserId: () => userStore.profile?.id,
+})
+
+function badgeText(item: MenuItem): string {
+  if (item.path !== REMOTE_PENTEST_PATH || pendingRemoteApprovals.value <= 0) return ''
+  return pendingRemoteApprovals.value > 99 ? '99+' : String(pendingRemoteApprovals.value)
+}
+
+function itemTooltip(item: MenuItem): string {
+  const badge = badgeText(item)
+  return badge ? `${item.title} · ${badge} 个待审批` : item.title
+}
+
 const COLLAPSED_KEY = 'prism.sidebar.collapsed'
 const GROUPS_KEY = 'prism.sidebar.groups'
 const isCollapsed = ref(
@@ -119,7 +146,11 @@ if (typeof window !== 'undefined') {
 
 const userGroupDefinitions = [
   { key: 'workspace', title: '工作区', paths: ['/dashboard', '/projects', '/code'] },
-  { key: 'review', title: '智能审查与审计', paths: ['/reviews', '/pentests', '/issues', '/reports', '/audit'] },
+  {
+    key: 'review',
+    title: '智能审查与审计',
+    paths: ['/reviews', '/pentests', REMOTE_PENTEST_PATH, '/issues', '/reports', '/audit'],
+  },
   { key: 'agents', title: 'Agent 与安全', paths: ['/agents', '/sandboxes', '/security'] },
   { key: 'community', title: '社区与支持', paths: ['/forum', '/support'] },
   { key: 'personal', title: '个人空间', paths: ['/knowledge', '/profile/personalization', '/profile'] },
@@ -239,7 +270,7 @@ function go(item: MenuItem): void {
           <el-tooltip
             v-for="item in group.items"
             :key="item.path"
-            :content="item.title"
+            :content="itemTooltip(item)"
             placement="right"
             :disabled="!isCollapsed"
           >
@@ -254,6 +285,12 @@ function go(item: MenuItem): void {
             >
               <el-icon class="nav-icon"><component :is="item.icon" /></el-icon>
               <span v-show="!isCollapsed" class="nav-text">{{ item.title }}</span>
+              <span
+                v-if="badgeText(item)"
+                class="nav-badge"
+                role="status"
+                :aria-label="`${badgeText(item)} 个远程授权申请待审批`"
+              >{{ badgeText(item) }}</span>
             </button>
           </el-tooltip>
         </div>
@@ -458,11 +495,38 @@ function go(item: MenuItem): void {
 }
 
 .is-collapsed .nav-item {
+  position: relative;
   width: 44px;
   height: 42px;
   margin: 2px auto;
   padding: 0;
   justify-content: center;
+}
+
+/* 待审批角标：展开时贴在右侧，收起时缩成图标右上角的小圆点式数字 */
+.nav-badge {
+  flex-shrink: 0;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--brand-400);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+}
+
+.is-collapsed .nav-badge {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 16px;
 }
 
 .nav-icon {

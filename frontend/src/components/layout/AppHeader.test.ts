@@ -18,7 +18,9 @@ vi.mock('vue-router', () => ({
     replace: harness.replace,
     resolve: ({ path }: { path: string }) => ({
       matched: [{}],
-      meta: path === '/agents' ? { permissions: ['agent:view', 'agent_asset:create'] } : {},
+      meta: path === '/agents'
+        ? { permissions: ['agent:view', 'agent_asset:create'] }
+        : path.startsWith('/remote-pentests') ? { permissions: ['pentest:view'] } : {},
     }),
   }),
 }))
@@ -28,8 +30,8 @@ vi.mock('@/stores/user', () => ({
     get profile() { return { id: 7, role: harness.role } },
     token: 'token',
     displayName: '普通成员',
-    isAdmin: () => false,
-    isSuperAdmin: () => false,
+    isAdmin: () => harness.role === 'admin' || harness.role === 'super_admin',
+    isSuperAdmin: () => harness.role === 'super_admin',
     hasRole: (role: string) => role === harness.role,
     hasPermission: (code: string) => code === 'agent:chat' ? harness.agentPermission : harness.permission,
     logout: vi.fn(),
@@ -102,6 +104,27 @@ describe('AppHeader navigation visibility', () => {
       expect.objectContaining({ title: '个人中心', path: '/profile' }),
     ]))
     wrapper.unmount()
+  })
+
+  it('功能导航包含“远程网站评估”，普通用户、审查员和管理员都能搜到', () => {
+    for (const role of ['user', 'reviewer', 'admin', 'super_admin']) {
+      harness.role = role
+      const wrapper = mountHeader()
+      const items = (wrapper.vm as any).searchItems as Array<{ title: string; path?: string; description: string }>
+      const entry = items.find((item) => item.path === '/remote-pentests')
+      expect(entry, role).toBeDefined()
+      expect(entry!.title).toBe('远程网站评估')
+      expect(entry!.description).toContain('授权')
+      wrapper.unmount()
+    }
+  })
+
+  it('缺少 pentest:view 权限时功能导航不出现远程网站评估', () => {
+    harness.role = 'user'
+    harness.permission = false
+    const wrapper = mountHeader()
+    const items = (wrapper.vm as any).searchItems as Array<{ path?: string }>
+    expect(items.some((item) => item.path === '/remote-pentests')).toBe(false)
   })
 
   it('缺少 agent:chat 时不显示小菱按钮和搜索入口', () => {
