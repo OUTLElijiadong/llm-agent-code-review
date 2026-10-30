@@ -74,7 +74,8 @@ def test_dashboard_recent_tasks_use_persisted_project_and_task_fields(db, monkey
             # 无覆盖账本的历史成功任务展示记录分（historical 评分范围）。
             "score": 86,
             "coverage": None,
-            "create_time": task.create_time.isoformat(),
+            # 接口时间统一带 UTC 标记(Z)，见 app.core.server_time。
+            "create_time": "2026-07-09T08:00:00Z",
         }
     ]
 

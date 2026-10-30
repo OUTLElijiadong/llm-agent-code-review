@@ -7,7 +7,7 @@ import { Aim, CircleCheck, Clock, DataAnalysis, Lock, Refresh, Search, WarningFi
 import { type SecurityDecoyStatus, applyDecoyRedirect, getDecoyStatus, getDefenseSurface, getSecurityCenterEvents, getSecurityCenterOverview, getTrafficSummary, runSecurityMonitor, traceSecurityIp, type AutomaticBlockingSnapshot, type SecurityCenterEvent, type SecurityCenterEventGroup, type SecurityCenterEventPage, type SecurityCenterOverview, type SecurityIpTrace, type SecurityMonitorPolicy, type SecuritySurfaceAudit, type SecurityTrafficPeer, type SecurityTrafficSummary, updateSecurityMonitorPolicy } from '@/api/adminSecurityCenter'
 import { getSystemStatus, type SystemStatus } from '@/api/adminOverview'
 import { resolveAlert } from '@/api/adminGovernance'
-import { formatServerTime, parseServerTime } from '@/utils/serverTime'
+import { formatServerTime, parseServerTime, serverTimeMs } from '@/utils/serverTime'
 import AutomaticBlockingPanel from '@/components/security/AutomaticBlockingPanel.vue'
 
 const overview = ref<SecurityCenterOverview | null>(null)
@@ -164,7 +164,7 @@ function monitorRunIsStale(): boolean {
   const run = overview.value?.monitoring.last_run
   const referenceAt = run?.finished_at || (run?.status === 'running' ? run.started_at : null)
   if (!referenceAt) return false
-  const timestamp = Date.parse(referenceAt)
+  const timestamp = serverTimeMs(referenceAt)
   if (!Number.isFinite(timestamp)) return true
   const intervalMinutes = overview.value?.monitoring.interval_minutes ?? 0
   const staleAfterMinutes = Math.max(intervalMinutes * 3, 15)
