@@ -24,6 +24,7 @@ from app.models.review_task import ReviewTask
 from app.models.review_task_file import ReviewTaskFile
 from app.models.user import User
 from app.services import rbac_service
+from app.services.chunk_receipts import with_chunk_receipts
 from app.services.project_member_service import (
     get_visible_project_ids,
     project_resource_capabilities,
@@ -178,6 +179,7 @@ def _task_coverage(task: ReviewTask, requested_mode: str | None = None) -> dict:
         # Verification completion does not prove that the full assessment
         # scope was covered. Keep the coverage status explicit for old or
         # partial payloads so a hidden score has a readable explanation.
+        # 顶层 completed/total_chunks 只对应最后一个文件，任务级片段数一律改由逐文件回执汇总。
         result = dict(coverage)
         if result.get("coverage_status") not in {"complete", "partial", "failed", "unknown"}:
             result["coverage_status"] = "unknown"
@@ -186,6 +188,10 @@ def _task_coverage(task: ReviewTask, requested_mode: str | None = None) -> dict:
             "coverage_status": "unknown",
             "unscanned": ["历史任务未保存覆盖清单，无法确认实际扫描范围"],
         }
+    # 没有任何覆盖账本的历史任务同样要明确写“片段数未知”，而不是什么都不显示。
+    result = dict(with_chunk_receipts(
+        result, total_files=task.total_files, review_type=task.review_type, status=task.status,
+    ))
     if task.review_type == "sandbox_test":
         result = _sandbox_coverage_for_display(result)
         if requested_mode in {"whitebox", "blackbox", "combined"}:

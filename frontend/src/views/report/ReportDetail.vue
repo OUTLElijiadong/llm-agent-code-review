@@ -743,6 +743,7 @@ import { reviewRiskLevel, reviewScoreColor } from '@/utils/reviewScore'
 import { severityDisplayLabel } from '@/constants/severity'
 import { useCountUp } from '@/composables/useCountUp'
 import { taskDisplayTitle } from '@/utils/taskDisplayTitle'
+import { chunkReceiptLine, readChunkReceipts } from '@/utils/chunkReceipts'
 
 const route = useRoute()
 const router = useRouter()
@@ -1034,9 +1035,9 @@ const coverageSummary = computed(() => {
   if (completedFiles !== undefined || totalFiles !== undefined) {
     parts.push(`文件处理 ${completedFiles ?? '未记录'}/${totalFiles ?? '未记录'}`)
   }
-  if (coverage.completed_chunks !== undefined || coverage.total_chunks !== undefined) {
-    parts.push(`代码片段处理 ${coverage.completed_chunks ?? '未记录'}/${coverage.total_chunks ?? '未记录'}`)
-  }
+  // 任务级片段数只来自逐文件回执合计（后端 chunk_receipts）；顶层计数只对应单个文件，不再与全任务文件数并列。
+  const chunkLine = chunkReceiptLine(coverage)
+  if (chunkLine) parts.push(chunkLine)
   const tested = Array.isArray(coverage.tested) ? coverage.tested.length : 0
   const unscanned = Math.max(
     typeof coverage.unscanned_files === 'number' ? coverage.unscanned_files : 0,
@@ -1079,6 +1080,7 @@ const coverageEntries = computed(() => {
     ['错误', [coverage.errors]],
     ['停止前未处理', [coverage.cancelled_files]],
     ['已完成阶段', [coverage.completed_phases]],
+    ['缺少回执的文件', [readChunkReceipts(coverage)?.missingFiles]],
   ]
   for (const [label, groups] of coverageGroups) {
     for (const entries of groups) {

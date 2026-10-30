@@ -517,6 +517,83 @@ describe('ReportDetail 报告口径', () => {
     wrapper.unmount()
   })
 
+  it('任务级片段数来自逐文件回执合计，不再把最后一个文件的 1/1 与 48/48 并列', async () => {
+    reportApi.getReportDetail.mockResolvedValueOnce({
+      project: {},
+      task: {
+        task_name: '任务231', review_type: 'standard', status: 'success',
+        coverage: {
+          coverage_status: 'complete', completed_files: 48, total_files: 48,
+          chunk_receipts: {
+            version: 'chunk-receipts-v1', total_files: 48, files_with_receipt: 48, files_missing_receipt: 0,
+            files_not_applicable: 0, missing_receipt_files: [], missing_receipt_files_omitted: 0,
+            known_total_chunks: 54, known_completed_chunks: 54, known_failed_chunks: 0,
+            receipts_complete: true, in_progress: false,
+            label: '已记录的片段处理数 54/54（48 个文件均有回执）',
+            note: '仅为逐文件处理回执的合计，不单独证明模型逐片审查的质量，也不是语义覆盖率',
+          },
+        },
+      },
+      stats: { total_issues: 0 }, files: [], rules_snapshot: [],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const execution = wrapper.get('[data-testid="report-execution-status"]').text()
+    expect(execution).toContain('文件处理 48/48')
+    expect(execution).toContain('已记录的片段处理数 54/54（48 个文件均有回执）')
+    expect(execution).not.toContain('代码片段处理')
+    expect(execution).not.toContain('1/1')
+    wrapper.unmount()
+  })
+
+  it('缺回执的文件显示为未知并逐个列出，不折算为 0', async () => {
+    reportApi.getReportDetail.mockResolvedValueOnce({
+      project: {},
+      task: {
+        review_type: 'standard', status: 'success',
+        coverage: {
+          coverage_status: 'complete', completed_files: 48, total_files: 48,
+          chunk_receipts: {
+            version: 'chunk-receipts-v1', total_files: 48, files_with_receipt: 46, files_missing_receipt: 2,
+            files_not_applicable: 0, missing_receipt_files: ['src/a.php', 'src/b.php'],
+            missing_receipt_files_omitted: 0, known_total_chunks: 51, known_completed_chunks: 51,
+            known_failed_chunks: 0, receipts_complete: false, in_progress: false,
+            label: '已记录的片段处理数 51/51（46 个文件有回执；另有 2 个文件缺少回执，片段数未知）',
+            note: '仅为逐文件处理回执的合计',
+          },
+        },
+      },
+      stats: { total_issues: 0 }, files: [], rules_snapshot: [],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const execution = wrapper.get('[data-testid="report-execution-status"]').text()
+    expect(execution).toContain('另有 2 个文件缺少回执，片段数未知')
+    expect(execution).toContain('缺少回执的文件：src/a.php')
+    expect(execution).toContain('缺少回执的文件：src/b.php')
+    wrapper.unmount()
+  })
+
+  it('旧响应只有顶层计数时，标注它只对应单个文件', async () => {
+    reportApi.getReportDetail.mockResolvedValueOnce({
+      project: {},
+      task: {
+        review_type: 'standard', status: 'success',
+        coverage: { coverage_status: 'complete', completed_files: 48, total_files: 48, completed_chunks: 1, total_chunks: 1 },
+      },
+      stats: { total_issues: 0 }, files: [], rules_snapshot: [],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const execution = wrapper.get('[data-testid="report-execution-status"]').text()
+    expect(execution).not.toContain('代码片段处理')
+    expect(execution).toContain('最近处理文件的片段 1/1（仅单个文件，不是任务合计）')
+    wrapper.unmount()
+  })
+
   it('导出请求期间重复调用只发出一次，并且错误不会保存文件', async () => {
     const pending = new Promise<Blob>(() => {})
     reportApi.exportReport.mockReturnValue(pending)

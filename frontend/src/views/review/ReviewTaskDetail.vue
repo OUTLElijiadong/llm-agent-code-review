@@ -37,13 +37,18 @@
         <dl v-else class="coverage-grid">
           <div><dt>当前文件</dt><dd>{{ task.coverage?.current_file || '未知（接口未提供）' }}</dd></div>
           <div><dt>已完成文件 / 总文件</dt><dd>{{ coverageCount(task.coverage?.completed_files) }} / {{ coverageCount(task.coverage?.total_files) }}</dd></div>
-          <div><dt>当前 / 最近文件分片</dt><dd>{{ coverageCount(task.coverage?.completed_chunks) }} / {{ coverageCount(task.coverage?.total_chunks) }}</dd></div>
+          <div v-if="showCurrentFileChunks"><dt>当前文件分片</dt><dd>{{ currentFileChunkText(task.coverage) }}</dd></div>
+          <div v-if="chunkReceiptSummary" data-testid="chunk-receipts"><dt>片段处理回执</dt><dd>{{ chunkReceiptSummary.label }}</dd></div>
         </dl>
+        <p v-if="chunkReceiptSummary?.note" class="coverage-note" data-testid="chunk-receipts-note">{{ chunkReceiptSummary.note }}。</p>
+        <p v-if="chunkReceiptSummary?.missingFiles.length" class="coverage-note coverage-note--warning" role="note">
+          缺少回执的文件：{{ chunkReceiptSummary.missingFiles.join('、') }}
+        </p>
         <p v-if="isSandboxReport" class="coverage-note">沙箱测试按任务范围记录完成情况；逐文件、分片和模型信息以报告中已保存的证据为准。</p>
         <p v-if="isSandboxReport && task?.coverage?.verification_status !== 'complete'" class="coverage-note coverage-note--warning" role="note">
           {{ sandboxCoverageLabel(task?.coverage?.verification_status) }}<span v-if="task?.coverage?.reason && task?.status !== 'failed'">：{{ task.coverage.reason }}</span>。评分保留为本次记录值，不表示完整黑盒/白盒验证通过。
         </p>
-        <p v-else class="coverage-note">仅展示服务端返回的执行记录；分片数不是全任务合计，未知字段不推算为进度。</p>
+        <p v-else class="coverage-note">仅展示服务端返回的执行记录；当前文件分片不是全任务合计，未知字段不推算为进度。</p>
       </div>
       <div v-if="taskFailure" class="execution-error" role="alert">{{ taskFailure }}</div>
     </section>
@@ -399,6 +404,7 @@ import { SEVERITY_OPTIONS, severityClass, severityDisplayLabel } from '@/constan
 import { DIM_META, normalizeDimKey, dimColor as resolveDimColor, dimLabel as resolveDimLabel } from '@/constants/dim'
 import { reviewTypeLabel } from '@/constants/reviewType'
 import { taskDisplayTitle } from '@/utils/taskDisplayTitle'
+import { currentFileChunkText, readChunkReceipts } from '@/utils/chunkReceipts'
 import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
@@ -502,6 +508,15 @@ const taskFailure = computed(() => {
 function coverageCount(value: unknown): string {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? String(value) : '未知'
 }
+
+// 任务级片段数只来自逐文件回执合计；顶层计数只对应当前/最近一个文件，二者不并列成同一粒度。
+const chunkReceiptSummary = computed(() => readChunkReceipts(task.value?.coverage))
+// 旧响应没有 chunk_receipts 时仍展示单文件进度（标签写明“当前文件”），有汇总的终态任务不再展示。
+const showCurrentFileChunks = computed(() => {
+  const coverage = task.value?.coverage
+  if (!chunkReceiptSummary.value) return true
+  return chunkReceiptSummary.value.inProgress && !!coverage?.current_file_chunks
+})
 
 function requestError(error: unknown, fallback: string): string {
   const failure = error as { message?: unknown } | null
