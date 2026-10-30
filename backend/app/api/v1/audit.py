@@ -11,6 +11,7 @@ from app.models.user import User
 from app.schemas.audit import AuditLogOut
 from app.schemas.common import PageOut, Resp
 from app.services import audit_service
+from app.services.rbac_service import is_admin_user
 
 router = APIRouter()
 
@@ -28,9 +29,10 @@ def list_audit_logs(
     db: Session = Depends(get_db),
     viewer: User = Depends(require_permission(PermissionCode.AUDIT_VIEW)),
 ):
-    """审计日志列表(仅授予审计读取权限的账号)"""
+    """审计日志列表。管理员看全站，其他持有 audit:view 的账号（如审查员）只看本人记录。"""
+    own_only = not is_admin_user(db, viewer.id)
     result = audit_service.list_logs(
         db, action, keyword, actor_id, start, end, page, page_size,
-        viewer=viewer, include_system_heartbeat=include_system_heartbeat,
+        viewer=viewer, include_system_heartbeat=include_system_heartbeat, own_only=own_only,
     )
     return Resp(data=PageOut(**result))

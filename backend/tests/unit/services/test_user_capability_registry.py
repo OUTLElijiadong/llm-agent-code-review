@@ -1168,7 +1168,11 @@ async def test_reviewer_audit_capability_reuses_real_api_auth_and_private_conten
         assert result["status_code"] == 200 and result["page"] == "/audit"
         items = {row["actor_id"]: row for row in result["data"]["items"]}
         assert items[reviewer.id]["detail"] == "我的私密对话"
-        assert items[ordinary.id]["detail"] is None and items[ordinary.id]["content_redacted"] is True
+        # 非管理员只能读本人记录：他人的行不出现，total 也只统计本人行
+        # （含这次能力调用自身写入的审计行，故按行数对账而不是写死 1）。
+        assert ordinary.id not in items
+        assert {row["actor_id"] for row in result["data"]["items"]} == {reviewer.id}
+        assert result["data"]["total"] == len(result["data"]["items"])
         with pytest.raises(AdminCapabilityError) as rejected:
             await admin_capability_service.execute_api(ordinary, spec, {}, request_id="audit-user-denied")
         assert rejected.value.status_code == 403

@@ -87,6 +87,7 @@ def list_logs(
     *,
     viewer: Optional[User] = None,
     include_system_heartbeat: bool = False,
+    own_only: bool = False,
 ) -> dict:
     """分页查询审计日志
 
@@ -100,6 +101,9 @@ def list_logs(
         page: 页码
         page_size: 每页数量
         include_system_heartbeat: 是否包含频繁的只读运维心跳；默认从人工审计视图折叠隐藏
+        viewer: 查看者
+        own_only: 为 True 时只返回 viewer 本人的记录（非管理员），忽略传入的 actor_id；
+            没有 viewer 时失败关闭，返回空结果。
 
     Returns:
         dict: 分页响应
@@ -108,6 +112,10 @@ def list_logs(
     owned = AuditLog.actor_id == int(viewer.id) if viewer is not None else false()
     detail_visible = or_(~private_content, owned)
     q = db.query(AuditLog, private_content.label("private_content"))
+    if own_only:
+        # 范围收窄发生在 total 统计之前，避免通过总数或分页数探测他人记录。
+        q = q.filter(owned)
+        actor_id = None
     if action:
         q = q.filter(AuditLog.action == action)
     if not include_system_heartbeat:
