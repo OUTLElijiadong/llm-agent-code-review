@@ -517,6 +517,38 @@ describe('ReportDetail 报告口径', () => {
     wrapper.unmount()
   })
 
+  it.each([
+    ['discuss', '圆桌评分'], ['standard', '代码评分'], ['security_scan', '安全审计评分'],
+  ])('报告详情的评分类型：%s 显示 %s', async (review_type, label) => {
+    permissions.add('security:view')
+    reportApi.getReportDetail.mockResolvedValueOnce({
+      project: {},
+      task: { task_name: '任务236', review_type, status: 'success', score: 62, coverage: { coverage_status: 'complete' } },
+      stats: { score: 62, total_issues: 12 }, files: [], rules_snapshot: [],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="report-score-kind"]').text()).toBe(label)
+    expect(wrapper.text()).not.toContain('类型未确认')
+    wrapper.unmount()
+  })
+
+  it('领域报告在评分环内与其它页面使用同一评分类型文案', async () => {
+    reportApi.getReportDetail.mockResolvedValueOnce({
+      project: {},
+      task: { review_type: 'sandbox_test', status: 'success', score: 90, coverage: { verification_status: 'partial' } },
+      stats: { score: 90, total_issues: 1 }, files: [], rules_snapshot: [],
+      source: { type: 'sandbox_test' },
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.get('.ring-out').text()).toBe('已测范围分')
+    expect(wrapper.get('[data-testid="report-domain-score-label"]').text()).toContain('领域评分')
+    wrapper.unmount()
+  })
+
   it('任务级片段数来自逐文件回执合计，不再把最后一个文件的 1/1 与 48/48 并列', async () => {
     reportApi.getReportDetail.mockResolvedValueOnce({
       project: {},

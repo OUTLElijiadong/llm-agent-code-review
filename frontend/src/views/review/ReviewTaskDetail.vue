@@ -93,7 +93,7 @@
           <span class="score-out font-mono">/100</span>
         </div>
         <div class="score-meta">
-          <div class="score-label">{{ isSandboxReport && task?.coverage?.verification_status !== 'complete' ? '已测范围分' : isTestScore ? '测试评分' : '代码质量' }}</div>
+          <div class="score-label" :title="scoreKind.basis">{{ scoreKind.label }}</div>
           <div class="score-status" :style="{ color: scoreFlatColor(displayScore) }">{{ riskLevel }}</div>
         </div>
       </div>
@@ -403,6 +403,7 @@ import { PRISM_SEVERITY_COLORS } from '@/components/chart/prismTheme'
 import { SEVERITY_OPTIONS, severityClass, severityDisplayLabel } from '@/constants/severity'
 import { DIM_META, normalizeDimKey, dimColor as resolveDimColor, dimLabel as resolveDimLabel } from '@/constants/dim'
 import { reviewTypeLabel } from '@/constants/reviewType'
+import { scoreKindOf } from '@/constants/scoreKind'
 import { taskDisplayTitle } from '@/utils/taskDisplayTitle'
 import { currentFileChunkText, readChunkReceipts } from '@/utils/chunkReceipts'
 import { useUserStore } from '@/stores/user'
@@ -447,6 +448,8 @@ const reportMetricsRestricted = computed(() => (
   && task.value?.can_view_report === false
 ))
 const isTestScore = computed(() => ['sandbox_test', 'pentest'].includes(task.value?.review_type || ''))
+// 评分类型与工作台、项目页、报告页共用同一判定，圆桌/安全审计不再被笼统标成“代码质量”。
+const scoreKind = computed(() => scoreKindOf(task.value))
 const sandboxModeLabels: Record<string, string> = {
   whitebox: '沙箱白盒测试',
   blackbox: '沙箱黑盒测试',

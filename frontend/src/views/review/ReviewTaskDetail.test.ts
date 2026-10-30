@@ -521,6 +521,26 @@ describe('审查详情真实执行状态', () => {
     expect(wrapper.text()).not.toContain('DeepSeek V4')
   })
 
+  it.each([
+    ['discuss', '圆桌评分'], ['standard', '代码评分'], ['full', '代码评分'],
+    ['pentest', '测试评分'], ['security_scan', '安全审计评分'],
+  ])('任务详情头部的评分类型：%s 显示 %s，与工作台和项目页同一口径', async (review_type, label) => {
+    review.getReviewTaskDetail.mockResolvedValue(taskResult({
+      review_type, status: 'success', score: 62, coverage: { stage: 'complete', coverage_status: 'complete' },
+    }))
+    await renderDetail()
+    expect(wrapper.get('.score-label').text()).toBe(label)
+    expect(wrapper.text()).not.toContain('类型未确认')
+  })
+
+  it('沙箱验证范围不完整时头部称为“已测范围分”', async () => {
+    review.getReviewTaskDetail.mockResolvedValue(taskResult({
+      review_type: 'sandbox_test', status: 'success', score: 80, coverage: { verification_status: 'partial' },
+    }))
+    await renderDetail()
+    expect(wrapper.get('.score-label').text()).toBe('已测范围分')
+  })
+
   it('终态任务显示逐文件回执合计，并说明它不证明审查质量', async () => {
     review.getReviewTaskDetail.mockResolvedValue(taskResult({
       status: 'success', total_files: 48, processed_files: 48,

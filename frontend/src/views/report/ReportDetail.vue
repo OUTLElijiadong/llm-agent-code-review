@@ -239,7 +239,7 @@
               </svg>
               <div class="ring-text">
                 <div class="ring-val font-display">{{ animatedScore }}</div>
-            <div class="ring-out font-mono">{{ isDomainReport ? '测试评分' : '/ 100' }}</div>
+            <div class="ring-out font-mono">{{ isDomainReport ? scoreKind.label : '/ 100' }}</div>
               </div>
             </div>
             <div
@@ -253,6 +253,7 @@
             <div v-else class="risk-tag" data-testid="report-domain-score-label">
               领域评分
             </div>
+            <div v-if="!isDomainReport" class="score-scope-tag" data-testid="report-score-kind" :title="scoreKind.basis">{{ scoreKind.label }}</div>
             <div v-if="scoreScope?.label" class="score-scope-tag" data-testid="report-score-scope">{{ scoreScope.label }}</div>
             <div v-if="scoreAuditLabel" class="score-scope-tag" data-testid="report-score-audit">{{ scoreAuditLabel }}</div>
           </div>
@@ -744,6 +745,7 @@ import { severityDisplayLabel } from '@/constants/severity'
 import { useCountUp } from '@/composables/useCountUp'
 import { taskDisplayTitle } from '@/utils/taskDisplayTitle'
 import { chunkReceiptLine, readChunkReceipts } from '@/utils/chunkReceipts'
+import { scoreKindOf } from '@/constants/scoreKind'
 
 const route = useRoute()
 const router = useRouter()
@@ -1180,6 +1182,11 @@ const cvssFormulaLabel = computed(() => cvssScoreBreakdown.value?.formula
   || 'CVSS 安全分 = 100 − 10 × 最高有效 CVSS 3.1 基础分；综合分 = CVSS 安全分与规则质量分按权重合成。')
 const cvssReason = computed(() => String(cvssScoreBreakdown.value?.cvss_reason ?? '').trim())
 const scoreScope = computed(() => report.value?.task?.score_scope as ScoreScope | undefined)
+// 评分类型与工作台、项目页、任务页共用同一判定；报告来源类型优先于任务字段。
+const scoreKind = computed(() => scoreKindOf({
+  review_type: report.value?.source?.type || report.value?.task?.review_type as string | undefined,
+  coverage: report.value?.task?.coverage as object | undefined,
+}))
 const scoreAudit = computed(() => report.value?.task?.score_audit as Record<string, unknown> | undefined)
 const scoreAvailable = computed(() => (
   stats.value.score !== null

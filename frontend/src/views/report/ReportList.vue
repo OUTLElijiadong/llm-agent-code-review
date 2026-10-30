@@ -181,6 +181,7 @@ import type { ReportListItem, ReportFormat } from '@/types/report'
 import EmptyState from '@/components/common/EmptyState.vue'
 import type { ProjectOut } from '@/types/project'
 import { reviewTypeLabel } from '@/constants/reviewType'
+import { scoreKindOf } from '@/constants/scoreKind'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { confirmDanger } from '@/composables/useDangerConfirm'
 import { useUserStore } from '@/stores/user'
@@ -358,9 +359,9 @@ function sandboxScoreTitle(row: ReportListItem) {
     return String(row.score_scope?.reason || row.coverage?.score_unavailable_reason || '没有可核验的评分回执；0 分与未知分数分别处理')
   }
   const scope = row.score_scope?.label ? `，${row.score_scope.label}` : ''
-  if (row.source?.type === 'sandbox_test') return `沙箱验证分 ${score}（已执行检查项通过率${scope}）`
-  if (row.source?.type === 'pentest') return `渗透已测范围分 ${score}（按已确认发现扣分${scope}）`
-  return `规则评分 ${score}（按问题严重度扣分${scope}）`
+  // 评分类型与工作台、项目页、任务页、报告页共用同一判定。
+  const kind = scoreKindOf({ review_type: row.source?.type, coverage: row.coverage })
+  return `${kind.label} ${score}（${kind.basis}${scope}）`
 }
 
 async function loadData() {
