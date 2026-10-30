@@ -21,6 +21,10 @@ ESCALATE = "escalate"
 DENY = "deny"
 
 _RISK_ORDER = {LOW: 0, MEDIUM: 1, HIGH: 2, CRITICAL: 3}
+
+# 模型或客户端写进任务 input 的授权布尔值/凭证不构成授权来源：既不进入计划摘要与任务指纹，
+# 创建团队时被剥除，执行时也被忽略。远程目标授权只认服务端查到的已批准远程网站评估委托。
+UNTRUSTED_AUTHORIZATION_KEYS = frozenset({"remote_target_authorized", "remote_target_approval_token"})
 _HIGH_RISK_MARKERS = (
     "permission", "role", "delete", "drop", "truncate", "production_config", "prod_config",
     "production.deploy", "deploy.production", "release.publish", "publish", "agent.toggle",
@@ -222,7 +226,7 @@ def review_agent_team_plan(payload: Mapping[str, Any]) -> dict[str, Any]:
                         str(member_by_key.get(str(item.get("member_key") or ""), {}).get("address") or ""),
                         member_by_key.get(str(item.get("member_key") or ""), {}),
                     ) in {"site_operator", "temporary"})
-                    and key != "remote_target_authorized" and not str(key).startswith("_")
+                    and key not in UNTRUSTED_AUTHORIZATION_KEYS and not str(key).startswith("_")
                 } if isinstance(item.get("input", {}), Mapping) else {},
             }
             for item in tasks if isinstance(item, Mapping)
@@ -252,7 +256,7 @@ def task_fingerprint(task: Mapping[str, Any], address: str) -> str:
         "instructions": task.get("instructions"),
         "input": {
             str(key): value for key, value in raw_input.items()
-            if key != "operation" and key != "remote_target_authorized" and not str(key).startswith("_")
+            if key != "operation" and key not in UNTRUSTED_AUTHORIZATION_KEYS and not str(key).startswith("_")
         },
     }
     if execution_strategy:

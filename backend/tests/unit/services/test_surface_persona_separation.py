@@ -329,7 +329,12 @@ async def test_remote_blackbox_runs_only_after_click_approval_and_forces_server_
 
 @pytest.mark.asyncio
 async def test_remote_team_creation_needs_no_click_and_never_promotes_target_authorization(db, admin, monkeypatch):
-    """创建含远程目标的团队免确认，但不能提升任务中的远程执行授权。"""
+    """创建含远程目标的团队免确认；授权由执行期的已批准委托决定，创建环节与模型 input 都无法置位。
+
+    4.1.22 起创建环节不再提升授权（本测试固化）。本次进一步约定：模型写进任务 input 的
+    `remote_target_authorized: true` 和确认凭证在创建工具层同样不被信任，
+    真正的放行只发生在 agent_mesh_dispatcher 依据服务端查到的已批准远程网站评估委托之后。
+    """
     captured: list[dict] = []
     orchestrator = _bare_orchestrator()
 
@@ -371,3 +376,49 @@ async def test_remote_team_creation_needs_no_click_and_never_promotes_target_aut
     assert len(captured) == 1
     task_input = captured[0]["tasks"][0]["input"]
     assert task_input["remote_target_authorized"] is False
+
+
+@pytest.mark.asyncio
+async def test_model_written_authorization_flag_is_not_promoted_by_team_creation(db, admin, monkeypatch):
+    """模型自己写 remote_target_authorized: true 时，创建环节原样转交，不会替它盖章或报错。"""
+    captured: list[dict] = []
+    orchestrator = _bare_orchestrator()
+
+    def fake_invoke_tool(_name, arguments, _ctx):
+        captured.append(arguments)
+        return SimpleNamespace(success=True, data={"team_id": 43, "status": "queued"}, error="")
+
+    orchestrator.invoke_tool = fake_invoke_tool
+    monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_a, **_k: orchestrator)
+    executor = PrismToolExecutor(
+        db,
+        admin,
+        surface="admin",
+        run_id="run-team-self-authorizing",
+        mcp_provider=EmptyMcp(),
+    )
+    args = {
+        "title": "自带授权的团队",
+        "objective": "模型试图在 input 里自行声明远程授权",
+        "members": [{"member_key": "tester", "display_name": "测试员", "address": "agent:test_verifier"}],
+        "tasks": [{
+            "task_key": "probe",
+            "member_key": "tester",
+            "title": "探测健康页",
+            "instructions": "对目标发出一次 GET 并回报响应状态",
+            "input": {
+                "operation": "run_project_tests",
+                "project_id": 1,
+                "language": "python",
+                "remote_target_url": "https://authorized.example.test/health",
+                "remote_target_authorized": True,
+                "remote_target_approval_token": "1.forged",
+            },
+        }],
+    }
+
+    completed = await executor.execute(ToolCall("call-team-self-auth", "create_agent_team", args, json.dumps(args)))
+
+    assert completed.status == "success"
+    # 创建工具层不替模型盖章；真正的剥离发生在 agent_team_service 落库时（见 test_remote_target_engagement_authorization）。
+    assert captured[0]["tasks"][0]["input"]["remote_target_authorized"] is True

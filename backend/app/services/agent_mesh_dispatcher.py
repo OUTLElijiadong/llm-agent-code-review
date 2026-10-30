@@ -21,6 +21,7 @@ from app.models.agent_mesh import AgentMeshMessage
 from app.models.custom_agent import CustomAgent
 from app.models.user import User
 from app.services import rbac_service
+from app.services.agent_supervisor_service import UNTRUSTED_AUTHORIZATION_KEYS
 from app.services.ai_usage_context import UsageAccountingError, model_attribution, usage_context
 
 _scheduler = None
@@ -140,7 +141,67 @@ def _missing(*fields: str) -> dict[str, Any]:
 
 def _payload(message: dict[str, Any]) -> dict[str, Any]:
     value = message.get("payload")
-    return value if isinstance(value, dict) else {}
+    if not isinstance(value, dict):
+        return {}
+    # 模型写进任务 input 的授权布尔值/凭证不是授权来源：所有成员处理器都读不到它们。
+    if UNTRUSTED_AUTHORIZATION_KEYS.intersection(value):
+        return {key: item for key, item in value.items() if key not in UNTRUSTED_AUTHORIZATION_KEYS}
+    return value
+
+
+def _remote_authorization_required(remote_target_url: str) -> dict[str, Any]:
+    """远程目标没有已批准的独立委托时的结构化阻断，并告诉用户去哪里申请。"""
+    from app.services import remote_pentest_service
+
+    origin = remote_pentest_service.redact_target_origin(remote_target_url)
+    result = _result(
+        "blocked",
+        "该远程目标尚未获得独立授权，请先提交远程网站评估并由另一位审批人批准",
+        errors=[{"code": "remote_target_authorization_required", "target_origin": origin}],
+        next_action={"open_path": "/remote-pentests/start", "target_url": origin},
+    )
+    result["retryable"] = False
+    return result
+
+
+def _active_remote_authorization(db: Session, user: User, remote_target_url: str) -> Optional[dict[str, Any]]:
+    """用独立事务查询当前账号对该目标已批准且仍有效的远程网站评估委托。
+
+    团队 Worker 的业务 Session 可能持有旧快照；取消、撤权或过期必须立即生效，
+    因此与 `_owner_access_error` 一样不复用业务 Session。
+    """
+    from app.services import remote_pentest_service
+
+    bind = db.get_bind()
+    with Session(bind=getattr(bind, "engine", bind), autoflush=False) as auth_db:
+        row = remote_pentest_service.find_active_authorization(auth_db, int(user.id), remote_target_url)
+        if row is None:
+            return None
+        return {
+            "engagement_public_id": row.public_id,
+            "target_origin": remote_pentest_service.redact_target_origin(remote_target_url),
+            "authorized_by_user_id": int(row.authorized_by_user_id),
+        }
+
+
+def _audit_remote_authorization_use(
+    db: Session, user: User, authorization: dict[str, Any], context: dict[str, Any],
+) -> None:
+    """记录团队依据哪份委托触达了哪个远程目标，便于事后追溯。"""
+    from app.services import audit_service
+
+    audit_service.log(
+        db,
+        user,
+        "remote_pentest_authorization_used",
+        target_type="remote_pentest",
+        target_id=authorization["engagement_public_id"],
+        detail=(
+            f"小菱团队按已批准的远程网站评估委托发起远程黑盒；team={context.get('team_id')}; "
+            f"task={context.get('agent_team_task_id') or context.get('task_id')}; "
+            f"target={authorization['target_origin']}"
+        ),
+    )
 
 
 def _readonly_team_task(data: dict[str, Any]) -> bool:
@@ -732,6 +793,20 @@ def _runtime_handler(
         language = str(data.get("language") or "").strip()
         if not project_id or not language:
             return _missing("project_id", "language")
+        # 远程目标的授权只认服务端查到的“已批准远程网站评估委托”；任务 input 里的授权布尔值
+        # 与确认凭证已在 _payload 中剥除。未命中时不交接依赖资源、不创建沙箱。
+        remote_target_url = str(data.get("remote_target_url") or "").strip()
+        remote_authorization: Optional[dict[str, Any]] = None
+        if remote_target_url:
+            raw_payload = message.get("payload")
+            if isinstance(raw_payload, dict) and UNTRUSTED_AUTHORIZATION_KEYS.intersection(raw_payload):
+                logger.warning(
+                    "[agent-mesh] 忽略团队任务 input 中自带的远程授权字段 team={} task={}",
+                    context.get("team_id"), team_task_id,
+                )
+            remote_authorization = _active_remote_authorization(db, user, remote_target_url)
+            if remote_authorization is None:
+                return _remote_authorization_required(remote_target_url)
         released_deployments: list[dict[str, str]] = []
         if context.get("team_id") and team_task_id:
             from app.services import agent_team_service
@@ -760,6 +835,8 @@ def _runtime_handler(
                 failure["retry_after_seconds"] = 5
                 return failure
         if operation == "run_full_project_validation":
+            # 组合验证只在隔离沙箱内运行，不会触达远程目标；上面的委托核对仅用于拦住误带的远程地址。
+            remote_authorization = None
             result = orch.run_full_project_validation(
                 project_id=int(project_id),
                 language=language,
@@ -770,6 +847,8 @@ def _runtime_handler(
         elif operation == "run_project_tests":
             # 本地黑盒的精确 GET 路径白名单；缺省时不带该键，沙箱服务端对缺失白名单的本地黑盒失败关闭。
             scope_kwargs = {"http_scope": data["http_scope"]} if data.get("http_scope") is not None else {}
+            if remote_authorization is not None:
+                _audit_remote_authorization_use(db, user, remote_authorization, context)
             result = orch.run_project_tests(
                 project_id=int(project_id),
                 language=language,
@@ -778,7 +857,7 @@ def _runtime_handler(
                 source_revision_id=data.get("source_revision_id"),
                 **scope_kwargs,
                 remote_target_url=str(data.get("remote_target_url") or ""),
-                remote_target_authorized=bool(data.get("remote_target_authorized", False)),
+                remote_target_authorized=remote_authorization is not None,
                 ctx=ctx,
             )
         else:
@@ -796,6 +875,10 @@ def _runtime_handler(
         if released_deployments:
             final["evidence"] = [
                 {"source": "dependency_sandbox_release", "data": item} for item in released_deployments
+            ] + list(final.get("evidence") or [])
+        if remote_authorization is not None:
+            final["evidence"] = [
+                {"source": "remote_pentest_authorization", "data": remote_authorization}
             ] + list(final.get("evidence") or [])
         return final
     if code == "sandbox_deployer":

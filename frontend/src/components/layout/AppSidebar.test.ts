@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const harness = vi.hoisted(() => ({
@@ -7,7 +7,11 @@ const harness = vi.hoisted(() => ({
   auditPermission: true,
   role: 'user',
   superAdmin: false,
+  authorizePermission: false,
+  pending: vi.fn(),
 }))
+
+vi.mock('@/api/remotePentest', () => ({ getPendingRemoteApprovalSnapshot: harness.pending }))
 
 vi.mock('vue-router', () => ({
   useRoute: () => ({ path: '/dashboard' }),
@@ -21,7 +25,9 @@ vi.mock('vue-router', () => ({
           ? { roles: ['reviewer'], permissions: ['audit:view'] }
         : path === '/projects'
           ? { permissions: ['test:permission'] }
-          : {},
+          : path.startsWith('/remote-pentests')
+            ? { permissions: ['pentest:view'] }
+            : {},
     }),
   }),
 }))
@@ -33,7 +39,11 @@ vi.mock('@/stores/user', () => ({
     isAdmin: () => harness.role === 'admin' || harness.role === 'super_admin',
     isSuperAdmin: () => harness.superAdmin,
     hasRole: (role: string) => role === harness.role,
-    hasPermission: (code: string) => code === 'audit:view' ? harness.auditPermission : harness.permission,
+    hasPermission: (code: string) => {
+      if (code === 'audit:view') return harness.auditPermission
+      if (code === 'pentest:authorize') return harness.authorizePermission
+      return harness.permission
+    },
   }),
 }))
 
@@ -48,6 +58,9 @@ describe('AppSidebar ordinary member navigation', () => {
     harness.auditPermission = true
     harness.role = 'user'
     harness.superAdmin = false
+    harness.authorizePermission = false
+    harness.pending.mockReset()
+    harness.pending.mockResolvedValue({ total: 0, items: [] })
   })
 
   function mountSidebar(mobileOpen = false) {
@@ -117,6 +130,91 @@ describe('AppSidebar ordinary member navigation', () => {
       expect(wrapper.find('[data-route="/pentests"]').exists()).toBe(true)
       wrapper.unmount()
     }
+  })
+
+  it('普通用户、审查员和管理员都能在侧栏找到“远程网站评估”入口', () => {
+    for (const role of ['user', 'reviewer', 'admin', 'super_admin']) {
+      harness.role = role
+      harness.superAdmin = role === 'super_admin'
+      const wrapper = mountSidebar()
+      const entry = wrapper.find('[data-route="/remote-pentests"]')
+      expect(entry.exists(), role).toBe(true)
+      expect(entry.text(), role).toContain('远程网站评估')
+      wrapper.unmount()
+    }
+  })
+
+  it('缺少 pentest:view 权限的非管理员看不到远程网站评估入口', () => {
+    harness.role = 'user'
+    harness.permission = false
+    const wrapper = mountSidebar()
+    expect(wrapper.find('[data-route="/remote-pentests"]').exists()).toBe(false)
+  })
+
+  it('点击入口跳转到远程网站评估列表并关闭移动端抽屉', async () => {
+    harness.role = 'admin'
+    const wrapper = mountSidebar(true)
+    await wrapper.get('[data-route="/remote-pentests"]').trigger('click')
+    expect(harness.push).toHaveBeenCalledWith('/remote-pentests')
+    expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('拥有 pentest:authorize 的账号看到别人提交的待审批数量角标', async () => {
+    harness.role = 'reviewer'
+    harness.authorizePermission = true
+    harness.pending.mockResolvedValue({ total: 3, items: [{ owner_id: 7 }, { owner_id: 8 }, { owner_id: 9 }] })
+    const wrapper = mountSidebar()
+    await flushPromises()
+
+    const badge = wrapper.get('[data-route="/remote-pentests"] .nav-badge')
+    expect(badge.text()).toBe('2')
+    expect(badge.attributes('aria-label')).toBe('2 个远程授权申请待审批')
+    expect(harness.pending).toHaveBeenCalledTimes(1)
+  })
+
+  it('没有审批权限、没有待审批或接口失败时不显示角标，也不影响入口', async () => {
+    harness.role = 'user'
+    let wrapper = mountSidebar()
+    await flushPromises()
+    expect(harness.pending).not.toHaveBeenCalled()
+    expect(wrapper.find('.nav-badge').exists()).toBe(false)
+    wrapper.unmount()
+
+    harness.role = 'reviewer'
+    harness.authorizePermission = true
+    wrapper = mountSidebar()
+    await flushPromises()
+    expect(wrapper.find('.nav-badge').exists()).toBe(false)
+    wrapper.unmount()
+
+    harness.pending.mockRejectedValue(new Error('offline'))
+    wrapper = mountSidebar()
+    await flushPromises()
+    expect(wrapper.find('[data-route="/remote-pentests"]').exists()).toBe(true)
+    expect(wrapper.find('.nav-badge').exists()).toBe(false)
+  })
+
+  it('管理员同样按 pentest:authorize 统计待审批角标', async () => {
+    harness.role = 'admin'
+    harness.authorizePermission = true
+    harness.pending.mockResolvedValue({ total: 1, items: [{ owner_id: 21 }] })
+    const wrapper = mountSidebar()
+    await flushPromises()
+
+    expect(wrapper.get('[data-route="/remote-pentests"] .nav-badge').text()).toBe('1')
+  })
+
+  it('角标超过 99 时显示 99+', async () => {
+    harness.role = 'reviewer'
+    harness.authorizePermission = true
+    harness.pending.mockResolvedValue({
+      total: 150,
+      items: Array.from({ length: 120 }, (_, index) => ({ owner_id: 100 + index })),
+    })
+    const wrapper = mountSidebar()
+    await flushPromises()
+
+    expect(wrapper.get('[data-route="/remote-pentests"] .nav-badge').text()).toBe('99+')
   })
 
   it('管理员侧栏保留管理入口并提供论坛与支持中心；安全中心仍限超级管理员', () => {
