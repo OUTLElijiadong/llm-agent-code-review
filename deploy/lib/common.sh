@@ -338,21 +338,155 @@ assert_project_member_rollback_compatible() {
   log_info "成员权限回退兼容门通过(reader=$capability)"
 }
 
-# 使用 mkdir 原子获取目录锁，防止并发备份或发布。
-# 参数: $1 为锁目录。
-# 返回: 成功时 0；锁已存在时终止脚本。
-acquire_directory_lock() {
-  local lock_dir="$1"
-  if ! mkdir "$lock_dir" 2>/dev/null; then
-    fatal "检测到并发任务或遗留锁: $lock_dir"
-  fi
+# 获取文件修改时间的 Unix 秒，兼容 GNU/BSD stat。
+# 参数: $1 文件或目录路径。
+# 返回: stdout 输出 Unix 秒；无法获取时返回 1。
+path_mtime_epoch() {
+  stat -c '%Y' "$1" 2>/dev/null || stat -f '%m' "$1" 2>/dev/null
 }
 
-# 删除当前脚本持有的目录锁。
+# 持有者元数据写在锁目录旁边的 <锁目录>.owner，而不是锁目录里面：
+# 释放锁仍然只靠 rmdir，旧版本脚本不会因为目录非空而留下永久锁。
+# 参数: $1 为锁目录。
+# 返回: stdout 输出元数据文件路径。
+lock_owner_file() {
+  printf '%s.owner\n' "$1"
+}
+
+# 记录当前进程为锁持有者（pid、启动时间、命令名）；写入失败不影响加锁。
+# 参数: $1 为锁目录。
+# 返回: 始终返回 0。
+write_lock_owner() {
+  local owner_file tmp_file
+  owner_file="$(lock_owner_file "$1")"
+  tmp_file="$owner_file.$$"
+  {
+    printf 'pid=%s\n' "$$"
+    printf 'started_epoch=%s\n' "$(date -u '+%s')"
+    printf 'command=%s\n' "${0##*/}"
+  } > "$tmp_file" 2>/dev/null && mv -f "$tmp_file" "$owner_file" 2>/dev/null || rm -f "$tmp_file" 2>/dev/null
+  return 0
+}
+
+# 读取持有者元数据中的单个字段；元数据缺失或比锁目录更旧（属于更早的持有者）时视为未记录。
+# 参数: $1 为锁目录；$2 为字段名。
+# 返回: 找到时 0 并输出字段值，否则 1。
+lock_owner_field() {
+  local lock_dir="$1" field="$2" owner_file owner_mtime lock_mtime line
+  owner_file="$(lock_owner_file "$lock_dir")"
+  [[ -f "$owner_file" ]] || return 1
+  owner_mtime="$(path_mtime_epoch "$owner_file" || true)"
+  lock_mtime="$(path_mtime_epoch "$lock_dir" || true)"
+  if [[ "$owner_mtime" =~ ^[0-9]+$ && "$lock_mtime" =~ ^[0-9]+$ ]] && (( owner_mtime + 5 < lock_mtime )); then
+    return 1
+  fi
+  while IFS= read -r line; do
+    if [[ "$line" == "$field="* ]]; then
+      printf '%s\n' "${line#*=}"
+      return 0
+    fi
+  done < "$owner_file"
+  return 1
+}
+
+# 判断锁的记录持有者是否仍在运行。
+# 参数: $1 为锁目录。
+# 返回: 0=仍在运行；1=持有进程已不存在（含 pid 被其他程序复用）；2=无法判断。
+lock_owner_alive() {
+  local lock_dir="$1" pid command cmdline
+  pid="$(lock_owner_field "$lock_dir" pid)" || return 2
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 2
+  command="$(lock_owner_field "$lock_dir" command || true)"
+  if [[ -r "/proc/$pid/cmdline" ]]; then
+    cmdline="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
+    [[ -n "$cmdline" ]] || return 1
+    [[ -z "$command" || "$cmdline" == *"$command"* ]] || return 1
+    return 0
+  fi
+  # 没有 /proc（macOS）时退回 kill -0：成功=进程存在；"No such process"=确定不存在；
+  # 其他失败（如无权限）无法判断，按“无法判断”处理，绝不据此抢锁。
+  local kill_error
+  if kill_error="$(kill -0 "$pid" 2>&1)"; then
+    return 0
+  fi
+  case "$kill_error" in
+    *"No such process"*) return 1 ;;
+  esac
+  return 2
+}
+
+# 生成一行可读的锁持有者描述，供日志和巡检使用。
+# 参数: $1 为锁目录。
+# 返回: stdout 输出描述。
+describe_lock_owner() {
+  local lock_dir="$1" pid command started now held alive_rc=0
+  if ! pid="$(lock_owner_field "$lock_dir" pid)"; then
+    printf '持有者未记录'
+    return 0
+  fi
+  command="$(lock_owner_field "$lock_dir" command || true)"
+  started="$(lock_owner_field "$lock_dir" started_epoch || true)"
+  now="$(date -u '+%s')"
+  held=""
+  if [[ "$started" =~ ^[0-9]+$ ]] && (( now >= started )); then
+    held="，已持有 $((now - started)) 秒"
+  fi
+  lock_owner_alive "$lock_dir" || alive_rc=$?
+  case "$alive_rc" in
+    0) printf '持有者 pid=%s 命令=%s 仍在运行%s' "$pid" "${command:-未知}" "$held" ;;
+    1) printf '持有者 pid=%s 命令=%s 已不存在，属遗留锁%s' "$pid" "${command:-未知}" "$held" ;;
+    *) printf '持有者 pid=%s 命令=%s 状态无法判断%s' "$pid" "${command:-未知}" "$held" ;;
+  esac
+}
+
+# 使用 mkdir 原子获取目录锁，防止并发备份或发布。
+# 持有者仍在运行时可有限等待；持有者已不存在时不自动抢锁（无法原子地安全接管），
+# 而是立即失败并给出确认后的手工处理命令。
+# 参数: $1 为锁目录；$2 为最长等待秒数（默认取 PRISM_LOCK_WAIT_SECONDS，缺省 0 即不等待）。
+# 返回: 成功时 0；无法取得锁时终止脚本。
+acquire_directory_lock() {
+  local lock_dir="$1"
+  local wait_seconds="${2:-${PRISM_LOCK_WAIT_SECONDS:-0}}"
+  local poll_seconds="${PRISM_LOCK_POLL_SECONDS:-5}"
+  local waited=0 next_notice=0 step owner_text alive_rc
+  [[ "$wait_seconds" =~ ^[0-9]+$ ]] || fatal "锁等待秒数必须是非负整数: $wait_seconds"
+  [[ "$poll_seconds" =~ ^[1-9][0-9]*$ ]] || fatal "锁轮询秒数必须是正整数: $poll_seconds"
+  # 用“已睡眠秒数”累计而不是 $SECONDS：$SECONDS 是整秒计数，起点不在整秒边界时
+  # 实际等待会比请求值少将近 1 秒。
+  while true; do
+    if mkdir "$lock_dir" 2>/dev/null; then
+      write_lock_owner "$lock_dir"
+      return 0
+    fi
+    owner_text="$(describe_lock_owner "$lock_dir")"
+    alive_rc=0
+    lock_owner_alive "$lock_dir" || alive_rc=$?
+    if (( alive_rc == 1 )); then
+      fatal "检测到并发任务或遗留锁: ${lock_dir}（${owner_text}）。确认没有发布、备份、恢复或维护任务在运行后，执行 rmdir '$lock_dir' 再重试"
+    fi
+    if (( waited >= wait_seconds )); then
+      if (( wait_seconds > 0 )); then
+        fatal "检测到并发任务或遗留锁: ${lock_dir}（${owner_text}），已等待 ${wait_seconds} 秒"
+      fi
+      fatal "检测到并发任务或遗留锁: ${lock_dir}（${owner_text}）"
+    fi
+    if (( waited >= next_notice )); then
+      log_info "等待维护锁 ${lock_dir}（${owner_text}）"
+      next_notice=$((waited + 60))
+    fi
+    step=$((wait_seconds - waited))
+    (( step <= poll_seconds )) || step=$poll_seconds
+    sleep "$step"
+    waited=$((waited + step))
+  done
+}
+
+# 删除当前脚本持有的目录锁；先删持有者元数据再 rmdir，释放期间锁始终有效。
 # 参数: $1 为锁目录。
 # 返回: 始终返回 0。
 release_directory_lock() {
   local lock_dir="$1"
+  rm -f "$(lock_owner_file "$lock_dir")" 2>/dev/null || true
   rmdir "$lock_dir" 2>/dev/null || true
 }
 

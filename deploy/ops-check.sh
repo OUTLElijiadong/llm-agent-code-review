@@ -5,6 +5,8 @@ set -Eeuo pipefail
 cd "$(dirname "$0")"
 # shellcheck source=lib/common.sh
 source "lib/common.sh"
+# shellcheck source=lib/unit_health.sh
+source "lib/unit_health.sh"
 
 # 输出命令帮助。
 # 参数: 无。
@@ -23,6 +25,9 @@ stdout 仅输出 JSON；ok/degraded 退出码为 0，阻断性 error 退出码�
   OPS_MEMORY_CRITICAL_PERCENT 内存临界使用率，默认 98
   BACKUP_MAX_AGE_HOURS       最近备份最大年龄，默认 30
   BACKUP_DIR                 备份目录，优先取进程环境或 dotenv，默认 ../backups
+  OPS_MAINTENANCE_MAX_AGE_HOURS   维护任务最近一次成功的最大年龄，默认 48（定时器每天一次）
+  OPS_RESTORE_VERIFY_MAX_AGE_HOURS 恢复验证最近一次成功的最大年龄，默认 216（定时器每周一次，留 2 天余量）
+  OPS_MAINTENANCE_LOG_DIR    维护任务日志目录，默认 /var/log/prism-maintenance
   OPS_HTTPS_REQUIRED         是否要求 HTTPS，默认 true
   DEPLOY_ENV_FILE            Compose dotenv，默认 .env
 USAGE
@@ -312,6 +317,20 @@ else
   fi
 fi
 
+# 定时维护任务与恢复验证的最近一次执行结果：只会降级（degraded），不会阻断。
+# deploy.sh 发布后会运行本脚本，status=error 会让发布失败，历史上的维护失败不应拦住新发布。
+maintenance_max_age="${OPS_MAINTENANCE_MAX_AGE_HOURS:-48}"
+restore_verify_max_age="${OPS_RESTORE_VERIFY_MAX_AGE_HOURS:-216}"
+if [[ ! "$maintenance_max_age" =~ ^[0-9]+$ || ! "$restore_verify_max_age" =~ ^[0-9]+$ ]]; then
+  emit_preflight_failure "维护/恢复验证巡检阈值格式非法"
+  exit 1
+fi
+collect_unit_health maintenance prism-maintenance.service "$maintenance_max_age" \
+  "${OPS_MAINTENANCE_LOG_DIR:-/var/log/prism-maintenance}" "cleanup-"
+collect_unit_health restore_verify prism-verify-backup.service "$restore_verify_max_age"
+maintenance_json="$(unit_health_json maintenance prism-maintenance.service "$maintenance_max_age")"
+restore_verify_json="$(unit_health_json restore_verify prism-verify-backup.service "$restore_verify_max_age")"
+
 containers_status="ok"
 [[ "$containers_ok" == "true" ]] || containers_status="error"
 backup_status="ok"
@@ -372,6 +391,13 @@ if [[ "$release_status" == "error" ]]; then
   add_action "release_reconcile" "核对发布绑定" "发布账本、镜像或默认 Compose 环境不一致，禁止使用默认环境重建。" true
 fi
 
+if [[ "$maintenance_status" == "degraded" ]]; then
+  add_action "maintenance_review" "排查维护任务" "最近一次定时维护任务未成功或已过期（${maintenance_reason}）。查看 /var/log/prism-maintenance/ 最新日志；缓存与日志可能在持续积累。" true
+fi
+if [[ "$restore_verify_status" == "degraded" ]]; then
+  add_action "restore_verify_review" "核对恢复验证" "最近一次备份恢复验证未成功或已过期（${restore_verify_reason}）。备份文件存在不代表最近一次恢复导入验证成功；请对最新备份手动执行隔离恢复验证。" true
+fi
+
 status="ok"
 exit_code=0
 can_continue=true
@@ -379,12 +405,19 @@ if [[ -n "$blocking_checks_json" ]]; then
   status="error"
   can_continue=false
   exit_code=1
-elif [[ "$disk_status" == "degraded" || "$memory_status" == "degraded" ]]; then
+elif [[ "$disk_status" == "degraded" || "$memory_status" == "degraded" \
+  || "$maintenance_status" == "degraded" || "$restore_verify_status" == "degraded" ]]; then
   status="degraded"
 fi
 summary="全部生产关键检查通过"
 [[ "$status" == "degraded" ]] && summary="关键服务可继续，但存在需要人工处理的降级项"
 [[ "$status" == "error" ]] && summary="存在阻断性生产故障，已停止自动继续"
+# 降级的原因里如果只有定时任务，明说，避免读者以为是磁盘或内存问题。
+if [[ "$status" == "degraded" && "$disk_status" != "degraded" && "$memory_status" != "degraded" ]]; then
+  summary="关键服务可继续，但定时任务存在问题："
+  [[ "$maintenance_status" != "degraded" ]] || summary+=" 每日维护最近一次未成功或已过期；"
+  [[ "$restore_verify_status" != "degraded" ]] || summary+=" 备份恢复验证最近一次未成功或已过期；"
+fi
 
 cat <<JSON
 {
@@ -401,6 +434,8 @@ cat <<JSON
     "disk": {"ok": $disk_ok, "status": "$disk_status", "used_percent": $disk_used, "max_percent": $disk_threshold, "critical_percent": $disk_critical_threshold},
     "memory": {"ok": $memory_ok, "status": "$memory_status", "used_percent": $memory_used, "max_percent": $memory_threshold, "critical_percent": $memory_critical_threshold},
     "backup": {"ok": $backup_ok, "status": "$backup_status", "file": "$(json_escape "$backup_name")", "age_hours": $backup_age_hours, "max_age_hours": $backup_max_age, "gzip_ok": $backup_gzip_ok, "checksum_ok": $backup_checksum_ok},
+    "maintenance": $maintenance_json,
+    "restore_verification": $restore_verify_json,
     "alembic": {"ok": $alembic_ok, "status": "$alembic_status", "current": "$(json_escape "$alembic_current")", "head": "$(json_escape "$alembic_head")"},
     "https": {"ok": $https_ok, "status": "$https_status", "mode": "$https_mode", "http_redirect_code": "$(json_escape "$http_redirect_code")", "health": "$https_health"}
   }

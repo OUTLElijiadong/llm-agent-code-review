@@ -379,6 +379,7 @@ run_release_binding_case() {
   local status_code
   mkdir -p "$workspace/deploy/lib" "$workspace/bin" "$workspace/releases" "$workspace/backups"
   cp lib/common.sh "$workspace/deploy/lib/common.sh"
+  cp lib/unit_health.sh "$workspace/deploy/lib/unit_health.sh"
   [[ ! -f lib/checkpoint_compatibility.py ]] || cp lib/checkpoint_compatibility.py "$workspace/deploy/lib/"
   [[ ! -f lib/project_member_compatibility.py ]] || cp lib/project_member_compatibility.py "$workspace/deploy/lib/"
   cp restore.sh rollback.sh ops-check.sh "$workspace/deploy/"
@@ -1067,8 +1068,13 @@ with open(sys.argv[1], encoding="utf-8") as source:
 assert payload["schema_version"] == 1
 assert payload["status"] == "ok"
 expected = {"release", "containers", "disk", "memory", "backup", "alembic", "https"}
-assert set(payload["checks"]) == expected
-assert all(payload["checks"][name]["ok"] is True for name in expected)
+# 定时任务检查：测试环境没有 systemctl 时必须如实报告 unknown/not_installed，且不能把巡检拉成降级。
+scheduled = {"maintenance", "restore_verification"}
+assert set(payload["checks"]) == expected | scheduled
+assert all(payload["checks"][name]["ok"] is True for name in expected | scheduled)
+for name in scheduled:
+    assert payload["checks"][name]["status"] == "ok"
+    assert payload["checks"][name]["job_state"] in {"unknown", "not_installed", "never_run", "ok", "running"}
 assert payload["checks"]["containers"]["services"]["redis"] in {"healthy", "running"}
 assert payload["checks"]["https"]["http_redirect_code"] == "308"
 assert payload["checks"]["alembic"]["current"] == "047_review_input_snapshot"
@@ -1077,6 +1083,56 @@ assert payload["checks"]["backup"]["file"] == "code_review_20990101_000000.sql.g
 assert payload["can_continue"] is True
 assert payload["checks"]["disk"]["status"] == "ok"
 PY
+
+  # 2026-10-30 的生产盲区：维护任务连续失败、恢复验证失败，巡检却仍是“全部生产关键检查通过”。
+  # 用假 systemctl 复现，期望降级（不阻断：发布后会运行巡检，历史失败不能拦住发布）。
+  cat > "$fake_bin/systemctl" <<'SCRIPT'
+#!/usr/bin/env bash
+[[ "${1:-}" == show ]] || exit 0
+unit="${2:-}"; prop="${3#--property=}"
+case "$unit:$prop" in
+  *:LoadState) echo loaded ;;
+  prism-maintenance.service:ActiveState|prism-verify-backup.service:ActiveState) echo failed ;;
+  prism-maintenance.service:Result|prism-verify-backup.service:Result) echo exit-code ;;
+  prism-maintenance.service:ExecMainStatus|prism-verify-backup.service:ExecMainStatus) echo 1 ;;
+  prism-maintenance.service:ExecMainExitTimestamp) echo "Fri 2026-10-30 04:30:00 CST" ;;
+  prism-verify-backup.service:ExecMainExitTimestamp) echo "Sun 2026-10-25 03:18:29 CST" ;;
+  *:ActiveState) echo inactive ;;
+  *) echo "" ;;
+esac
+SCRIPT
+  chmod +x "$fake_bin/systemctl"
+  PATH="$fake_bin:$PATH" \
+    FAKE_DOCKER_LOG="$workspace/docker-ops.log" \
+    DEPLOY_ENV_FILE="$env_file" \
+    BACKUP_DIR="$backup_dir" \
+    BACKUP_MAX_AGE_HOURS=48 \
+    OPS_MEMORY_MAX_PERCENT=100 \
+    OPS_MEMORY_CRITICAL_PERCENT=100 \
+    OPS_MAINTENANCE_LOG_DIR="$workspace/no-such-maintenance-logs" \
+    OPS_HTTPS_REQUIRED=FALSE \
+    ./ops-check.sh > "$workspace/ops-scheduled-failed.json"
+  python3 - "$workspace/ops-scheduled-failed.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    payload = json.load(source)
+assert payload["status"] == "degraded", payload["status"]
+assert payload["can_continue"] is True
+assert payload["blocking_checks"] == []
+assert payload["summary"] != "全部生产关键检查通过"
+assert "定时任务存在问题" in payload["summary"]
+for name in ("maintenance", "restore_verification"):
+    check = payload["checks"][name]
+    assert check["ok"] is False and check["status"] == "degraded", check
+    assert check["job_state"] == "failed" and check["result"] == "exit-code" and check["exit_status"] == "1"
+assert payload["checks"]["disk"]["status"] == "ok" and payload["checks"]["memory"]["status"] == "ok"
+codes = {item["code"] for item in payload["actions"]}
+assert {"maintenance_review", "restore_verify_review"} <= codes
+assert all(item["requires_human"] is True for item in payload["actions"] if item["code"] in {"maintenance_review", "restore_verify_review"})
+PY
+  rm -f "$fake_bin/systemctl"
 
   PATH="$fake_bin:$PATH" \
     FAKE_DOCKER_LOG="$workspace/docker-ops.log" \
@@ -1158,7 +1214,7 @@ PY
 
   # 隔离采集失败：只替换采集结果这一输入，不替换状态判定/反馈/门禁。
   mkdir -p "$workspace/ops-probe-failure/lib"
-  cp lib/common.sh "$workspace/ops-probe-failure/lib/"
+  cp lib/common.sh lib/unit_health.sh "$workspace/ops-probe-failure/lib/"
   python3 - "$workspace/ops-probe-failure/ops-check.sh" <<'PYTHON'
 from pathlib import Path
 import sys

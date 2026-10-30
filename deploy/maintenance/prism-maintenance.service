@@ -17,5 +17,11 @@ NoNewPrivileges=true
 ProtectSystem=full
 ProtectHome=true
 PrivateTmp=false
+# ProtectHome=true 会让 /root 对进程只读，docker CLI 在 $HOME/.docker 建状态目录会失败
+# （"mkdir /root/.docker: read-only file system"，生产 2026-10-24 起连续失败）。
+# 不放宽 ProtectHome，而是给 Docker CLI 一个由 systemd 管理的可写配置目录。
+RuntimeDirectory=prism-maintenance
+RuntimeDirectoryMode=0700
+Environment=DOCKER_CONFIG=%t/prism-maintenance/docker
 StandardOutput=journal
 StandardError=journal

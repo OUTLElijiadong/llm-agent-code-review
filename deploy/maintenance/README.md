@@ -13,6 +13,25 @@
 正式发布后安装 `prism-maintenance.service` 和 `prism-maintenance.timer` 到 `/etc/systemd/system/`，执行 `systemctl daemon-reload` 和 `systemctl enable --now prism-maintenance.timer`。日志位于 `/var/log/prism-maintenance/`，保留 7 天。过期报告与应用内存缓存由后端内部定时任务独立清理，无需 Codex 或浏览器保持在线。
 
 
+## 执行语义与故障排查
+
+- **阶段互相独立**：过期传输包、Docker 构建缓存、journal、维护日志四个阶段各自运行。某一阶段失败只记录“阶段名、退出码、错误摘要”，继续执行后面的阶段，最后写 `SUMMARY ok/failed/skipped`；只要有失败阶段，脚本以非 0 退出，`systemctl is-failed prism-maintenance.service` 与巡检都能看到。错误原文只在 `/var/log/prism-maintenance/cleanup-*.log` 里，journal 只有 `status=1/FAILURE`，排查时看这个目录最新的日志。
+- **Docker 配置目录**：unit 带 `ProtectHome=true`，`/root` 对进程只读，Docker CLI 在 `$HOME/.docker` 建状态目录会报 `mkdir /root/.docker: read-only file system`（2026-10-24 至 10-30 连续 7 次因此失败，已在生产用 `systemd-run` 复现；去掉 `ProtectHome` 或指定可写 `DOCKER_CONFIG` 都能成功）。unit 现在用 `RuntimeDirectory=prism-maintenance` 加 `Environment=DOCKER_CONFIG=%t/prism-maintenance/docker`，不放宽 `ProtectHome`。手工运行未设置 `DOCKER_CONFIG` 时，脚本用私有临时目录兜底并在退出时清理。根因结论来自复现，不是对所有环境的保证；日志的 `diagnostics:` 行会记录 HOME、DOCKER_CONFIG 和 Docker 客户端版本。
+- **git 属主检查**：生产 `/opt/code-review` 属主是 uid 501，而 `ProtectHome=true` 使 root 的 `~/.gitconfig`（里面的 `safe.directory`）不可见，git 会报 `detected dubious ownership`。旧脚本把这个报错当成“仓库历史不完整”，传输包清理因此一直被跳过。现在所有读取仓库的 git 调用统一走 `repo_git`（带 `-c safe.directory=<仓库>`），读取失败时日志写 `cannot read repository state` 和原因，与真正的浅克隆（`shallow clone`）区分。清理传输包的其余保守条件不变：`fuser` 确认未占用、包可读取、所有引用提交都可从当前 HEAD 到达。
+- **共享维护锁**：与发布、备份、恢复、回滚共用 `deploy/.releases/.maintenance.lock`，持有者的 pid、启动时间、命令名记录在旁边的 `.maintenance.lock.owner`。持有者仍在运行：正常跳过。持有者已不存在，或无法确认持有者且锁已存在超过 6 小时（`PRISM_LOCK_STALE_SECONDS`）：任务失败并在日志里给出 `rmdir` 命令，**不自动删除**，请先确认没有发布、备份、恢复或回滚在运行。
+- **备份恢复验证拿锁**：`verify-backup.sh` 等脚本默认拿不到锁就立即失败；设置 `PRISM_LOCK_WAIT_SECONDS`（秒）可在持有者仍存活时有限等待。持有者已不存在时不会等待，也不会抢锁。
+
+- **巡检覆盖定时任务**：`ops-check.sh` 的 `checks` 增加 `maintenance`（`prism-maintenance.service`）与 `restore_verification`（`prism-verify-backup.service`），读取 systemd 记录的最近一次执行结果、退出码、时间和失败原因（维护任务取 `/var/log/prism-maintenance/` 最新日志尾部，恢复验证取 journal 里最近的 ERROR 行）。`job_state` 取值：`ok`、`failed`、`running`、`never_run`、`not_installed`、`unknown`。最近一次失败，或最近一次成功已超过期望间隔（维护 48 小时、恢复验证 216 小时，可用 `OPS_MAINTENANCE_MAX_AGE_HOURS`、`OPS_RESTORE_VERIFY_MAX_AGE_HOURS` 调整）都会让巡检 `status` 变为 `degraded` 并给出需人工处理的动作；**不会**变成 `error`，因为发布后会运行巡检，历史上的定时任务失败不能让新发布失败。`never_run`（systemd 重启后丢失历史）如实报告，不降级。
+
+升级后需要在服务器重新安装 unit 并重载：
+
+```bash
+sudo install -m 0644 deploy/maintenance/prism-maintenance.service /etc/systemd/system/prism-maintenance.service
+sudo systemctl daemon-reload
+sudo systemctl reset-failed prism-maintenance.service
+sudo systemctl start prism-maintenance.service   # 手动跑一次，随后查看最新的 /var/log/prism-maintenance/cleanup-*.log
+```
+
 ## 应用内部维护
 
 后端生命周期自动启动两个维护任务，不依赖桌面客户端、浏览器或外部调度：
