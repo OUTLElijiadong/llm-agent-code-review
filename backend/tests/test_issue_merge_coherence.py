@@ -357,12 +357,13 @@ def test_two_non_security_agents_reporting_the_same_naming_problem_still_merge()
 
 def test_persisted_issues_from_a_full_review_never_mix_topics(tmp_path, monkeypatch):
     from datetime import datetime, timezone
-    from unittest.mock import Mock
     from types import SimpleNamespace
+    from unittest.mock import Mock
 
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
+    from app.ai.multi_agent import get_agent_profiles
     from app.core.database import Base
     from app.models.code_file import CodeFile
     from app.models.code_version import CodeVersion
@@ -370,7 +371,6 @@ def test_persisted_issues_from_a_full_review_never_mix_topics(tmp_path, monkeypa
     from app.models.review_issue import ReviewIssue
     from app.models.review_task import ReviewTask
     from app.models.user import User
-    from app.ai.multi_agent import get_agent_profiles
     from app.services import review_service
 
     engine = create_engine(f"sqlite:///{tmp_path / 'coherence.sqlite'}")
@@ -429,6 +429,9 @@ def test_persisted_issues_from_a_full_review_never_mix_topics(tmp_path, monkeypa
         )
 
     with sessions() as observer:
+        persisted_task = observer.get(ReviewTask, task.id)
+        # 拆分后问题条数与严重度统计按两条独立问题计，不是旧逻辑的 1 条。
+        assert (persisted_task.total_issues, persisted_task.high_issues, persisted_task.low_issues) == (2, 1, 1)
         rows = observer.query(ReviewIssue).filter_by(task_id=task.id).all()
         assert len(rows) == 2, [(row.issue_type, row.title) for row in rows]
         for row in rows:

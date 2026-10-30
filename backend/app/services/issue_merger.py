@@ -9,38 +9,15 @@ import re
 from dataclasses import dataclass, replace
 from typing import Iterable, List, Optional
 
+from app.ai import finding_coherence
 from app.ai.cvss import normalize_cvss
+from app.ai.finding_coherence import ClaimView, claims_are_coherent
 from app.ai.result_parser import Issue, normalize_severity
 from app.ai.static_analyzer import Finding
 
 _LINE_PROXIMITY = 2
 _SEVERITY_RANK = {"低": 1, "中": 2, "高": 3, "严重": 4}
 _TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|[\u4e00-\u9fff]")
-_SECURITY_ISSUE_TYPES = {
-    "安全", "安全漏洞", "安全问题", "security", "security_issue",
-    "security_vulnerability", "vulnerability", "漏洞",
-}
-_SECURITY_LANGUAGE_RE = re.compile(
-    r"漏洞|注入|越权|未授权|未认证|未验证|鉴权绕过|认证绕过|身份验证绕过|"
-    r"访问控制|跨站|权限提升|权限逃逸|敏感信息泄露|信息泄露|数据泄露|"
-    r"动态\s*SQL|(?:SQL|查询).{0,30}(?:拼接|拼入|插入|插值|字符串拼装)|"
-    r"(?:用户|请求|外部|不可信).{0,30}(?:拼接|拼入|插入|插值|未经转义|未转义).{0,30}(?:SQL|查询)|"
-    r"对象级(?:授权|权限|访问控制)|跨租户|跨账号|租户隔离|账号隔离|"
-    r"任意文件|路径穿越|目录穿越|反序列化|远程代码执行|命令执行|代码执行|"
-    r"硬编码凭据|凭据泄露|密钥泄露|密码泄露|"
-    r"\b(?:SQLi|XSS|CSRF|SSRF|RCE|XXE)\b|"
-    r"\b(?:IDOR|BOLA|injection|vulnerabilit(?:y|ies)|exploit|unauthori[sz]ed|unauthenticated|"
-    r"privilege escalation|privilege bypass|auth(?:entication|orization)? bypass|"
-    r"access control|object[- ]level (?:authorization|access control)|"
-    r"\bdynamic\s+sql\b|"
-    r"(?:user[- ]controlled|user[- ]input|untrusted|request[- ]provided).{0,80}(?:sql|query)|"
-    r"(?:sql|query).{0,80}(?:interpolat\w*|concatenat\w*|without escaping|unescaped)|"
-    r"broken object[- ]level authorization|cross[- ]tenant|tenant isolation|"
-    r"path traversal|directory traversal|remote code execution|"
-    r"command execution|command injection|code execution|deseriali[sz]ation|"
-    r"credential exposure|credential leak|secret leak|information disclosure|data exposure)\b",
-    re.IGNORECASE,
-)
 _EVIDENCE_CONFIDENCE_CAP = {
     "unsupported": 0.45,
     "inferred": 0.60,
@@ -60,9 +37,14 @@ def merge_findings_and_issues(
 
     Matching requires a common vulnerability identity plus a defensible code
     anchor. Merely sharing a CWE on adjacent lines is not enough, which keeps
-    separate sinks separate. Every contributing source is retained in
-    ``source_details`` while the legacy ``source`` field remains a compact
-    static/regex/llm/hybrid value.
+    separate sinks separate. Sharing a code location is not enough either: two
+    findings that quote the same line must also describe the same problem
+    (``finding_coherence.claims_are_coherent``), otherwise a documentation or
+    naming remark would be absorbed by the security finding on that line.
+    Every contributing source is retained in ``source_details`` while the
+    legacy ``source`` field remains a compact static/regex/llm/hybrid value.
+    The merged title, description, suggestion, category and CWE all come from
+    one primary claim; incoherent members are kept as separate issues.
     """
     candidates = [finding_to_issue(item) for item in findings]
     candidates.extend(_copy_issue(item) for item in issues)
@@ -100,6 +82,9 @@ def merge_findings_and_issues(
         else:
             clusters.append([candidate])
 
+    # 合并前自检：成簇环节已按两两一致校验，这里再按主发现复核一遍，主题不一致的成员拆成
+    # 独立问题，避免标题、描述、类别、CWE、来源明细取自不同主题的成员。
+    clusters = [part for cluster in clusters for part in _split_incoherent_cluster(cluster)]
     merged = [_merge_cluster(cluster, file_id, anchor_index) for cluster in clusters]
     merged.sort(key=lambda item: (item.line_number or 0, item.cwe or "", item.title or ""))
     return merged
@@ -344,7 +329,7 @@ def _has_llm_provenance(issue: Issue) -> bool:
 def _is_security_claim(issue: Issue) -> bool:
     issue_type = str(issue.issue_type or "").strip().lower()
     if (
-        issue_type in _SECURITY_ISSUE_TYPES
+        issue_type in finding_coherence.SECURITY_ISSUE_TYPES
         or bool(str(issue.cwe or "").strip())
         or bool(str(issue.owasp or "").strip())
     ):
@@ -360,7 +345,7 @@ def _is_security_claim(issue: Issue) -> bool:
             issue.exploit_scenario,
         )
     )
-    return bool(_SECURITY_LANGUAGE_RE.search(claim_text))
+    return bool(finding_coherence.SECURITY_LANGUAGE_RE.search(claim_text))
 
 
 def _safe_positive_line(value: object) -> Optional[int]:
@@ -874,7 +859,37 @@ def _cluster_match_score(cluster: List[Issue], candidate: Issue) -> float:
     return min(scores)
 
 
+def _claim_view(issue: Issue) -> ClaimView:
+    return ClaimView(
+        issue_type=issue.issue_type or "",
+        cwe=issue.cwe or "",
+        owasp=issue.owasp or "",
+        title=issue.title or "",
+        description=issue.description or "",
+        suggestion=issue.suggestion or "",
+        exploit_scenario=issue.exploit_scenario or "",
+    )
+
+
+def _issues_are_coherent(left: Issue, right: Issue) -> bool:
+    """两条发现是否在讲同一个问题。同一调用点或同一段引文只说明位置相同，不说明主题相同。"""
+    return claims_are_coherent(_claim_view(left), _claim_view(right)).ok
+
+
 def _match_score(left: Issue, right: Issue) -> float:
+    """位置、证据规则判定为同一问题后，再校验两条发现的主题是否一致。
+
+    位置相同（同一锚点、同一行、同一段引文）只说明它们指向同一处代码，不说明在讲同一件事：
+    文档、命名类发现常引用 sink 所在行，标题与描述却讲别的事。主题不一致的发现保持独立，
+    各自保留自己的来源。一致性校验放在位置规则之后，只对原本会合并的配对执行。
+    """
+    score = _location_match_score(left, right)
+    if score >= 1.0 and not _issues_are_coherent(left, right):
+        return -1.0
+    return score
+
+
+def _location_match_score(left: Issue, right: Issue) -> float:
     left_cwe = _normalize_cwe(left.cwe)
     right_cwe = _normalize_cwe(right.cwe)
     if left_cwe and right_cwe and left_cwe != right_cwe:
@@ -931,9 +946,60 @@ def _match_score(left: Issue, right: Issue) -> float:
     return -1.0
 
 
+def _split_incoherent_cluster(cluster: List[Issue]) -> List[List[Issue]]:
+    """合并后的自检：簇内每个成员都必须与主发现语义一致，不一致的拆成独立簇。
+
+    成簇环节已经用 _match_score 校验过两两一致，这里是第二道防线：即使成簇逻辑日后被改动或被
+    绕过，写入记录的标题、描述、类别、CWE 也不会取自不同主题的成员。主发现用
+    _canonical_claim_key 选出（证据等级、置信度、证据长度、内容丰富度），选择不依赖输入顺序。
+    被拆出的成员递归检查，所以三个互不相干的成员会得到三个独立簇。来源可追溯：被拆出的成员
+    带着自己的 source_details 成为独立记录，不会丢失，也不会写进主发现的来源明细。
+    """
+    if len(cluster) <= 1:
+        return [cluster]
+    canonical = max(cluster, key=_canonical_claim_key)
+    kept = [item for item in cluster if item is canonical or _issues_are_coherent(canonical, item)]
+    rest = [item for item in cluster if not any(item is member for member in kept)]
+    if not rest:
+        return [cluster]
+    return [kept, *_split_incoherent_cluster(rest)]
+
+
+# 主发现缺失时才允许从簇内一致成员补的叙述字段。类别（issue_type）不在其中，始终取主发现。
+# 标题、描述只在主发现为空（例如模型只给了证据）时才补，主发现已有值一律保留，不再取各成员
+# 最长的一条。CWE 与 OWASP 同属“问题身份”，主发现没有时才从一致成员补，因为模型常漏填 CWE，
+# 而静态规则命中的同一问题带有明确 CWE。
+_NARRATIVE_FILL_FIELDS = (
+    "title", "description", "suggestion", "fixed_code", "owasp", "cwe",
+    "exploit_scenario", "remediation",
+)
+
+
+def _narrative_source(canonical: Issue, cluster: List[Issue]) -> Issue:
+    """返回合并记录的叙述来源：主发现本身，仅补它缺的辅助字段。
+
+    补充只取与主发现一致的成员，且按 _canonical_claim_key 从高到低选第一个有值的，选择与输入
+    顺序无关。主发现已有值的字段一律保留，不会被更长的文本覆盖。
+    """
+    donors = sorted(
+        (item for item in cluster if item is not canonical and _issues_are_coherent(canonical, item)),
+        key=_canonical_claim_key,
+        reverse=True,
+    )
+    updates: dict[str, str] = {}
+    for name in _NARRATIVE_FILL_FIELDS:
+        if getattr(canonical, name, None):
+            continue
+        value = next((getattr(item, name) for item in donors if getattr(item, name, None)), None)
+        if value:
+            updates[name] = value
+    return replace(canonical, **updates) if updates else canonical
+
+
 def _merge_cluster(cluster: List[Issue], file_id: int, anchor_index: "_AnchorIndex") -> Issue:
     # 严重度和置信度必须来自同一个真实声明，不能分别取最大值后拼成
-    # 无任何引擎/智能体实际主张过的组合。
+    # 无任何引擎/智能体实际主张过的组合。标题、描述、建议、类别、CWE 同理：
+    # 都取自这条主发现，不再各取簇内最长的一条而拼成“标题是 A、类别是 B”。
     canonical = max(cluster, key=_canonical_claim_key)
     static_candidates = [item for item in cluster if _source_family(item.source) in {"static", "regex"}]
     line_source = max(static_candidates, key=_content_quality_key) if static_candidates else canonical
@@ -966,19 +1032,23 @@ def _merge_cluster(cluster: List[Issue], file_id: int, anchor_index: "_AnchorInd
         source_anchor=source_anchor,
     )
 
+    # 叙述性字段整组取自同一条主发现：主发现缺的字段才从簇内其余成员补，补的时候也只取
+    # 与主发现一致（_issues_are_coherent）的成员。标题、描述、建议、攻击场景属于同一份陈述，
+    # 不能分别取各成员最长的一条。
+    narrative = _narrative_source(canonical, cluster)
     return Issue(
         line_number=line_number,
         end_line=end_line,
         issue_type=canonical.issue_type,
         severity=severity,
-        title=_longest_text(item.title for item in cluster),
-        description=_longest_text(item.description for item in cluster) or "",
-        suggestion=_longest_text(item.suggestion for item in cluster),
-        fixed_code=_longest_text(item.fixed_code for item in cluster),
-        owasp=_longest_text(item.owasp for item in cluster) or "",
-        cwe=_normalize_cwe(canonical.cwe) or _normalize_cwe(_longest_text(item.cwe for item in cluster)) or "",
+        title=narrative.title,
+        description=narrative.description or "",
+        suggestion=narrative.suggestion,
+        fixed_code=narrative.fixed_code,
+        owasp=narrative.owasp or "",
+        cwe=_normalize_cwe(narrative.cwe) or "",
         evidence=evidence,
-        exploit_scenario=_longest_text(item.exploit_scenario for item in cluster) or "",
+        exploit_scenario=narrative.exploit_scenario or "",
         references=references,
         confidence=canonical.confidence,
         cvss_score=cvss_score,
@@ -986,7 +1056,7 @@ def _merge_cluster(cluster: List[Issue], file_id: int, anchor_index: "_AnchorInd
         cvss_version=cvss_version,
         cvss_source=cvss_source,
         compliance_mapping=compliance,
-        remediation=_longest_text(item.remediation for item in cluster) or "",
+        remediation=narrative.remediation or "",
         source=source,
         static_rule_hits=sum(
             max(0, int(item.static_rule_hits or 0))
