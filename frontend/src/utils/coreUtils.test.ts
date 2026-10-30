@@ -94,17 +94,20 @@ it('resolves post-login redirects to a safe role home', function testPostLoginRe
 /** 验证日期、相对时间与空值格式化。 */
 it('formats dates and relative times deterministically', function testDateFormatting(): void {
   vi.useFakeTimers()
-  const now = new Date(2026, 0, 2, 4, 4, 5)
-  const oneHourAgo = new Date(2026, 0, 2, 3, 4, 5)
+  // 服务端时间一律按 UTC 解释、按北京时间(UTC+8)展示，与进程所在时区无关。
+  const now = new Date(Date.UTC(2026, 0, 2, 4, 4, 5))
+  const oneHourAgo = new Date(Date.UTC(2026, 0, 2, 3, 4, 5))
   vi.setSystemTime(now)
 
   expect(formatDateTime(null)).toBe('-')
-  expect(formatDateTime(new Date(2026, 0, 2, 3, 4, 5))).toBe('2026-01-02 03:04:05')
-  expect(formatDateTime(new Date(2026, 0, 2, 3, 4, 5), 'MM/DD HH:mm')).toBe('01/02 03:04')
+  expect(formatDateTime(new Date(Date.UTC(2026, 0, 2, 3, 4, 5)))).toBe('2026-01-02 11:04:05')
+  expect(formatDateTime(new Date(Date.UTC(2026, 0, 2, 3, 4, 5)), 'MM/DD HH:mm')).toBe('01/02 11:04')
+  expect(formatDateTime('2026-01-02T03:04:05')).toBe('2026-01-02 11:04:05')
   expect(formatDate(undefined)).toBe('-')
-  expect(formatDate(new Date(2026, 0, 2))).toBe('2026-01-02')
+  expect(formatDate(new Date(Date.UTC(2026, 0, 2, 20, 0, 0)))).toBe('2026-01-03')
   expect(formatRelativeTime(null)).toBe('-')
   expect(formatRelativeTime(oneHourAgo)).toContain('小时前')
+  expect(formatRelativeTime('2026-01-02T03:04:05')).toBe('1 小时前')
 })
 
 /** 验证文件大小与时长的正常、边界和空值分支。 */

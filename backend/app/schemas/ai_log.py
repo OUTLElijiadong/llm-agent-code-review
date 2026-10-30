@@ -1,18 +1,16 @@
 """
 AI日志模块Pydantic Schema
 """
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel, field_serializer
 
+from app.core.server_time import iso_utc
+
 
 def _serialize_dt(dt: Optional[datetime]) -> Optional[str]:
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.isoformat()
+    return iso_utc(dt)
 
 
 class AiLogOut(BaseModel):

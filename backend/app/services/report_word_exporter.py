@@ -27,6 +27,7 @@ from docx.shared import Inches, Pt, RGBColor
 
 from app.ai.cvss import CVSS_STANDARD_URL
 from app.ai.scoring import score_risk_level
+from app.core.server_time import format_beijing
 from app.services.report_exporter import (
     conflict_status_label,
     cvss_source_label,
@@ -338,7 +339,7 @@ def _build_header(doc: Any, task_info: Dict[str, Any], score: int) -> None:
         ("所属项目", str(task_info.get("project_name") or "-")),
         ("审查类型", str(task_info.get("review_type") or "-")),
         ("审查模型", str(task_info.get("model_name") or "-")),
-        ("生成时间", str(task_info.get("create_time") or "-")),
+        ("生成时间", format_beijing(task_info.get("create_time"))),
     ]
     for label, value in meta_fields:
         para = doc.add_paragraph()
@@ -634,8 +635,8 @@ def _build_issue_paragraph(doc: Any, issue: Dict[str, Any], index: int, severity
         "状态: {0}；处理人: {1}；处理时间: {2}；更新时间: {3}".format(
             finding_status_label(issue.get("status")),
             issue.get("handled_by") or "-",
-            issue.get("handled_at") or "-",
-            issue.get("update_time") or "-",
+            format_beijing(issue.get("handled_at")),
+            format_beijing(issue.get("update_time")),
         ),
         size=9,
     )

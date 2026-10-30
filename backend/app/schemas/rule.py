@@ -6,6 +6,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.core.server_time import iso_utc
 from app.utils.input_validation import normalize_plain_text, normalize_rule_code
 
 
@@ -77,5 +78,5 @@ class RuleOut(BaseModel):
         if v is None:
             return None
         if isinstance(v, datetime):
-            return v.isoformat()
+            return iso_utc(v)
         return str(v)

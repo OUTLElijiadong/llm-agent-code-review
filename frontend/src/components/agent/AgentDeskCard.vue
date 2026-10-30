@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import dayjs from 'dayjs'
+import { formatServerTimeRelative } from '@/utils/serverTime'
 import AgentAvatar from './AgentAvatar.vue'
 import type { AgentRuntimeOut, AgentStatus } from '@/types/agent'
 import { useTilt } from '@/utils/tilt'
@@ -27,8 +27,7 @@ const statusLabel: Record<AgentStatus, string> = {
 
 const lastCalled = computed(() => {
   if (!props.agent.last_called_at) return '尚未调用'
-  return dayjs(props.agent.last_called_at).fromNow?.()
-    ?? dayjs(props.agent.last_called_at).format('MM-DD HH:mm')
+  return formatServerTimeRelative(props.agent.last_called_at)
 })
 
 const successRate = computed(() => {

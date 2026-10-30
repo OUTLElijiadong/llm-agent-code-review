@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.dependencies import require_admin, require_super_admin
 from app.core.exceptions import ForbiddenError, NotFoundError
+from app.core.server_time import iso_utc
 from app.models.agent_governance import (
     AgentAlert,
     AgentArtifactVersion,
@@ -662,7 +663,7 @@ def list_jobs(db: Session = Depends(get_db), actor: User = Depends(require_admin
             out.last_run_error = str(error)[:300] if error else None
             finished = run.finished_at or run.started_at
             if finished is not None:
-                out.last_run_finished_at = finished.isoformat()
+                out.last_run_finished_at = iso_utc(finished)
         data.append(out)
     return Resp(data=data)
 
@@ -750,8 +751,8 @@ def list_job_runs(db: Session = Depends(get_db), actor: User = Depends(require_a
                 "id": row.id,
                 "job_id": row.job_id,
                 "status": status,
-                "started_at": row.started_at.isoformat() if row.started_at else None,
-                "finished_at": row.finished_at.isoformat() if row.finished_at else None,
+                "started_at": iso_utc(row.started_at),
+                "finished_at": iso_utc(row.finished_at),
                 "result_json": row.result_json,
                 "error": error,
             }
@@ -1050,7 +1051,7 @@ def list_rewards(db: Session = Depends(get_db), _: User = Depends(require_admin)
                 "event_type": row.event_type,
                 "score": row.score,
                 "reason": row.reason,
-                "create_time": row.create_time.isoformat() if row.create_time else None,
+                "create_time": iso_utc(row.create_time),
             }
             for row in rows
         ]
@@ -1088,7 +1089,7 @@ def create_reward(
             "event_type": row.event_type,
             "score": row.score,
             "reason": row.reason,
-            "create_time": row.create_time.isoformat() if row.create_time else None,
+            "create_time": iso_utc(row.create_time),
         }
     )
 
@@ -1110,5 +1111,5 @@ def _version_to_dict(row: AgentArtifactVersion) -> dict:
         "status": row.status,
         "content": row.content,
         "snapshot": row.snapshot,
-        "create_time": row.create_time.isoformat() if row.create_time else None,
+        "create_time": iso_utc(row.create_time),
     }

@@ -46,6 +46,7 @@ import {
 } from '@/utils/sandboxPresentation'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import { formatServerTimeWithTemplate } from '@/utils/serverTime'
 
 const POLL_INTERVAL_MS = 2500
 const userStore = useUserStore()
@@ -293,10 +294,7 @@ function purposeLabel(item: SandboxEnvironment): string {
 
 function formatTime(value?: string | null): string {
   if (!value) return '-'
-  const date = new Date(value.endsWith('Z') || /[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`)
-  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', {
-    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-  }).format(date)
+  return formatServerTimeWithTemplate(value, 'MM-DD HH:mm:ss')
 }
 
 function formatScore(value: number): string {

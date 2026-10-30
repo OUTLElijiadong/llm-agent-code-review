@@ -16,6 +16,7 @@ from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 from app.ai.cvss import CVSS_VERSION, normalize_cvss
+from app.core.server_time import format_beijing
 from app.services.report_exporter import _sanitize_report_html
 from app.services.report_markdown import markdown_to_html
 from app.services.report_pdf_exporter import (
@@ -33,6 +34,13 @@ def _value(value: Any, fallback: str = "未记录") -> str:
     if isinstance(value, (dict, list)):
         return json.dumps(clean_report_payload(value), ensure_ascii=False, indent=2, default=str)
     return clean_report_text(value)
+
+
+def _time(value: Any, fallback: str = "未记录") -> str:
+    """报告正文里的时刻：北京时间并标注（UTC+8）；库内 naive 与带 Z/偏移的快照文本都按 UTC 解释。"""
+    if value is None or value == "":
+        return fallback
+    return clean_report_text(format_beijing(value))
 
 
 def _status_label(value: Any) -> str:
@@ -292,7 +300,7 @@ def build_pentest_report_markdown(
         f"执行状态：{_status_label(execution_status)}",
         f"报告状态：{_status_label(domain_data.get('status'))}",
         f"授权目标：{_value(authorized_target)}",
-        f"授权窗口：{_value(domain_data.get('window_start'))} 至 {_value(domain_data.get('window_end'))}",
+        f"授权窗口：{_time(domain_data.get('window_start'))} 至 {_time(domain_data.get('window_end'))}",
         "",
         "## 覆盖范围",
         *_coverage_lines(coverage),
@@ -436,7 +444,7 @@ def build_remote_pentest_report_markdown(content: dict[str, Any]) -> str:
         f"目标：{_value(scope.get('target_url'))}",
         f"状态：{_status_label(content.get('status'))}",
         f"规则版本：{_value(scope.get('rules_version'))}",
-        f"授权窗口：{_value(scope.get('window_start'))} 至 {_value(scope.get('window_end'))}",
+        f"授权窗口：{_time(scope.get('window_start'))} 至 {_time(scope.get('window_end'))}",
         f"授权依据：{_value(scope.get('authorization_basis'))}",
         f"范围补充：{_value(scope.get('scope_notes'))}",
         "",

@@ -361,7 +361,7 @@ import { scoreKindOf } from '@/constants/scoreKind'
 import { useUserStore } from '@/stores/user'
 
 import { Download, Lock, MagicStick, Plus } from '@element-plus/icons-vue'
-import dayjs from 'dayjs'
+import { formatServerTime } from '@/utils/serverTime'
 import {
   getAuditSourceArchiveResult,
   getProjectDetail,
@@ -498,7 +498,7 @@ const statusLabels: Record<string, string> = {
 }
 
 function formatDate(dateStr: string): string {
-  return dayjs(dateStr).format('YYYY-MM-DD HH:mm')
+  return formatServerTime(dateStr, 'minute')
 }
 
 function getStatusType(status: string): 'success' | 'warning' | 'info' | 'danger' {

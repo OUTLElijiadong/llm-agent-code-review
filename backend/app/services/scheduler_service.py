@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
+from app.core.server_time import iso_utc
 from app.models.agent_governance import AgentJob, AgentJobRun
 from app.models.user import User
 from app.services import agent_knowledge_service, agent_memory_service
@@ -718,7 +719,7 @@ def _collect_application_health(db: Session, current_job_id: int) -> Dict[str, A
         {
             "run_id": int(run.id),
             "job_id": int(run.job_id),
-            "started_at": run.started_at.isoformat() if run.started_at else None,
+            "started_at": iso_utc(run.started_at),
         }
         for run in stuck_run_rows
     ]
@@ -795,7 +796,7 @@ def _collect_application_health(db: Session, current_job_id: int) -> Dict[str, A
             "latest_agent": latest_model.agent_label if latest_model else None,
             "latest_model": latest_model.model_name if latest_model else None,
             "latest_status": latest_model.status if latest_model else None,
-            "latest_at": latest_model.create_time.isoformat() if latest_model else None,
+            "latest_at": iso_utc(latest_model.create_time) if latest_model else None,
         },
         "task_queue": {
             "stuck_runs": stuck_runs,

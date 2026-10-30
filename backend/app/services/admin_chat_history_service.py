@@ -9,6 +9,7 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
+from app.core.server_time import iso_utc
 from app.models.admin_chat import AdminChatMessage, AdminChatSession
 from app.models.user import User
 
@@ -145,7 +146,7 @@ def to_dict(row: AdminChatMessage) -> dict[str, Any]:
     return {
         "id": row.id,
         "role": row.role,
-        "time": row.create_time.isoformat() if row.create_time else "",
+        "time": iso_utc(row.create_time) or "",
         "payload": _payload(row),
         "agent_code": row.agent_code,
         "trace_id": row.trace_id,

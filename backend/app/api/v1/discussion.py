@@ -25,6 +25,7 @@ from app.api.v1.ws_discussion import (
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.core.exceptions import NotFoundError, ValidationError
+from app.core.server_time import iso_utc
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.roundtable import RoundtableSession, RoundtableTurn
@@ -62,8 +63,8 @@ def _session_data(db: Session, row: RoundtableSession) -> dict:
         "progress": progress,
         "turn_count": row.last_turn_seq,
         "continued_from_session_id": row.continued_from_session_id,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        "created_at": iso_utc(row.created_at),
+        "updated_at": iso_utc(row.updated_at),
         "followup_until": (
             utc_timestamp(row.closed_at) + 300
             if row.status == "concluded" and row.closed_at and row.report_task_id

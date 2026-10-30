@@ -23,6 +23,7 @@ import {
   type AgentMeshConversationStatus,
 } from '@/api/agentMesh'
 import { isAgentResponseSessionOccupied } from '@/utils/agentResponseSession'
+import { serverTimeMs } from '@/utils/serverTime'
 
 interface Props {
   /** localStorage 命名空间:user / admin 各自独立 */
@@ -457,7 +458,7 @@ async function refreshArchivedSessions(): Promise<void> {
       .map((item) => ({
         id: item.session_id,
         title: item.title.trim() || '未命名对话',
-        createdAt: Number.isFinite(Date.parse(item.last_seen_at)) ? Date.parse(item.last_seen_at) : 0,
+        createdAt: Number.isFinite(serverTimeMs(item.last_seen_at)) ? serverTimeMs(item.last_seen_at) : 0,
       }))
   } catch {
     // 归档目录读取失败时保留上次结果，用户可重新打开后重试。

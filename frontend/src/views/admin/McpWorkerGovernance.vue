@@ -48,6 +48,7 @@ import type {
 } from '@/types/mcpGovernance'
 import type { GovernanceAgent } from '@/types/adminGovernance'
 import type { SandboxLanguage, SandboxTestMode } from '@/types/sandbox'
+import { formatServerTime } from '@/utils/serverTime'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 
@@ -113,10 +114,7 @@ function statusType(status: string): 'success' | 'warning' | 'danger' | 'info' {
 
 function formatTime(value?: string | null): string {
   if (!value) return '-'
-  const date = new Date(value.endsWith('Z') || /[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`)
-  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', {
-    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
-  }).format(date)
+  return formatServerTime(value, 'minute')
 }
 
 async function loadAll(): Promise<void> {

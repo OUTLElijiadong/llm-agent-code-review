@@ -21,6 +21,7 @@ from app.agents.event_bus import emit_event
 from app.agents.events import AgentEventType
 from app.core.exceptions import ConflictError
 from app.core.permission_codes import PermissionCode
+from app.core.server_time import iso_utc
 from app.models.agent_governance import ApprovalItem
 from app.models.custom_agent import CustomAgent, CustomAgentRelease, CustomAgentVersion, CustomSkill, CustomSkillVersion
 from app.models.user import User
@@ -330,7 +331,7 @@ def _release_target_snapshot(db: Session, row: ApprovalItem) -> str:
     # 快照绑定管理员实际看到的完整发布包：Agent 编写内容、
     # binding.config、Skill 定义/能力/测试证据以及前一发布版本。
     payload = {
-        "approval_update_time": row.update_time.isoformat() if row.update_time else None,
+        "approval_update_time": iso_utc(row.update_time),
         "package": _release_approval_detail(db, row),
     }
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
@@ -489,7 +490,7 @@ def _serialize_user_target(target: User) -> dict[str, Any]:
         "role": target.role,
         "status": target.status,
         "token_version": int(target.token_version or 0),
-        "update_time": target.update_time.isoformat() if target.update_time else None,
+        "update_time": iso_utc(target.update_time),
     }
 
 

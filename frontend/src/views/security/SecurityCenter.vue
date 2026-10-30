@@ -22,6 +22,7 @@ import SecurityScanModal from '@/components/security/SecurityScanModal.vue'
 import { OWASP_TOP10, SECURITY_CATALOG_METADATA, type OwaspDoc } from './owasp-knowledge'
 import { CN_VULN_PORTALS, CN_SECURITY_STANDARDS } from './cnnvd-knowledge'
 import { useUserStore } from '@/stores/user'
+import { formatServerTime } from '@/utils/serverTime'
 import { actionableError, mustDiscardReadSnapshot } from '@/composables/withFeedback'
 
 withDefaults(defineProps<{ embedded?: boolean }>(), {
@@ -440,7 +441,7 @@ useAgentPageRefresh({ pages: ['/security', '/reviews'], refresh: () => Promise.a
           <template v-if="source">
             <b>{{ source.name }}：{{ vulnerabilityStatusLabel(source) }}</b>
             <span>{{ source.status_message || '后端未提供来源状态说明。' }}</span>
-            <span v-if="source.checked_at">核验：{{ source.checked_at }}</span>
+            <span v-if="source.checked_at">核验：{{ formatServerTime(source.checked_at, 'datetime-label') }}</span>
             <span v-if="source.http_status !== null">HTTP {{ source.http_status }}</span>
             <span v-if="source.upstream_code">上游码 {{ source.upstream_code }}</span>
             <span v-if="source.cached">当前为缓存/退避观察，非本次新网络核验</span>
@@ -500,7 +501,7 @@ useAgentPageRefresh({ pages: ['/security', '/reviews'], refresh: () => Promise.a
             <span v-if="record.source_date">来源日期：{{ record.source_date }}</span>
             <span v-if="record.cve_ids.length">CVE：{{ record.cve_ids.join('、') }}</span>
             <span v-if="record.cwe_ids.length">CWE：{{ record.cwe_ids.join('、') }}</span>
-            <span>查询时间：{{ record.checked_at }}</span>
+            <span>查询时间：{{ formatServerTime(record.checked_at, 'datetime-label') }}</span>
             <span>匹配类型：{{ record.match_type }}</span>
             <a :href="record.evidence_url" target="_blank" rel="noopener noreferrer">查看响应来源</a>
           </p>

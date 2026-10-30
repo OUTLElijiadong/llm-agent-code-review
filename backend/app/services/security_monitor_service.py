@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 from app.agents.event_bus import emit_event
 from app.agents.events import AgentEventType, new_trace_id
 from app.core.config import settings
+from app.core.server_time import iso_utc
 from app.models.agent_governance import AgentAlert
 from app.models.user import User
 from app.services import observability_service, ops_service, security_center_service, security_response_service
@@ -1021,7 +1022,7 @@ def query_security_status(
                 "source": alert.source,
                 "title": alert.title,
                 "status": alert.status,
-                "create_time": alert.create_time.isoformat() if alert.create_time else None,
+                "create_time": iso_utc(alert.create_time),
             }
             for alert in open_alerts
         ],

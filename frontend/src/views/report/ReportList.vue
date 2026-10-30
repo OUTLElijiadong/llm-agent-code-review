@@ -88,7 +88,7 @@
               <span class="rc-project" :title="row.project_name">{{ row.project_name }}</span>
               <span v-if="row.source?.type === 'sandbox_test'">{{ row.source.report_issue_summary?.total ?? '—' }} 条报告条目</span>
               <span v-else>问题 {{ row.total_issues }}</span>
-              <span>{{ formatDateTime(row.create_time, 'YYYY-MM-DD HH:mm') }}</span>
+              <span>{{ formatServerTime(row.create_time, 'minute') }}</span>
             </div>
             <p
               v-if="reportStatusNote(row)"
@@ -174,7 +174,7 @@ import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { ArrowDown, MagicStick, View as ViewIcon } from '@element-plus/icons-vue'
-import { formatDateTime } from '@/utils/format'
+import { formatServerTime } from '@/utils/serverTime'
 import { getReports, deleteReport, exportReport } from '@/api/report'
 import { getProjects } from '@/api/project'
 import type { ReportListItem, ReportFormat } from '@/types/report'

@@ -13,6 +13,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.core.server_time import iso_utc
 from app.models.admin_chat import OpsExecution
 from app.models.user import User
 from app.schemas.security_center import AutomaticBlockingPolicyIn
@@ -218,6 +219,6 @@ def execution_snapshot(row: OpsExecution) -> dict[str, Any]:
         "status": row.status, "request_id": row.request_id, "error": row.error, "result": wrapper,
     })
     recorded_at = row.finished_at or row.started_at
-    result["confirmed_at"] = recorded_at.isoformat() if recorded_at else None
+    result["confirmed_at"] = iso_utc(recorded_at)
     result["snapshot_source"] = "audited_receipt"
     return result

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import { computed, onMounted, reactive, ref } from 'vue'
-import dayjs from 'dayjs'
+import { formatServerTime } from '@/utils/serverTime'
 import { CopyDocument, Delete, Plus, Refresh, Remove } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
@@ -91,7 +91,7 @@ async function handleDelete(row: BetaInviteCode): Promise<void> {
 }
 
 function formatTime(value?: string): string {
-  return value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '-'
+  return value ? formatServerTime(value, 'minute') : '-'
 }
 
 function changeFilter(): void {

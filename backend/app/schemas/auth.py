@@ -6,6 +6,7 @@ from typing import Optional
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from app.core.server_time import iso_utc
 from app.utils.input_validation import normalize_username
 
 
@@ -65,9 +66,9 @@ class UserOut(BaseModel):
     @field_validator("last_login", "create_time", mode="before")
     @classmethod
     def _datetime_to_str(cls, v):
-        """将ORM返回的datetime对象转为字符串"""
+        """将ORM返回的datetime对象转为带 UTC 标记的字符串(库内 naive 值即 UTC)"""
         if isinstance(v, datetime):
-            return v.isoformat()
+            return iso_utc(v)
         return v
 
 

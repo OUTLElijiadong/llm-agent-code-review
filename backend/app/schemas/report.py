@@ -2,9 +2,11 @@
 报告模块Pydantic Schema
 """
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SerializerFunctionWrapHandler, field_serializer
+
+from app.core.server_time import tag_naive_utc
 
 
 class ReportListItem(BaseModel):
@@ -50,3 +52,11 @@ class DomainReportExportOut(BaseModel):
     domain_data: dict
     domain_markdown: str = Field(default="", description="由原始领域数据生成的可读报告正文")
     native_exports: list[dict] = Field(default_factory=list)
+
+    @field_serializer(
+        "source", "project", "task_info", "statistics", "domain_data", "native_exports",
+        mode="wrap", when_used="json",
+    )
+    def _tag_naive_datetimes_as_utc(self, value: Any, handler: SerializerFunctionWrapHandler) -> Any:
+        """领域 JSON 导出不经过 Resp 信封；嵌套 dict 里的 naive datetime 同样输出为 UTC(Z)。"""
+        return handler(tag_naive_utc(value))

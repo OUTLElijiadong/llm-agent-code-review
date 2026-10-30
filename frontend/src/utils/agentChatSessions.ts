@@ -4,6 +4,7 @@
  */
 
 import { isAgentResponseSessionOccupied } from '@/utils/agentResponseSession'
+import { serverTimeMs } from '@/utils/serverTime'
 
 export interface AgentChatSessionMeta {
   id: string
@@ -275,7 +276,7 @@ export function mergeAgentChatSessions(
   const included = new Set<string>()
 
   const toMeta = (item: DiscoveredAgentChatSession, cached?: AgentChatSessionMeta): AgentChatSessionMeta => {
-    const parsedLastSeen = item.lastSeenAt ? Date.parse(item.lastSeenAt) : Number.NaN
+    const parsedLastSeen = item.lastSeenAt ? serverTimeMs(item.lastSeenAt) : Number.NaN
     const remoteTitle = item.title?.trim() ?? ''
     const cachedTitle = cached?.title?.trim() ?? ''
     // 服务端摘要是历史目录的跨设备事实源；仅当服务端仍是占位标题时，

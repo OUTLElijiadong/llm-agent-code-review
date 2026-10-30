@@ -100,7 +100,7 @@
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
-import dayjs from 'dayjs'
+import { formatServerTime } from '@/utils/serverTime'
 import { useUserStore } from '@/stores/user'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
@@ -138,7 +138,7 @@ const avatarInput = ref<HTMLInputElement | null>(null)
 const avatarBusy = ref(false)
 const avatarError = ref('')
 function formatDate(time?: string): string {
-  return time ? dayjs(time).format('YYYY-MM-DD HH:mm') : '-'
+  return time ? formatServerTime(time, 'minute') : '-'
 }
 
 /* ── 头像 ── */

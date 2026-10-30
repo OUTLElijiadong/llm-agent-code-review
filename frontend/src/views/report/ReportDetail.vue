@@ -721,7 +721,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 
 import { ArrowLeft, ArrowDown, Document, Download, Printer, View } from '@element-plus/icons-vue'
-import { formatDateTime, parseUtcTimestamp } from '@/utils/format'
+import { formatServerTime } from '@/utils/serverTime'
 import type { EChartsCoreOption as EChartsOption } from 'echarts/core'
 import BaseChart from '@/components/chart/BaseChart.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -1331,7 +1331,7 @@ const riskLevel = computed(() => !scoreAvailable.value ? '未评估' : isSandbox
 
 function formatDate(s?: string): string {
   if (!s) return '-'
-  return formatDateTime(parseUtcTimestamp(s), 'YYYY-MM-DD HH:mm')
+  return formatServerTime(s, 'minute')
 }
 
 function formatDuration(ms: number | null): string {

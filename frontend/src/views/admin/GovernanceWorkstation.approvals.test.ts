@@ -166,7 +166,8 @@ it('审批详情展示服务端脱敏参数，并只对已验证会话发出返�
 
   vm.openApprovalDetails(row)
   await wrapper.vm.$nextTick()
-  expect(wrapper.get('.approval-dialog').text()).toContain('2026-10-06T01:02:03Z')
+  // 库内 01:02:03(UTC) 在审批详情里统一显示为北京时间 09:02:03，不再原样打印接口文本。
+  expect(wrapper.get('.approval-dialog').text()).toContain('2026-10-06 09:02:03')
   expect(wrapper.get('.approval-dialog').text()).toContain('[REDACTED]')
   expect(wrapper.get('.approval-dialog').text()).toContain('服务端已核验此请求与当前管理员账号下的小菱会话关联')
 

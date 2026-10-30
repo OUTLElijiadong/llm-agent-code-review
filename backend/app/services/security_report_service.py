@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.ai.cvss import CVSS_VERSION, calculate_cvss_score, normalize_cvss_vector
 from app.ai.scoring import compute_composite_score_breakdown
 from app.core.exceptions import NotFoundError
+from app.core.server_time import format_beijing
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.review_issue import ReviewIssue
@@ -206,7 +207,7 @@ def _report_markdown(
             else []
         ),
         f"扫描文件数：{max(0, _safe_int(result.get('file_count')))}",
-        f"报告生成时间：{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC",
+        f"报告生成时间：{format_beijing(datetime.utcnow())}",
         "",
         "审计结论",
         summary or "服务未返回审计摘要；本报告仅保留已取得的结果与覆盖记录。",

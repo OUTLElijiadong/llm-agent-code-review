@@ -5,12 +5,14 @@ from typing import Optional, Union
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.core.server_time import iso_utc
+
 
 def _to_str(v):
     if v is None:
         return None
     if isinstance(v, datetime):
-        return v.isoformat()
+        return iso_utc(v)
     return str(v)
 
 

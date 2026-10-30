@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ArrowRight, CircleCheck, CopyDocument, Lock, Refresh } from '@element-plus/icons-vue'
+import { formatServerTime, parseServerTime, serverTimeMs } from '@/utils/serverTime'
 import {
   getAutomaticBlocking,
   updateAutomaticBlocking,
@@ -51,7 +52,7 @@ const records = computed(() => {
   })
 })
 function reachedExpiry(entry: AutomaticBlockEntry): boolean {
-  const deadline = Date.parse(entry.expires_at || '')
+  const deadline = serverTimeMs(entry.expires_at)
   return entry.status === 'active' && Number.isFinite(deadline) && deadline <= clock.value
 }
 const enabledCount = computed(() => snapshot.value?.active_blocks.filter((item) => item.status === 'active' && !reachedExpiry(item)).length ?? 0)
@@ -139,7 +140,7 @@ async function refresh(sync = true): Promise<boolean> {
 function scheduleExpiryCheck(): void {
   if (expiryTimer) clearTimeout(expiryTimer)
   const next = snapshot.value?.active_blocks.map((entry) => ({
-    deadline: Date.parse(entry.expires_at || ''), key: `${entry.id}:${entry.expires_at}`,
+    deadline: serverTimeMs(entry.expires_at), key: `${entry.id}:${entry.expires_at}`,
   })).filter((entry) => Number.isFinite(entry.deadline) && !expiryChecks.has(entry.key))
     .sort((left, right) => left.deadline - right.deadline)[0]
   if (!next) return
@@ -225,8 +226,7 @@ async function save(): Promise<void> {
 
 function formatTime(value: string | null): string {
   if (!value) return '尚无记录'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? '时间格式异常' : date.toLocaleString('zh-CN', { hour12: false })
+  return parseServerTime(value) === null ? '时间格式异常' : formatServerTime(value, 'datetime')
 }
 
 function recordStatus(entry: AutomaticBlockEntry): string {

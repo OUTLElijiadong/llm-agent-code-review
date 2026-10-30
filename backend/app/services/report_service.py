@@ -15,6 +15,7 @@ from app.ai.scoring import CVSS_SCORING_VERSION, compute_composite_score_breakdo
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, PermissionError
 from app.core.pagination import Pagination
 from app.core.permission_codes import PermissionCode
+from app.core.server_time import iso_utc
 from app.models.code_file import CodeFile
 from app.models.pentest import PentestEngagement, PentestFinding
 from app.models.project import Project
@@ -686,7 +687,7 @@ def list_reports(db: Session, user: User, project_id: int = None,
             "error_message": clean_report_text(row.error_message) if can_view_report else None,
             "coverage": clean_report_payload(coverage) if coverage is not None else None,
             "source": source,
-            "create_time": row.create_time.isoformat() if row.create_time else None,
+            "create_time": iso_utc(row.create_time),
         })
     return pagination.to_dict(items)
 
@@ -833,7 +834,7 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
                  "status": task.status,
                  "error_message": clean_report_text(task.error_message),
                  "coverage": clean_report_payload(report_coverage),
-                 "create_time": task.create_time.isoformat() if task.create_time else None,
+                 "create_time": iso_utc(task.create_time),
                  "agent_releases": _task_agent_release_summaries(db, task_id)},
         "stats": {
             "total_files": task.total_files, "total_issues": issue_count,
