@@ -265,6 +265,7 @@ import { taskDisplayTitle } from '@/utils/taskDisplayTitle'
 import { ref, reactive, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
+import { BEIJING_LABEL, formatServerTime, formatServerTimeRelative } from '@/utils/serverTime'
 
 import type { EChartsCoreOption as EChartsOption } from 'echarts/core'
 import BaseChart from '@/components/chart/BaseChart.vue'
@@ -649,7 +650,7 @@ const activityFeed = computed<ActivityItem[]>(() => {
     const projectName = t.project_name || ''
     const displayName = projectName ? `${projectName} · ${taskName}` : taskName
     const safeDisplayName = escapeHtml(displayName)
-    const created = t.create_time ? dayjs(t.create_time).fromNow?.() ?? dayjs(t.create_time).format('M/D HH:mm') : ''
+    const created = t.create_time ? formatServerTimeRelative(t.create_time) : ''
     const live = status === 'running' && i === 0
     const ok = status === 'success'
     return {
@@ -811,7 +812,7 @@ function onWeeklyReport() {
       : '<tr><td colspan="2" style="color:#999">暂无数据</td></tr>'
   const taskRows = (s.recent_tasks || []).length
     ? (s.recent_tasks || []).map((t) =>
-        `<tr><td>#${esc(t.id)}</td><td>${esc(t.project_name)}</td><td>${esc(taskDisplayTitle(t.task_name, `任务 #${t.id}`))}</td><td style="text-align:right">${esc(taskScoreLabel(t))}：${esc(t.score ?? '未提供')}</td><td>${esc(String(t.create_time || '').slice(0, 10))}</td></tr>`).join('')
+        `<tr><td>#${esc(t.id)}</td><td>${esc(t.project_name)}</td><td>${esc(taskDisplayTitle(t.task_name, `任务 #${t.id}`))}</td><td style="text-align:right">${esc(taskScoreLabel(t))}：${esc(t.score ?? '未提供')}</td><td>${esc(formatServerTime(t.create_time, 'date', { fallback: '' }))}</td></tr>`).join('')
     : '<tr><td colspan="5" style="color:#999">暂无审查记录</td></tr>'
 
   const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
@@ -827,7 +828,7 @@ function onWeeklyReport() {
   @media print{body{margin:16px}}
 </style></head><body>
   <h1>棱镜 Prism · 代码审查统计报告</h1>
-  <div class="sub">风险与问题类型图表区间:${esc(rangeLabel.value)}；概览为累计值，最近审查不受区间限制。生成时间:${esc(dayjs().format('YYYY-MM-DD HH:mm'))}</div>
+  <div class="sub">风险与问题类型图表区间:${esc(rangeLabel.value)}；概览为累计值，最近审查不受区间限制。生成时间:${esc(formatServerTime(Date.now(), 'minute'))}${BEIJING_LABEL}</div>
   <h2>累计概览</h2>
   <div class="cards">
     <div class="card"><div class="n">${esc(s.review_count)}</div><div class="l">累计成功任务（含测试）</div></div>

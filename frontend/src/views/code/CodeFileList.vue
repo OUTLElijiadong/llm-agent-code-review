@@ -162,7 +162,7 @@ import { useUserStore } from '@/stores/user'
 import { useMediaQuery } from '@vueuse/core'
 
 import { Picture, Files, Document, Download } from '@element-plus/icons-vue'
-import dayjs from 'dayjs'
+import { formatServerTime } from '@/utils/serverTime'
 import { list, downloadBinary } from '@/api/codeFile'
 import type { CodeFileOut } from '@/types/project'
 import { ElMessage } from 'element-plus/es/components/message/index'
@@ -210,7 +210,7 @@ const downloadError = ref('')
  * @returns 格式化后的日期字符串
  */
 function formatDate(dateStr: string): string {
-  return dayjs(dateStr).format('YYYY-MM-DD HH:mm')
+  return formatServerTime(dateStr, 'minute')
 }
 
 /**

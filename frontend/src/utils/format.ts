@@ -2,59 +2,73 @@
  * 格式化工具函数
  * 提供时间格式化、文件大小格式化等通用工具方法
  *
- * 时区约定: 后端返回 ISO 8601 UTC(+00:00) 格式,前端统一转换为本地时区显示。
- * dayjs 通过 utc 插件解析带时区偏移的字符串,format 输出自动转换为浏览器本地时区。
+ * 时区约定: 服务端时间一律解释为 UTC(带 Z、带偏移、不带偏移的历史格式、空格分隔均可),
+ * 展示一律为北京时间(Asia/Shanghai),不依赖用户电脑时区。
+ * 唯一实现位于 {@link ./serverTime}；本文件的时间函数只是保持旧导入路径可用的薄封装,
+ * 新代码请直接使用 `parseServerTime` / `formatServerTime`。
  */
 
-import dayjs from 'dayjs'
-import utc from 'dayjs/plugin/utc'
-import timezone from 'dayjs/plugin/timezone'
-import relativeTime from 'dayjs/plugin/relativeTime'
-import 'dayjs/locale/zh-cn'
+import {
+  formatServerTime,
+  formatServerTimeRelative,
+  formatServerTimeWithTemplate,
+  serverTimeMs,
+  type ServerTimeStyle,
+} from '@/utils/serverTime'
 
-dayjs.extend(utc)
-dayjs.extend(timezone)
-dayjs.extend(relativeTime)
-dayjs.locale('zh-cn')
-
-/** 解析服务端 UTC 时间；兼容团队旧接口省略时区后缀的 ISO 字符串。 */
-export function parseUtcTimestamp(value: string | undefined | null): number {
-  if (!value) return Number.NaN
-  return dayjs.utc(value).valueOf()
+/** 历史上 formatDateTime 调用点用到的固定模板，映射到统一样式。 */
+const TEMPLATE_STYLES: Record<string, ServerTimeStyle> = {
+  'YYYY-MM-DD HH:mm:ss': 'datetime',
+  'YYYY-MM-DD HH:mm': 'minute',
+  'YYYY-MM-DD': 'date',
+  'HH:mm:ss': 'time',
+  'MM-DD HH:mm': 'short',
+  'HH:mm': 'hm',
 }
 
 /**
- * 格式化日期时间为标准字符串
- * @param date - 日期字符串、时间戳或Date对象
- * @param template - dayjs格式模板，默认为 "YYYY-MM-DD HH:mm:ss"
- * @returns 格式化后的日期时间字符串
+ * 解析服务端时间为 UTC 毫秒时间戳；无法解析返回 NaN。
+ * 兼容团队旧接口省略时区后缀的 ISO 字符串。
+ */
+export function parseUtcTimestamp(value: string | undefined | null): number {
+  return serverTimeMs(value)
+}
+
+/**
+ * 格式化日期时间为北京时间字符串
+ * @param date - 服务端时间字符串、毫秒时间戳或 Date 对象
+ * @param template - 展示模板，默认 "YYYY-MM-DD HH:mm:ss"；仅支持历史上用到的几种固定模板
+ * @returns 北京时间字符串；空值返回 "-"
  */
 export function formatDateTime(
   date: string | number | Date | undefined | null,
   template: string = 'YYYY-MM-DD HH:mm:ss',
 ): string {
   if (!date) return '-'
-  return dayjs(date).format(template)
+  const style = TEMPLATE_STYLES[template]
+  if (style) return formatServerTime(date, style)
+  // 少见的自定义模板：先换算到北京时间再套模板，仍然不依赖进程时区。
+  return formatServerTimeWithTemplate(date, template)
 }
 
 /**
- * 格式化日期为简短字符串
- * @param date - 日期字符串、时间戳或Date对象
- * @returns 格式化后的日期字符串（YYYY-MM-DD）
+ * 格式化为北京时间日期（YYYY-MM-DD）
+ * @param date - 服务端时间字符串、毫秒时间戳或 Date 对象
+ * @returns 北京时间日期字符串；空值返回 "-"
  */
 export function formatDate(date: string | number | Date | undefined | null): string {
   if (!date) return '-'
-  return dayjs(date).format('YYYY-MM-DD')
+  return formatServerTime(date, 'date')
 }
 
 /**
- * 格式化为相对时间字符串（如 "3小时前"）
- * @param date - 日期字符串、时间戳或Date对象
+ * 格式化为相对时间字符串（如 "3 小时前"），与绝对时间共用同一套解析
+ * @param date - 服务端时间字符串、毫秒时间戳或 Date 对象
  * @returns 相对时间描述字符串
  */
 export function formatRelativeTime(date: string | number | Date | undefined | null): string {
   if (!date) return '-'
-  return dayjs(date).fromNow()
+  return formatServerTimeRelative(date)
 }
 
 /**

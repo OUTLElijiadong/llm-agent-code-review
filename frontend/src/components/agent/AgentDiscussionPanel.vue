@@ -278,6 +278,7 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import PrismLoading from '@/components/common/PrismLoading.vue'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { formatServerTime, parseServerTime } from '@/utils/serverTime'
 import {
   subscribeDiscussion,
   type WsMessage,
@@ -1096,11 +1097,7 @@ function scrollToBottom(force = false) {
 
 function formatTime(ts: string) {
   if (!ts) return ''
-  try {
-    return new Date(ts).toLocaleTimeString('zh-CN', {
-      hour: '2-digit', minute: '2-digit', second: '2-digit',
-    })
-  } catch { return '' }
+  return parseServerTime(ts) === null ? '' : formatServerTime(ts, 'time')
 }
 
 onMounted(() => {

@@ -60,7 +60,7 @@
 import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import dayjs from 'dayjs'
+import { formatServerTime } from '@/utils/serverTime'
 import { Search } from '@element-plus/icons-vue'
 import { getProjects } from '@/api/project'
 import type { ProjectOut } from '@/types/project'
@@ -79,7 +79,7 @@ const filteredProjects = computed(() => {
 })
 
 function formatDate(time?: string): string {
-  return time ? dayjs(time).format('YYYY-MM-DD HH:mm') : '-'
+  return time ? formatServerTime(time, 'minute') : '-'
 }
 
 function goProjectCode(proj: ProjectOut): void {

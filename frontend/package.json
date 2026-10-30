@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:time-zones": "for tz in UTC America/Los_Angeles Asia/Shanghai; do echo \"== TZ=$tz\"; TZ=$tz vitest run src/utils/serverTime.test.ts src/utils/coreUtils.test.ts src/views/serverTime.pages.test.ts || exit 1; done",
     "test:e2e": "playwright test",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

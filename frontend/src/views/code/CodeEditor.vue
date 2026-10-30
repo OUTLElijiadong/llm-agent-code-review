@@ -107,7 +107,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { goBack } from '@/utils/navigation'
 
 import { Document, Download } from '@element-plus/icons-vue'
-import dayjs from 'dayjs'
+import { formatServerTime } from '@/utils/serverTime'
 import MonacoEditor from '@/components/editor/MonacoEditor.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import { getProjectDetail } from '@/api/project'
@@ -199,7 +199,7 @@ function formatSize(bytes: number): string {
  * @returns YYYY-MM-DD HH:mm 格式字符串
  */
 function formatDateTime(dateStr: string): string {
-  return dayjs(dateStr).format('YYYY-MM-DD HH:mm')
+  return formatServerTime(dateStr, 'minute')
 }
 
 /**

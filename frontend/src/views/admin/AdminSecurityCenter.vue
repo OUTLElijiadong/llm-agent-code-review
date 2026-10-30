@@ -7,6 +7,7 @@ import { Aim, CircleCheck, Clock, DataAnalysis, Lock, Refresh, Search, WarningFi
 import { type SecurityDecoyStatus, applyDecoyRedirect, getDecoyStatus, getDefenseSurface, getSecurityCenterEvents, getSecurityCenterOverview, getTrafficSummary, runSecurityMonitor, traceSecurityIp, type AutomaticBlockingSnapshot, type SecurityCenterEvent, type SecurityCenterEventGroup, type SecurityCenterEventPage, type SecurityCenterOverview, type SecurityIpTrace, type SecurityMonitorPolicy, type SecuritySurfaceAudit, type SecurityTrafficPeer, type SecurityTrafficSummary, updateSecurityMonitorPolicy } from '@/api/adminSecurityCenter'
 import { getSystemStatus, type SystemStatus } from '@/api/adminOverview'
 import { resolveAlert } from '@/api/adminGovernance'
+import { formatServerTime, parseServerTime } from '@/utils/serverTime'
 import AutomaticBlockingPanel from '@/components/security/AutomaticBlockingPanel.vue'
 
 const overview = ref<SecurityCenterOverview | null>(null)
@@ -239,8 +240,7 @@ function getErrorMessage(error: unknown): string {
 
 function formatTime(value?: string | null): string {
   if (!value) return '未知'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? '时间格式异常' : date.toLocaleString('zh-CN', { hour12: false })
+  return parseServerTime(value) === null ? '时间格式异常' : formatServerTime(value, 'datetime')
 }
 
 function eventStatusLabel(value: string): string {

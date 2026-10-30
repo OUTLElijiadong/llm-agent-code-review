@@ -203,7 +203,7 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import { ref, computed, onMounted, reactive } from 'vue'
 import { type FormInstance, type FormRules } from 'element-plus'
 import { ArrowLeft, Plus, Search, View, Edit, Delete } from '@element-plus/icons-vue'
-import dayjs from 'dayjs'
+import { formatServerTime } from '@/utils/serverTime'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { confirmDanger } from '@/composables/useDangerConfirm'
 import {
@@ -305,7 +305,7 @@ const filteredTemplates = computed<ReportTemplate[]>(() => {
  */
 function formatDateTime(s: string): string {
   if (!s) return '—'
-  return dayjs(s).format('YYYY-MM-DD HH:mm')
+  return formatServerTime(s, 'minute')
 }
 
 /**

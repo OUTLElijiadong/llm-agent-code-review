@@ -356,7 +356,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { Connection, Delete as DeleteIcon, Edit as EditIcon, Plus, Search } from '@element-plus/icons-vue'
 
-import dayjs from 'dayjs'
+import { formatServerTime } from '@/utils/serverTime'
 import {
   getProjects,
   deleteProject,
@@ -475,7 +475,7 @@ const showStatusSplit = computed(() => total.value <= projects.value.length)
 
 function formatDate(dateStr?: string): string {
   if (!dateStr) return ''
-  return dayjs(dateStr).format('YYYY-MM-DD HH:mm')
+  return formatServerTime(dateStr, 'minute')
 }
 
 function initials(name: string): string {

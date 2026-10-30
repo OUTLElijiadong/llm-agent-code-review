@@ -62,6 +62,7 @@ import type {
   ToolCallLog,
 } from '@/types/adminGovernance'
 import { useUserStore } from '@/stores/user'
+import { formatServerTime } from '@/utils/serverTime'
 
 type Mode = 'overview' | 'agents' | 'approvals' | 'policies' | 'tools' | 'knowledge' | 'jobs' | 'observability' | 'rewards' | 'rollback'
 
@@ -821,8 +822,7 @@ function jobRunTagType(status?: string | null): 'success' | 'danger' | 'warning'
 
 function jobRunTime(value?: string | null): string {
   if (!value) return ''
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false })
+  return formatServerTime(value, 'datetime')
 }
 </script>
 
@@ -997,7 +997,7 @@ function jobRunTime(value?: string | null): string {
         <template v-if="selectedApproval">
           <dl class="approval-detail-grid">
             <div><dt>审批编号</dt><dd>{{ selectedApproval.id }}</dd></div>
-            <div><dt>创建时间</dt><dd>{{ selectedApproval.create_time || '未记录' }}</dd></div>
+            <div><dt>创建时间</dt><dd>{{ formatServerTime(selectedApproval.create_time, 'datetime', { fallback: '未记录' }) }}</dd></div>
             <div><dt>风险等级</dt><dd>{{ riskText(selectedApproval.risk_level) }}</dd></div>
             <div><dt>请求动作</dt><dd><code>{{ selectedApproval.action }}</code></dd></div>
             <div><dt>目标资源</dt><dd><code>{{ selectedApproval.resource }}</code></dd></div>

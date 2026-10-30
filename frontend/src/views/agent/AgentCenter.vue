@@ -220,7 +220,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import dayjs from 'dayjs'
+import { formatServerTime, serverTimeMs } from '@/utils/serverTime'
 
 import AgentAvatar from '@/components/agent/AgentAvatar.vue'
 import AgentDeskCard from '@/components/agent/AgentDeskCard.vue'
@@ -345,7 +345,7 @@ function toggleCategory(c: string): void {
 
 function formatLast(t?: string | null): string {
   if (!t) return '尚未调用'
-  return dayjs(t).format('YYYY-MM-DD HH:mm:ss')
+  return formatServerTime(t, 'datetime')
 }
 
 function onAgentSelect(code: string): void {
@@ -534,7 +534,7 @@ function handleAgentEvent(ev: AgentEvent): void {
   if (!ev.agent) return
   let nextStatus = STATUS_BY_EVENT[ev.type]
   if (!nextStatus) return
-  const timestamp = Date.parse(ev.timestamp)
+  const timestamp = serverTimeMs(ev.timestamp)
   if (!Number.isFinite(timestamp)) return
   const age = Math.max(0, Date.now() - timestamp)
   if ((EXECUTION_STATUSES.has(nextStatus) || nextStatus === 'blocked') && age > 90_000) nextStatus = 'idle'

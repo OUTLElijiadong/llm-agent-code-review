@@ -1,4 +1,5 @@
 import type { SandboxEnvironment, SandboxEvent, SandboxLanguage } from '@/types/sandbox'
+import { serverTimeMs } from '@/utils/serverTime'
 
 const ACTIVE_STATUSES = new Set(['queued', 'dispatching', 'running', 'finalizing', 'ready', 'stopping'])
 const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'blocked', 'stopped', 'expired'])
@@ -27,7 +28,7 @@ export function projectSandboxLanguage(language?: string | null): SandboxLanguag
 export function sortSandboxEvents(events: SandboxEvent[]): SandboxEvent[] {
   return [...events].sort((left, right) => {
     if (left.id !== right.id) return left.id - right.id
-    return new Date(left.create_time).getTime() - new Date(right.create_time).getTime()
+    return serverTimeMs(left.create_time) - serverTimeMs(right.create_time)
   })
 }
 

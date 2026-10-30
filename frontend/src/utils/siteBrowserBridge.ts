@@ -1,4 +1,5 @@
 import { siteBrowserApi, type SiteBrowserApi, type SiteBrowserObservation, type SiteBrowserRequiredEvent, type SiteBrowserAck } from '@/api/siteBrowser'
+import { serverTimeMs } from '@/utils/serverTime'
 import { isSafeXiaolingRoute } from '@/utils/xiaolingNavigation'
 
 export const SITE_BROWSER_TARGET_EVENT = 'prism:site-browser-target'
@@ -179,7 +180,7 @@ export function createSiteBrowserBridge(options: Options) {
   }
   async function execute(event: SiteBrowserRequiredEvent): Promise<void> {
     const context = options.current(), epoch = generation
-    const expires = Date.parse(event.expires_at)
+    const expires = serverTimeMs(event.expires_at)
     if (options.isActive?.() === false || !Number.isSafeInteger(event.action_id) || handled.has(event.action_id) || !Number.isFinite(expires) || !same(context, {
       ...context, accountId: event.account_id, sessionId: event.session_id, runId: event.run_id, surface: event.surface,
     }) || expires <= Date.now()) return
