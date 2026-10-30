@@ -21,6 +21,8 @@
 - **共享维护锁**：与发布、备份、恢复、回滚共用 `deploy/.releases/.maintenance.lock`，持有者的 pid、启动时间、命令名记录在旁边的 `.maintenance.lock.owner`。持有者仍在运行：正常跳过。持有者已不存在，或无法确认持有者且锁已存在超过 6 小时（`PRISM_LOCK_STALE_SECONDS`）：任务失败并在日志里给出 `rmdir` 命令，**不自动删除**，请先确认没有发布、备份、恢复或回滚在运行。
 - **备份恢复验证拿锁**：`verify-backup.sh` 等脚本默认拿不到锁就立即失败；设置 `PRISM_LOCK_WAIT_SECONDS`（秒）可在持有者仍存活时有限等待。持有者已不存在时不会等待，也不会抢锁。
 
+- **巡检覆盖定时任务**：`ops-check.sh` 的 `checks` 增加 `maintenance`（`prism-maintenance.service`）与 `restore_verification`（`prism-verify-backup.service`），读取 systemd 记录的最近一次执行结果、退出码、时间和失败原因（维护任务取 `/var/log/prism-maintenance/` 最新日志尾部，恢复验证取 journal 里最近的 ERROR 行）。`job_state` 取值：`ok`、`failed`、`running`、`never_run`、`not_installed`、`unknown`。最近一次失败，或最近一次成功已超过期望间隔（维护 48 小时、恢复验证 216 小时，可用 `OPS_MAINTENANCE_MAX_AGE_HOURS`、`OPS_RESTORE_VERIFY_MAX_AGE_HOURS` 调整）都会让巡检 `status` 变为 `degraded` 并给出需人工处理的动作；**不会**变成 `error`，因为发布后会运行巡检，历史上的定时任务失败不能让新发布失败。`never_run`（systemd 重启后丢失历史）如实报告，不降级。
+
 升级后需要在服务器重新安装 unit 并重载：
 
 ```bash
