@@ -557,10 +557,15 @@ def validate_task_member_references(payload: Any) -> None:
 def _strip_untrusted_team_metadata(payload: AgentTeamCreateIn) -> AgentTeamCreateIn:
     """客户端不得伪造仅由服务端签发的团队租约与重试策略。"""
 
+    from app.services.agent_supervisor_service import UNTRUSTED_AUTHORIZATION_KEYS
+
     for task in payload.tasks:
         data = dict(task.input or {})
         data.pop("_execution_strategy", None)
         data.pop("_agent_team", None)
+        # 远程目标授权只来自服务端查到的已批准委托；模型写进 input 的授权布尔值和确认凭证一律不入库。
+        for key in UNTRUSTED_AUTHORIZATION_KEYS:
+            data.pop(key, None)
         task.input = data
     return payload
 

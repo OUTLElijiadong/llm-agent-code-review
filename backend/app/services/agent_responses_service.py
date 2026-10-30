@@ -1922,20 +1922,8 @@ class PrismToolExecutor:
                 if approval_request.get("supervisor_plan_sha256") != team_supervision["plan_sha256"]:
                     raise InvalidRunStateError("当前审批未绑定此版本的 Agent 团队计划")
                 self._mark_approval(call, approve=True)
-            if remote_targets and page_team_requires_confirmation:
-                # 审批先验证原始模型参数与计划摘要，再注入服务端外部目标授权标记。
-                authorized_arguments = copy.deepcopy(call.arguments)
-                for task in authorized_arguments.get("tasks", []):
-                    task_input = task.get("input") if isinstance(task, dict) else None
-                    if isinstance(task_input, dict) and str(task_input.get("remote_target_url") or "").strip():
-                        task_input["remote_target_authorized"] = True
-                call = ToolCall(
-                    call_id=call.call_id,
-                    name=call.name,
-                    arguments=authorized_arguments,
-                    raw_arguments=call.raw_arguments,
-                    parse_error=call.parse_error,
-                )
+            # 团队里的远程目标不再靠这次点击授权：成员执行前由服务端核对申请人名下
+            # 已批准的“远程网站评估”委托（agent_mesh_dispatcher），任务 input 里的授权字段一律无效。
 
         if call.name in self._skill_bindings:
             if not approved:
