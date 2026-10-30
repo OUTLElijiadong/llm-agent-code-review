@@ -40,6 +40,7 @@ from reportlab.platypus import (
 
 from app.ai.cvss import CVSS_STANDARD_URL
 from app.ai.scoring import score_risk_level
+from app.core.server_time import format_beijing
 from app.services.report_exporter import (
     conflict_status_label,
     cvss_source_label,
@@ -448,7 +449,7 @@ def _build_header_elements(
     task_name = escape(str(task_info.get("task_name") or "未命名任务"))
     project_name = escape(str(task_info.get("project_name") or "-"))
     review_type = escape(str(task_info.get("review_type") or "-"))
-    create_time = escape(str(task_info.get("create_time") or "-"))
+    create_time = escape(format_beijing(task_info.get("create_time")))
     model_name = escape(str(task_info.get("model_name") or "-"))
 
     elements.append(_paragraph(f"任务名称:{task_name}", styles["normal"]))
@@ -791,8 +792,8 @@ def _build_issue_section(
 
     status_parts = [f"状态：{finding_status_label(issue.get('status'))}"]
     status_parts.append(f"处理人：{issue.get('handled_by') or '-'}")
-    status_parts.append(f"处理时间：{issue.get('handled_at') or '-'}")
-    status_parts.append(f"更新时间：{issue.get('update_time') or '-'}")
+    status_parts.append(f"处理时间：{format_beijing(issue.get('handled_at'))}")
+    status_parts.append(f"更新时间：{format_beijing(issue.get('update_time'))}")
     elements.append(_paragraph("<b>处理状态:</b>", styles["normal"]))
     elements.append(_paragraph(escape("；".join(status_parts), {"&": "&amp;"}), styles["normal"]))
 

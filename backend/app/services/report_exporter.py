@@ -48,6 +48,7 @@ from app.ai.scoring import (
 )
 from app.constants.compliance import build_compliance_summary
 from app.core.exceptions import ConflictError
+from app.core.server_time import iso_utc, localize_fields
 from app.services.report_markdown import markdown_to_html, markdown_to_safe_html
 from app.services.report_text import clean_report_payload
 
@@ -89,6 +90,9 @@ _TASK_FIELDS: tuple = (
     "score", "score_version", "score_breakdown", "summary", "model_name", "duration_ms",
     "start_time", "end_time", "create_time", "error_message", "coverage", "agent_releases",
 )
+# 导出里会出现的时间字段：JSON 输出 UTC(Z)，HTML/PDF/Word 输出北京时间并标注（UTC+8）。
+_ISSUE_TIME_FIELDS: tuple = ("handled_at", "create_time", "update_time")
+_TASK_TIME_FIELDS: tuple = ("start_time", "end_time", "create_time")
 
 # 模板目录路径(app/templates/)
 _TEMPLATES_DIR: Path = Path(__file__).resolve().parent.parent / "templates"
@@ -209,7 +213,8 @@ def _to_serializable(value: Any) -> Any:
              不可识别对象转为 str()。
     """
     if isinstance(value, datetime):
-        return value.isoformat()
+        # 库内 naive 时间是 UTC；JSON 导出必须带 Z，人读格式再由各导出器换算为北京时间。
+        return iso_utc(value)
     if isinstance(value, Path):
         return str(value)
     if isinstance(value, dict):
@@ -244,6 +249,9 @@ def _normalize_issue(issue: Any) -> Dict[str, Any]:
     normalized: Dict[str, Any] = {}
     for field in _ISSUE_FIELDS:
         normalized[field] = _to_serializable(raw.get(field))
+    # 入参可能是 model_dump 出来的无标记 ISO 串或空格分隔文本，统一成带 Z 的 UTC。
+    for field in _ISSUE_TIME_FIELDS:
+        normalized[field] = iso_utc(normalized.get(field))
     # references_json / compliance_mapping 保持原值(可能为 None 或容器)
     if normalized.get("references_json") is None:
         normalized["references_json"] = []
@@ -276,6 +284,8 @@ def _normalize_task(task: Any) -> Dict[str, Any]:
     normalized: Dict[str, Any] = {}
     for field in _TASK_FIELDS:
         normalized[field] = _to_serializable(raw.get(field))
+    for field in _TASK_TIME_FIELDS:
+        normalized[field] = iso_utc(normalized.get(field))
     task_name = normalized.get("task_name") or normalized.get("name") or ""
     normalized["task_name"] = task_name
     normalized["name"] = task_name
@@ -1171,9 +1181,11 @@ def export_to_html(
     template = _JINJA_ENV.from_string(template_content)
     html_context = dict(context)
     html_context["task_info"] = {
-        **context["task_info"],
+        **localize_fields(context["task_info"], _TASK_TIME_FIELDS),
         "status_label": report_status_label(context["task_info"].get("status")),
     }
+    # 008 迁移预置的旧模板读 task.*，与 task_info 共用同一份已换算的北京时间。
+    html_context["task"] = html_context["task_info"]
     evidence = context.get("evidence") if isinstance(context.get("evidence"), dict) else {}
     decompilation = evidence.get("decompilation")
     if isinstance(decompilation, dict):
@@ -1186,7 +1198,7 @@ def export_to_html(
         }
     html_context["issues"] = [
         {
-            **issue,
+            **localize_fields(issue, _ISSUE_TIME_FIELDS),
             "status_label": finding_status_label(issue.get("status")),
             "human_review_status_label": human_review_status_label(issue.get("human_review_status")),
             "evidence_quality_label": evidence_quality_label(issue.get("evidence_quality")),

@@ -1715,7 +1715,7 @@ def test_pdf_and_word_render_full_issue_audit_metadata_and_score_breakdown():
         "SUGGESTION_TOKEN_20260827",
         "REMEDIATION_TOKEN_20260827",
         "FINGERPRINT_TOKEN_20260827",
-        "2026-08-27T01:02:03",
+        "2026-08-27 09:02:03（UTC+8）",
         "REFERENCE_TOKEN_20260827",
         "FIRST 向量：AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
         "CVSS 3.1（FIRST）向量复算",
@@ -1742,7 +1742,7 @@ def test_pdf_and_word_render_full_issue_audit_metadata_and_score_breakdown():
         "FINGERPRINT_TOKEN_20260827",
         "已修复",
         "处理人: 7",
-        "2026-08-27T01:02:03",
+        "2026-08-27 09:02:03（UTC+8）",
         "REFERENCE_TOKEN_20260827",
     ):
         assert token in document_xml

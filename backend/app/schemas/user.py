@@ -6,6 +6,8 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_serializer
 
+from app.core.server_time import iso_utc
+
 
 class UserListItem(BaseModel):
     """用户列表项
@@ -29,10 +31,8 @@ class UserListItem(BaseModel):
 
     @field_serializer("last_login", "create_time", "update_time")
     def _serialize_datetime(self, dt: Optional[datetime], _info) -> Optional[str]:
-        """将datetime对象序列化为ISO格式字符串"""
-        if dt is None:
-            return None
-        return dt.isoformat()
+        """将datetime对象序列化为带 UTC 标记的 ISO 字符串(库内 naive 值即 UTC)"""
+        return iso_utc(dt)
 
 
 class PasswordResetOut(BaseModel):

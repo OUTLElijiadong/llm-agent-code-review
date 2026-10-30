@@ -123,7 +123,8 @@ def test_team_summary_refreshes_latest_status_timestamp_and_counts_despite_cache
 
     item = agent_team_service.list_teams(db, SimpleNamespace(id=7, role="user"))["items"][0]
     assert item["status"] == "completed"
-    assert item["updated_at"] == newer.isoformat()
+    # 库内 naive 值是 UTC，接口统一输出带 Z 的 UTC 时刻(见 app.core.server_time)。
+    assert item["updated_at"] == "2026-10-14T01:02:03Z"
     assert item["counts"]["completed"] == 2
     assert item["counts"]["running"] == 0
 

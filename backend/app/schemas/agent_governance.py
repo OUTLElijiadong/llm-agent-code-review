@@ -5,9 +5,11 @@ from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.core.server_time import iso_utc
+
 
 def to_datetime_str(value: Any) -> Optional[str]:
-    """将时间值转换为 ISO 字符串。
+    """将时间值转换为带 UTC 标记的 ISO 字符串。
 
     Args:
         value: 任意时间输入，通常为 datetime 或字符串。
@@ -18,7 +20,7 @@ def to_datetime_str(value: Any) -> Optional[str]:
     if value is None:
         return None
     if isinstance(value, datetime):
-        return value.isoformat()
+        return iso_utc(value)
     return str(value)
 
 

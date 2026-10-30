@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session, load_only
 
 from app.core.config import settings
 from app.core.permission_codes import PermissionCode
+from app.core.server_time import iso_utc
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.project_source_archive import ProjectSourceArchive
@@ -332,7 +333,7 @@ def get_summary(db: Session, user: User) -> dict:
             "review_type": task.review_type,
             "score": visible_score if visible_score is not None and 0 <= visible_score <= 100 else None,
             "coverage": task.coverage if isinstance(task.coverage, dict) else None,
-            "create_time": task.create_time.isoformat() if task.create_time else None,
+            "create_time": iso_utc(task.create_time),
         })
 
     return {
@@ -429,7 +430,7 @@ def get_score_trend(db: Session, user: User, limit: int = 10) -> list[dict]:
                 break
     return [
         {"task_id": task.id, "score": score,
-         "create_time": task.create_time.isoformat() if task.create_time else None}
+         "create_time": iso_utc(task.create_time)}
         for task, score in reversed(rows)
     ]
 
@@ -517,7 +518,7 @@ def get_running(db: Session, user: User) -> dict:
             "status": task.status,
             "processed_files": int(task.processed_files or 0),
             "total_files": int(task.total_files or 0),
-            "create_time": task.create_time.isoformat() if task.create_time else None,
+            "create_time": iso_utc(task.create_time),
         }
         for task, project_name in review_rows
     ]
@@ -564,7 +565,7 @@ def get_running(db: Session, user: User) -> dict:
             "surface": row.surface,
             "session_key": row.session_key,
             "status": row.status,
-            "update_time": row.update_time.isoformat() if row.update_time else None,
+            "update_time": iso_utc(row.update_time),
         }
         for row in agent_rows
     ]

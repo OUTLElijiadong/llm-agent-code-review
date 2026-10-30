@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.agents.contracts import CONTRACTS
 from app.core.config import settings
 from app.core.observability import observe_event
+from app.core.server_time import iso_utc
 from app.models.agent_mesh import AgentMeshMessage, AgentMeshMessageEvent
 from app.models.agent_response_run import AgentResponseRun, response_run_stop_requested
 from app.models.agent_team import AgentTeam, AgentTeamEvent, AgentTeamMember, AgentTeamTask
@@ -1336,8 +1337,8 @@ def _serialize_member(row: AgentTeamMember) -> dict[str, Any]:
         "template_version_id": row.template_version_id,
         "capabilities": _public(_unjson(row.capabilities_json, {})),
         "status": row.status,
-        "started_at": row.started_at.isoformat() if row.started_at else None,
-        "completed_at": row.completed_at.isoformat() if row.completed_at else None,
+        "started_at": iso_utc(row.started_at),
+        "completed_at": iso_utc(row.completed_at),
     }
 
 
@@ -1372,14 +1373,14 @@ def _serialize_task(row: AgentTeamTask, member_key: str = "", *, result_budget: 
         "priority": row.priority,
         "attempt_count": row.attempt_count,
         "max_attempts": row.max_attempts,
-        "next_attempt_at": row.next_attempt_at.isoformat() if row.next_attempt_at else None,
-        "lease_expires_at": row.lease_expires_at.isoformat() if row.lease_expires_at else None,
+        "next_attempt_at": iso_utc(row.next_attempt_at),
+        "lease_expires_at": iso_utc(row.lease_expires_at),
         "result": project_team_result(_unjson(row.result_json, {}), team_id=int(row.team_id),
                                       task_id=int(row.id), budget=result_budget),
         "artifacts": _public(_unjson(row.artifacts_json, [])),
         "errors": _public(_unjson(row.errors_json, [])),
-        "started_at": row.started_at.isoformat() if row.started_at else None,
-        "completed_at": row.completed_at.isoformat() if row.completed_at else None,
+        "started_at": iso_utc(row.started_at),
+        "completed_at": iso_utc(row.completed_at),
     }
 
 
@@ -1400,7 +1401,7 @@ def _serialize_event(row: AgentTeamEvent) -> dict[str, Any]:
         "message_id": row.message_id,
         "correlation_id": row.correlation_id,
         "detail": _public(detail),
-        "created_at": row.create_time.isoformat() if row.create_time else None,
+        "created_at": iso_utc(row.create_time),
     }
 
 
@@ -1420,9 +1421,9 @@ def _serialize_message(row: AgentMeshMessage) -> dict[str, Any]:
         "context": _public(_unjson(row.context_json, {})),
         "artifacts": _public(_unjson(row.artifacts_json, [])),
         "errors": _public(_unjson(row.errors_json, [])),
-        "create_time": row.create_time.isoformat() if row.create_time else None,
-        "created_at": row.create_time.isoformat() if row.create_time else None,
-        "update_time": row.update_time.isoformat() if row.update_time else None,
+        "create_time": iso_utc(row.create_time),
+        "created_at": iso_utc(row.create_time),
+        "update_time": iso_utc(row.update_time),
     }
 
 
@@ -1470,12 +1471,12 @@ def _team_metadata_out(team: Any, counts: dict[str, int]) -> dict[str, Any]:
         "max_attempts": team.max_attempts,
         "priority": team.priority,
         "trace_id": team.trace_id,
-        "deadline_at": team.deadline_at.isoformat() if team.deadline_at else None,
-        "started_at": team.started_at.isoformat() if team.started_at else None,
-        "completed_at": team.completed_at.isoformat() if team.completed_at else None,
-        "created_at": team.create_time.isoformat() if team.create_time else None,
-        "updated_at": team.update_time.isoformat() if team.update_time else None,
-        "archived_at": team.archived_at.isoformat() if team.archived_at else None,
+        "deadline_at": iso_utc(team.deadline_at),
+        "started_at": iso_utc(team.started_at),
+        "completed_at": iso_utc(team.completed_at),
+        "created_at": iso_utc(team.create_time),
+        "updated_at": iso_utc(team.update_time),
+        "archived_at": iso_utc(team.archived_at),
         "counts": counts,
     }
 

@@ -18,6 +18,7 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ConflictError, NotFoundError
+from app.core.server_time import iso_utc
 from app.models.project_source_revision import ProjectSourceRevision
 from app.services.project_member_service import require_project_access
 
@@ -60,7 +61,7 @@ def list_revisions(db: Session, actor: Any, project_id: int) -> list[dict[str, A
             "parent_sha256": row.parent_sha256,
             "repaired_files": json.loads(row.repaired_files_json or "[]"),
             "repair_notes": row.repair_notes,
-            "create_time": row.create_time.isoformat() if row.create_time else None,
+            "create_time": iso_utc(row.create_time),
         })
     return out
 
@@ -169,5 +170,5 @@ def revision_to_dict(row: ProjectSourceRevision) -> dict[str, Any]:
         "parent_sha256": row.parent_sha256,
         "repaired_files": json.loads(row.repaired_files_json or "[]"),
         "repair_notes": row.repair_notes,
-        "create_time": row.create_time.isoformat() if row.create_time else None,
+        "create_time": iso_utc(row.create_time),
     }

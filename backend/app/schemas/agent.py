@@ -6,11 +6,13 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.core.server_time import iso_utc
+
 
 def _datetime_to_iso(v: Any) -> Optional[str]:
-    """把 datetime 或字符串统一转为 ISO 字符串;其余原样返回。"""
+    """把 datetime 或字符串统一转为带 UTC 标记的 ISO 字符串;其余原样返回。"""
     if isinstance(v, datetime):
-        return v.isoformat()
+        return iso_utc(v)
     return v if v is None or isinstance(v, str) else str(v)
 
 

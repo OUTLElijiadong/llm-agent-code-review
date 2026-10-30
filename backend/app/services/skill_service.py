@@ -18,6 +18,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.agents.skills.registry import SkillRegistry
+from app.core.server_time import iso_utc
 from app.models.agent_skill_record import AgentSkillRecord
 
 if TYPE_CHECKING:
@@ -285,7 +286,7 @@ def list_recent_records(
             "success": r.effect == "success",
             "duration_ms": r.duration_ms,
             "output_summary": r.output_summary or "",
-            "create_time": str(r.create_time) if r.create_time else None,
+            "create_time": iso_utc(r.create_time),
         }
         for r in records
     ]

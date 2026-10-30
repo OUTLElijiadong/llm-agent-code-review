@@ -23,6 +23,7 @@ from app.core.dependencies import get_current_user
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
 from app.core.permission_codes import PermissionCode
 from app.core.rbac_dependency import require_permission
+from app.core.server_time import iso_utc, json_default
 from app.models.agent_mesh import AgentMeshMessage
 from app.models.agent_response_run import (
     AgentResponseRun,
@@ -74,7 +75,7 @@ def list_run_assets(run_id: str, db: Session = Depends(get_db),
         "role": row.role,
         "mime": row.mime,
         "sha256": row.sha256,
-        "create_time": row.create_time.isoformat() if row.create_time else None,
+        "create_time": iso_utc(row.create_time),
     } for row in rows])
 
 
@@ -1815,8 +1816,10 @@ async def stream_agent_response(
                     "error": {"message": "Agent 产生了不支持的内部事件"},
                 }
             value = {**public_event, "sequence_number": sequence}
+            # 事件载荷里若混入 datetime，按 UTC(Z) 输出，而不是 default=str 的空格分隔无标记文本。
             return (
-                f"event: {value.get('type', 'message')}\ndata: {json.dumps(value, ensure_ascii=False, default=str)}\n\n"
+                f"event: {value.get('type', 'message')}\n"
+                f"data: {json.dumps(value, ensure_ascii=False, default=json_default)}\n\n"
             )
 
         if payload.action != "start":
