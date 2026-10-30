@@ -450,6 +450,9 @@ def _infer_owasp_cwe(title: str, description: str) -> Tuple[str, str]:
         Tuple[str, str]: (owasp, cwe) 元组;未匹配则返回 ("", "")
     """
     text = f"{title} {description}".lower()
+    # 纯 ASCII 关键词按“前后不是字母数字”匹配，中文关键词仍按子串匹配。子串匹配会让 des 命中
+    # description/design/destination，把文档类发现推断成弱加密 CWE-327（线上 #3956、#3961 的
+    # 类别标签来源之一）。"_"、"."、中文紧邻关键词仍算命中，例如 verify_jwt、hashlib.md5、存储型xss。
     rules: Tuple[Tuple[Tuple[str, ...], str], ...] = (
         (("sql 注入", "sql注入", "sql injection"),
          "CWE-89"),
@@ -469,16 +472,23 @@ def _infer_owasp_cwe(title: str, description: str) -> Tuple[str, str]:
          "CWE-639"),
         (("硬编码", "hardcoded", "明文密码"),
          "CWE-798"),
-        (("弱加密", "md5", "sha1", "des", "ecb"),
+        (("弱加密", "md5", "sha1", "des", "3des", "ecb"),
          "CWE-327"),
         (("jwt",), "CWE-522"),
     )
     for keywords, cwe in rules:
         if isinstance(keywords, str):
             keywords = (keywords,)
-        if any(k in text for k in keywords):
+        if any(_keyword_in_text(k, text) for k in keywords):
             return owasp_for_cwe(cwe), cwe
     return "", ""
+
+
+def _keyword_in_text(keyword: str, text: str) -> bool:
+    """纯 ASCII 关键词要求前后都不是字母或数字；含中文的关键词按子串匹配。"""
+    if not keyword.isascii():
+        return keyword in text
+    return re.search(rf"(?<![a-z0-9]){re.escape(keyword)}(?![a-z0-9])", text) is not None
 
 
 def _normalize_issue(raw: dict) -> Issue:

@@ -11,6 +11,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.ai.finding_coherence import claims_are_coherent, view_from_mapping
+
 # v2 区分精确源码引用与漏洞核实；历史 v1 记录由原有输出契约原样保留。
 AGGREGATION_VERSION = "finding-aggregation-v2"
 RISK_SCORING_VERSION = "claim-risk-v2"
@@ -479,6 +481,21 @@ def _evidence_quality(evidence: str, code: str, raw: Mapping[str, Any]) -> str:
 
 
 def _same_finding(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+    """位置或证据规则判定为同一处代码后，再校验两条声明的主题是否一致。
+
+    证据重叠、同一调用点只说明指向同一处代码。文档、命名类声明引用 sink 所在行时，证据与
+    安全声明相同，但它讲的不是那个安全问题，不能并入。cwe_conflict_splits=False：两边都带
+    CWE 但不一致仍按本聚合器既有设计保留在一起，交 classification_disagreement 人工复核；
+    只有一边缺 CWE、或类别和正文明显不同的才会被拆开。
+    """
+    if not _same_location(left, right):
+        return False
+    return claims_are_coherent(
+        view_from_mapping(left), view_from_mapping(right), cwe_conflict_splits=False,
+    ).ok
+
+
+def _same_location(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
     left_anchor = str(left.get("source_anchor") or "")
     right_anchor = str(right.get("source_anchor") or "")
     if left_anchor and right_anchor:
