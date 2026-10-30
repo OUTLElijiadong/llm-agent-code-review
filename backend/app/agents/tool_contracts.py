@@ -281,7 +281,7 @@ class RunProjectTestsArguments(FixedToolArguments):
                 "请补充后重新调用。不想限定路径时，改用 test_mode='combined' 或调用 run_full_project_validation，"
                 "二者都不需要白名单"
             )
-        if self.http_scope and not local_blackbox:
+        if self.http_scope is not None and not local_blackbox:
             raise ValueError(
                 "http_scope 仅适用于本地黑盒测试(test_mode='blackbox' 且不传 remote_target_url)；"
                 "白盒、组合测试和远程目标黑盒不接受该字段，请去掉 http_scope"

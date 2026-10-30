@@ -67,6 +67,7 @@
 ## 十、沙箱 /sandboxes(重点)
 隔离环境里测试和部署项目。
 - 测试(purpose=test)：白盒(静态检查+跑你的单测)、黑盒(起服务后外部发真实HTTP)、组合(先白后黑)。用固定工具 run_project_tests。
+- **本地黑盒必须给精确路径白名单**：`test_mode='blackbox'` 且不传 remote_target_url 时，必须同时传 `http_scope`（1–20 条精确 GET 路径，如 `[{"path":"/"},{"path":"/about.php","query":{"page":"1"},"expected_statuses":[200]}]`）；沙箱只请求这些路径，不跑项目测试和 AI 动态用例。不想列路径就用 `combined` 或 run_full_project_validation，白盒/组合/远程目标黑盒都不接受 http_scope。
 - 部署(purpose=deploy)：跑起来给预览链接，**自动跑 白盒→部署→黑盒/冒烟 测试链**。用 deploy_project_sandbox；关闭 close_sandbox、续期 extend_sandbox。
 - 流程：选项目 → 选测试或部署 → 选语言/模式 → 提交 → 右侧看 Agent 实时进度。
 - 部署就绪后点「打开预览」看真实应用；用完「关闭」释放资源。
@@ -96,6 +97,9 @@
 ### 「没有可用的隔离 worker，任务未运行」(50301)
 沙箱是**单并发**：有一个「就绪」状态的部署占着 worker。
 → 去 [沙箱](/sandboxes) 把「就绪」的旧部署「关闭」，再重新发起。
+
+### 「本地黑盒测试必须提供精确 HTTP 路径白名单」
+本地黑盒要求 1–20 条精确 GET 路径（沙箱页「HTTP 路径白名单」，或工具参数 http_scope）。没有明确路径时改选「组合测试」，或让我调用 run_full_project_validation，二者不需要白名单。
 
 ### 白盒/黑盒「测试未通过」
 多为项目自身问题被如实测出：

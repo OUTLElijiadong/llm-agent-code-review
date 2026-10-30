@@ -211,6 +211,32 @@ def test_http_scope_is_rejected_with_hint_outside_local_blackbox(db, local_sandb
     assert "仅适用于本地黑盒" in (result.error or ""), result.error
 
 
+def test_empty_scope_is_rejected_for_every_mode_at_the_contract_layer():
+    """空列表既不能让本地黑盒通过，也不能带进其它模式。"""
+    for arguments in (
+        {"test_mode": "blackbox", "http_scope": []},
+        {"test_mode": "combined", "http_scope": []},
+        {"test_mode": "blackbox", "remote_target_url": "https://example.test/", "http_scope": SCOPE},
+    ):
+        with pytest.raises(FixedToolArgumentError):
+            validate_fixed_tool_arguments("run_project_tests", {"project_id": 1, "language": "php", **arguments})
+
+
+def test_remote_blackbox_without_scope_is_still_accepted_by_the_contract():
+    """远程目标黑盒走授权探测，不需要也不接受本地白名单(远程授权逻辑本身不在此修改)。"""
+    arguments = validate_fixed_tool_arguments(
+        "run_project_tests",
+        {
+            "project_id": 1,
+            "language": "php",
+            "test_mode": "blackbox",
+            "remote_target_url": "https://authorized.example.test/health",
+        },
+    )
+
+    assert "http_scope" not in arguments
+
+
 @pytest.mark.parametrize("test_mode", ["whitebox", "combined"])
 def test_non_blackbox_modes_keep_working_without_scope(db, local_sandbox, test_mode):
     """回归保护：白盒与组合测试不需要也不得携带白名单。"""
@@ -334,3 +360,70 @@ def test_pentest_detect_probe_sends_minimal_root_scope_and_creates_environment(d
     # 委托范围里没有任何路径声明，探测只允许沙箱回环上的 GET /，不得凭空扩展别的路径。
     assert config["http_scope"] == ROOT_ONLY_SCOPE
     assert probe["http_scope"] == ROOT_ONLY_SCOPE
+
+
+def test_pentest_probe_success_is_reported_as_bounded_not_complete_dynamic_coverage(db, local_sandbox):
+    """只探测了精确白名单里的 GET / 时，渗透覆盖状态不得被标成完整的动态覆盖。"""
+    engagement = PentestEngagement(
+        public_id="pt-scope-coverage01",
+        user_id=int(local_sandbox.owner.id),
+        project_id=int(local_sandbox.project.id),
+        target_type="web",
+        scope_json="{}",
+        status="completed",
+    )
+    db.add(engagement)
+    db.flush()
+    for phase_key in pentest_service.PHASE_KEYS:
+        phase = pentest_service._ensure_phase_run(db, engagement.id, phase_key)
+        phase.status = "success"
+        if phase_key == "detect":
+            phase.output_json = pentest_service._dump({
+                "probe": {
+                    "attempted": True,
+                    "env_status": "succeeded",
+                    "http_scope": ROOT_ONLY_SCOPE,
+                },
+            })
+    db.commit()
+
+    coverage = pentest_service._pentest_coverage(db, engagement.id)
+
+    assert coverage["coverage_status"] == "partial"
+    assert any("白名单" in gap and "GET /" in gap for gap in coverage["coverage_gaps"]), coverage["coverage_gaps"]
+
+
+# ── 其余入口：MCP create_test / 服务端报错对所有调用方可自愈 ──
+
+
+def test_service_error_for_missing_scope_tells_every_caller_how_to_recover(db, local_sandbox):
+    """团队成员、MCP 等不经过工具契约的入口只能看到服务端报错，必须告诉它们怎么补或怎么换。"""
+    with pytest.raises(sandbox_service.ValidationError) as raised:
+        sandbox_service.create_environment(
+            db,
+            local_sandbox.owner,
+            {"project_id": local_sandbox.project.id, "purpose": "test", "language": "php", "test_mode": "blackbox"},
+        )
+
+    message = raised.value.message
+    assert "精确 HTTP 路径白名单" in message
+    assert "1–20" in message and "combined" in message, message
+
+
+def test_managed_mcp_create_test_blackbox_is_rejected_with_a_way_out(db, local_sandbox, monkeypatch):
+    """prism-sandbox.create_test 的 schema 没有 http_scope，blackbox 在服务端必被拒；报错要指向可行替代。"""
+    from app.services import managed_mcp_adapter
+
+    monkeypatch.setattr(managed_mcp_adapter, "managed_kind_ready", lambda *_args: True)
+
+    with pytest.raises(sandbox_service.ValidationError) as raised:
+        managed_mcp_adapter.call_managed_tool(
+            db,
+            local_sandbox.owner,
+            "prism-sandbox",
+            "create_test",
+            {"project_id": local_sandbox.project.id, "language": "php", "test_mode": "blackbox"},
+        )
+
+    assert db.query(SandboxEnvironment).count() == 0
+    assert "combined" in raised.value.message, raised.value.message
