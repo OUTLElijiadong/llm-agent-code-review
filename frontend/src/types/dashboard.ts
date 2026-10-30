@@ -6,7 +6,11 @@ export interface RecentTaskOut {
   status: string
   score: number | null
   review_type?: string | null
-  coverage?: { verification_status?: 'complete' | 'partial' | 'failed' | 'unknown' | null } | null
+  /** 后端原样返回任务 coverage；工作台只读取其中的 verification_status 判定评分类型。 */
+  coverage?: {
+    verification_status?: 'complete' | 'partial' | 'failed' | 'unknown' | null
+    [key: string]: unknown
+  } | null
   create_time: string | null
 }
 

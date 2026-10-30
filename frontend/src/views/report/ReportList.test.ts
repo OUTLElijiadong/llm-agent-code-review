@@ -251,6 +251,29 @@ describe('报告卡片列表', () => {
     expect(wrapper.find('.report-card').text()).not.toContain('模式未记录')
   })
 
+  it.each([
+    ['discuss', '圆桌评分 62'],
+    ['standard', '代码评分 62'],
+    ['security_scan', '安全审计评分 62'],
+  ])('报告列表评分环的说明按评分类型命名：%s 显示 %s', async (type, expected) => {
+    api.reports.mockResolvedValueOnce({
+      items: [{
+        ...report,
+        task_id: 236, score: 62,
+        coverage: { coverage_status: 'complete', score_available: true },
+        score_scope: { available: true, scope: 'complete', label: '完整覆盖' },
+        source: { type, stats_basis: 'review_issues' },
+      }],
+      total: 1, page: 1, page_size: 20, pages: 1,
+    })
+    wrapper = mountPage()
+    await flushPromises()
+
+    const title = wrapper.find('.rc-score').attributes('title') ?? ''
+    expect(title).toContain(expected)
+    expect(title).not.toContain('类型未确认')
+  })
+
   it('历史动态用例通过率不作为沙箱代码质量或漏洞风险评分展示', async () => {
     api.reports.mockResolvedValueOnce({
       items: [{

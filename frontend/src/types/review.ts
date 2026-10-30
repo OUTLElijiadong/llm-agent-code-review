@@ -135,6 +135,28 @@ export interface TaskFileOut {
   snapshot_verified?: boolean
 }
 
+/**
+ * 任务级片段处理汇总（后端 chunk_receipts.py）：只由逐文件回执合计得到。
+ * known_* 只含有效回执的文件；没有任何有效回执时为 null（未知），不是 0。
+ * 它记录的是处理回执数量，不证明模型逐片审查的质量，也不是语义覆盖率。
+ */
+export interface ChunkReceiptSummary {
+  version: string
+  total_files: number | null
+  files_with_receipt: number
+  files_missing_receipt: number
+  files_not_applicable: number
+  missing_receipt_files: string[]
+  missing_receipt_files_omitted: number
+  known_total_chunks: number | null
+  known_completed_chunks: number | null
+  known_failed_chunks: number | null
+  receipts_complete: boolean
+  in_progress: boolean
+  label: string
+  note: string
+}
+
 export interface TaskCoverageOut {
   score_available?: boolean
   score_basis?: string | null
@@ -168,8 +190,16 @@ export interface TaskCoverageOut {
   completed_file_count?: number | null
   total_file_count?: number | null
   included_file_count?: number | null
+  /**
+   * 旧接口遗留：只对应当前或最后一个文件，不是任务合计。新接口已移除，
+   * 任务级片段数请读取 chunk_receipts（逐文件回执合计）。
+   */
   completed_chunks?: number | null
   total_chunks?: number | null
+  /** 进行中任务的当前文件分片进度；终态任务不再返回。 */
+  current_file_chunks?: { completed: number | null, total: number | null } | null
+  /** 任务级「已记录的片段处理数」，由逐文件回执汇总；缺回执的文件单列为未知。 */
+  chunk_receipts?: ChunkReceiptSummary | null
   error?: string | null
   unscanned?: string[]
   skipped?: string[]

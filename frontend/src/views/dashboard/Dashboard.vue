@@ -276,6 +276,7 @@ import SecurityPostureCard from '@/components/security/SecurityPostureCard.vue'
 import { PRISM_SEVERITY_COLORS } from '@/components/chart/prismTheme'
 import { severityClass, severityDisplayLabel } from '@/constants/severity'
 import { DIM_META, normalizeDimKey } from '@/constants/dim'
+import { scoreKindOf } from '@/constants/scoreKind'
 import {
   getSummary,
   getRiskDistribution,
@@ -626,13 +627,12 @@ interface ActivityItem {
 }
 
 function taskScoreLabel(task: RecentTaskOut): string {
-  if (['sandbox_test', 'pentest'].includes(task.review_type || '')) return '测试评分'
-  if (['quick', 'standard', 'security', 'performance', 'full'].includes(task.review_type || '')) return '代码评分'
-  return '历史评分（类型未确认）'
+  // 评分类型全站只在 scoreKind 判定，保证同一任务在工作台、项目页、任务页、报告页标签一致。
+  return scoreKindOf(task).label
 }
 
 function taskCoverageNote(task: RecentTaskOut): string {
-  if (task.review_type !== 'sandbox_test' || task.coverage?.verification_status === 'complete') return ''
+  if (scoreKindOf(task).key !== 'sandbox_partial') return ''
   if (task.coverage?.verification_status === 'partial') return ' · 验证范围不完整'
   if (task.coverage?.verification_status === 'failed') return ' · 验证未通过'
   return ' · 验证范围未知'

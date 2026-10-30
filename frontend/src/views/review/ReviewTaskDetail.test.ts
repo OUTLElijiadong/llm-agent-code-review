@@ -521,6 +521,72 @@ describe('审查详情真实执行状态', () => {
     expect(wrapper.text()).not.toContain('DeepSeek V4')
   })
 
+  it.each([
+    ['discuss', '圆桌评分'], ['standard', '代码评分'], ['full', '代码评分'],
+    ['pentest', '测试评分'], ['security_scan', '安全审计评分'],
+  ])('任务详情头部的评分类型：%s 显示 %s，与工作台和项目页同一口径', async (review_type, label) => {
+    review.getReviewTaskDetail.mockResolvedValue(taskResult({
+      review_type, status: 'success', score: 62, coverage: { stage: 'complete', coverage_status: 'complete' },
+    }))
+    await renderDetail()
+    expect(wrapper.get('.score-label').text()).toBe(label)
+    expect(wrapper.text()).not.toContain('类型未确认')
+  })
+
+  it('沙箱验证范围不完整时头部称为“已测范围分”', async () => {
+    review.getReviewTaskDetail.mockResolvedValue(taskResult({
+      review_type: 'sandbox_test', status: 'success', score: 80, coverage: { verification_status: 'partial' },
+    }))
+    await renderDetail()
+    expect(wrapper.get('.score-label').text()).toBe('已测范围分')
+  })
+
+  it('终态任务显示逐文件回执合计，并说明它不证明审查质量', async () => {
+    review.getReviewTaskDetail.mockResolvedValue(taskResult({
+      status: 'success', total_files: 48, processed_files: 48,
+      coverage: {
+        stage: 'complete', completed_files: 48, total_files: 48,
+        chunk_receipts: {
+          version: 'chunk-receipts-v1', total_files: 48, files_with_receipt: 48, files_missing_receipt: 0,
+          files_not_applicable: 0, missing_receipt_files: [], missing_receipt_files_omitted: 0,
+          known_total_chunks: 54, known_completed_chunks: 54, known_failed_chunks: 0,
+          receipts_complete: true, in_progress: false,
+          label: '已记录的片段处理数 54/54（48 个文件均有回执）',
+          note: '仅为逐文件处理回执的合计，不单独证明模型逐片审查的质量，也不是语义覆盖率',
+        },
+      },
+    }))
+    await renderDetail()
+    const panel = wrapper.get('[aria-label="执行阶段与覆盖"]')
+    expect(panel.text()).toContain('48 / 48')
+    expect(panel.text()).toContain('已记录的片段处理数 54/54（48 个文件均有回执）')
+    expect(panel.text()).toContain('不单独证明模型逐片审查的质量')
+    expect(panel.text()).not.toContain('当前 / 最近文件分片')
+    expect(panel.text()).not.toContain('1 / 1')
+  })
+
+  it('进行中任务分开显示任务级回执合计与当前文件分片进度', async () => {
+    review.getReviewTaskDetail.mockResolvedValue(taskResult({
+      coverage: {
+        stage: 'analyzing', current_file: 'worker.ts', completed_files: 2, total_files: 8,
+        current_file_chunks: { completed: 3, total: 11 },
+        chunk_receipts: {
+          version: 'chunk-receipts-v1', total_files: 8, files_with_receipt: 2, files_missing_receipt: 6,
+          files_not_applicable: 0, missing_receipt_files: [], missing_receipt_files_omitted: 0,
+          known_total_chunks: 13, known_completed_chunks: 5, known_failed_chunks: 0,
+          receipts_complete: false, in_progress: true,
+          label: '已记录的片段处理数 5/13（进行中；2 个文件有回执；尚有 6 个文件未产生回执）',
+          note: '仅为逐文件处理回执的合计',
+        },
+      },
+    }))
+    await renderDetail()
+    const panel = wrapper.get('[aria-label="执行阶段与覆盖"]')
+    expect(panel.text()).toContain('3 / 11')
+    expect(panel.text()).toContain('当前文件分片')
+    expect(panel.text()).toContain('已记录的片段处理数 5/13（进行中')
+  })
+
   it('真实零计数保留为零，而不是未知或虚构完成', async () => {
     review.getReviewTaskDetail.mockResolvedValue(taskResult({
       coverage: { stage: 'queued', completed_files: 0, total_files: 8, completed_chunks: 0, total_chunks: 11 },

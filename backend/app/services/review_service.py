@@ -62,6 +62,7 @@ from app.models.review_task_file import ReviewTaskFile
 from app.models.user import User
 from app.schemas.review import ReviewStartIn
 from app.services.ai_usage_context import current_attribution, model_attribution, usage_context
+from app.services.chunk_receipts import with_chunk_receipts
 from app.services.context_fidelity import extract_protected_facts
 from app.services.deepseek_responses_runtime import _split_compaction_source, estimate_tokens
 from app.services.issue_merger import finding_to_issue, merge_findings_and_issues
@@ -2904,7 +2905,10 @@ def get_task_detail(db: Session, user: User, task_id: int) -> dict:
         "summary": summary,
         "score_version": None if hide_report_metrics else task.score_version,
         "score_breakdown": None if hide_report_metrics else _display_task_score_breakdown(task, display_score),
-        "coverage": None if hide_report_metrics else report_coverage,
+        # 顶层 completed/total_chunks 只对应当前或最后一个文件；任务级片段数由逐文件回执汇总。
+        "coverage": None if hide_report_metrics else with_chunk_receipts(
+            report_coverage, total_files=task.total_files, review_type=task.review_type, status=task.status,
+        ),
         "model_name": task.model_name, "duration_ms": task.duration_ms,
         "start_time": task.start_time, "end_time": task.end_time,
         "create_time": task.create_time,

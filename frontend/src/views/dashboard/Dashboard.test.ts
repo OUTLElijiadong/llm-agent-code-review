@@ -686,13 +686,58 @@ describe('代码评分样本口径', () => {
   it('只有沙箱成功记录时不把测试100分显示成代码评分', async () => {
     mocks.getSummary.mockResolvedValue({ ...summary(), review_count: 1, code_review_count: 0, avg_score: 0,
       recent_tasks: [{ id: 1, task_name: '沙箱执行', project_id: 1, project_name: '项目', status: 'success',
-        review_type: 'sandbox_test', score: 100, create_time: null }] })
+        review_type: 'sandbox_test', score: 100, coverage: { verification_status: 'complete' }, create_time: null }] })
     const wrapper = mountPage()
     await flushPromises()
     expect(wrapper.findAll('.stat-num')[3].text()).toBe('—/100')
     expect(wrapper.find('.stat-gauge').exists()).toBe(false)
     expect(wrapper.text()).toContain('测试评分')
     expect(wrapper.text()).toContain('暂无代码评分样本')
+  })
+
+  it('沙箱成功记录没有验证覆盖证据时按已测范围分展示，不当作整体测试评分', async () => {
+    mocks.getSummary.mockResolvedValue({ ...summary(), review_count: 1, code_review_count: 0, avg_score: 0,
+      recent_tasks: [{ id: 1, task_name: '沙箱执行', project_id: 1, project_name: '项目', status: 'success',
+        review_type: 'sandbox_test', score: 100, create_time: null }] })
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.text()).toContain('已测范围分')
+    expect(wrapper.text()).not.toContain('测试评分')
+    expect(wrapper.findAll('.stat-num')[3].text()).toBe('—/100')
+  })
+
+  it('圆桌任务 #236（62 分）在工作台显示明确的“圆桌评分”，不落到类型未确认', async () => {
+    mocks.getSummary.mockResolvedValue(summary({
+      recent_tasks: [{ id: 236, task_name: 'timed.rst · 圆桌讨论审', project_id: 1, project_name: '项目', status: 'success',
+        review_type: 'discuss', score: 62, coverage: { stage: 'complete', coverage_status: 'complete' }, create_time: null }],
+    }))
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.text()).toContain('圆桌评分')
+    expect(wrapper.text()).toContain('62')
+    expect(wrapper.text()).not.toContain('类型未确认')
+  })
+
+  it('安全审计任务同样有明确的评分类型', async () => {
+    mocks.getSummary.mockResolvedValue(summary({
+      recent_tasks: [{ id: 5, task_name: '全链路审计', project_id: 1, project_name: '项目', status: 'success',
+        review_type: 'fullchain_audit', score: 70, create_time: null }],
+    }))
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.text()).toContain('安全审计评分')
+    expect(wrapper.text()).not.toContain('类型未确认')
+  })
+
+  it('沙箱验证范围不完整时与项目页一致，称为“已测范围分”', async () => {
+    mocks.getSummary.mockResolvedValue(summary({
+      recent_tasks: [{ id: 6, task_name: '沙箱执行', project_id: 1, project_name: '项目', status: 'success',
+        review_type: 'sandbox_test', score: 90, coverage: { verification_status: 'partial' }, create_time: null }],
+    }))
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.text()).toContain('已测范围分')
+    expect(wrapper.text()).toContain('验证范围不完整')
   })
 
   it('缺失样本数或空分数不冒充有效代码评分', async () => {

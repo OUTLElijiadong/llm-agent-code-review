@@ -76,6 +76,39 @@ describe('主页面失败恢复真实挂载', () => {
     expect(card.text()).not.toContain('null')
   })
 
+  it.each([
+    ['discuss', 62, '圆桌评分 62'],
+    ['standard', 88, '代码评分 88'],
+    ['fullchain_audit', 70, '安全审计评分 70'],
+    ['', 55, '历史评分（类型未确认） 55'],
+  ])('项目页最近任务的评分类型：%s 显示“%s”，与工作台同一口径', async (review_type, score, expected) => {
+    api.getProjectDetail.mockResolvedValue({
+      ...project,
+      recent_tasks: [{ id: 236, review_type, score, total_issues: 12, status: 'success', create_time: '2026-10-01T00:00:00Z',
+        coverage: { stage: 'complete', coverage_status: 'complete' } }],
+    })
+    render(ProjectDetail); await flushPromises()
+    state().activeTab = 'tasks'
+    await flushPromises()
+    const card = wrapper.get('.recent-task-card')
+    expect(card.text()).toContain(expected)
+    if (review_type) expect(card.text()).not.toContain('类型未确认')
+  })
+
+  it('项目页沙箱验证范围不完整时称为“已测范围分”并标注范围', async () => {
+    api.getProjectDetail.mockResolvedValue({
+      ...project,
+      recent_tasks: [{ id: 9, review_type: 'sandbox_test', score: 90, total_issues: 1, status: 'success',
+        create_time: '2026-10-01T00:00:00Z', coverage: { verification_status: 'partial' } }],
+    })
+    render(ProjectDetail); await flushPromises()
+    state().activeTab = 'tasks'
+    await flushPromises()
+    const card = wrapper.get('.recent-task-card')
+    expect(card.text()).toContain('已测范围分 90')
+    expect(card.text()).toContain('范围不完整')
+  })
+
   it('项目刷新503保留快照并显示失败；重试成功后移除提示', async () => {
     render(ProjectList); await flushPromises()
     api.getProjects.mockRejectedValueOnce(fail())

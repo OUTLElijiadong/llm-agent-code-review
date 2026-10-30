@@ -2135,6 +2135,59 @@ def test_extract_issues_repairs_one_invalid_json_response(monkeypatch: pytest.Mo
     assert calls[0]["usage_chunk_index"] != calls[1]["usage_chunk_index"]
 
 
+def test_finalized_roundtable_report_exposes_eight_dimension_scores_from_its_issues(
+    db: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """圆桌收尾后读取报告：8 维度由已落库的问题集按既有规则派生，无依据的维度为“无数据”。
+
+    这是生产圆桌 #236 的路径：收尾只写 ReviewIssue 与整体评分，从不写维度字段，
+    因此报告页读取时必须能从问题集即时算出，而不是显示「暂无 8 维度数据」。
+    """
+    from app.models.custom_agent import ReviewTaskAgentRelease  # noqa: F401 - 注册报告关联表
+    from app.models.user import User
+    from app.services.report_service import get_report_detail
+
+    task = ReviewTask(
+        user_id=2, project_id=3, task_name="timed.rst · 圆桌讨论审", review_type="discuss",
+        status="running", total_files=1, processed_files=0,
+    )
+    _seed_execution_actor(db, task.user_id, task.project_id)
+    db.add(task)
+    db.commit()
+
+    def extract_issues(*_args: Any, **_kwargs: Any) -> list[Issue]:
+        return [
+            Issue(line_number=1, issue_type="安全漏洞", severity="高", title="越权", description="缺少鉴权"),
+            Issue(line_number=2, issue_type="安全漏洞", severity="中", title="弱校验", description="校验不足"),
+            Issue(line_number=3, issue_type="异常处理", severity="中", title="吞异常", description="except 后 pass"),
+            Issue(line_number=4, issue_type="可维护性", severity="低", title="函数过长", description="超过 80 行"),
+        ]
+
+    monkeypatch.setattr(module, "SessionLocal", lambda: db)
+    monkeypatch.setattr(module.DeepSeekAgent, "log_deferred", staticmethod(lambda *_a, **_k: None))
+    monkeypatch.setattr(module, "_extract_issues", extract_issues)
+
+    module._finalize_review(
+        task_id=task.id, user_id=2, file_id=10, file_name="timed.rst", all_turns=[_turn(1)], code="x\ny\nz\nw\n",
+        language="rst", deferred_logs=[], agent=RecordingAgent(), stopped=False, consensus="共识",
+    )
+
+    # 读取侧的授权与本测试无关：用管理员账号读取（报告权限由其它测试覆盖）。
+    admin = User(id=99, username="report-admin", password="x", email="r@a.c", nickname="管理员", role="admin", status=1)
+    db.add(admin)
+    db.commit()
+    detail = get_report_detail(db, admin, task.id)
+    items = {item["key"]: item for item in detail["stats"]["dimension_scores"]["items"]}
+
+    assert detail["stats"]["dim_scores"] == {"security": 89, "exception": 97, "maintain": 99}
+    assert items["security"]["status"] == "scored"
+    assert items["style"]["status"] == "no_data" and items["style"]["score"] is None
+    assert detail["stats"]["dimension_scores"]["no_data_count"] == 5
+    # 维度评分只是读取时的派生视图：不改变任务已持久化的整体评分与版本。
+    assert detail["task"]["score_version"] == db.get(ReviewTask, task.id).score_version
+
+
 def test_finalize_review_persists_issues_statistics_and_log_labels(
     db: Any,
     monkeypatch: pytest.MonkeyPatch,

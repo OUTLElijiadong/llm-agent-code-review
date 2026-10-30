@@ -48,6 +48,7 @@ from app.ai.scoring import (
 )
 from app.constants.compliance import build_compliance_summary
 from app.core.exceptions import ConflictError
+from app.services.chunk_receipts import CHUNK_RECEIPT_NOTE, with_chunk_receipts
 from app.services.report_markdown import markdown_to_html, markdown_to_safe_html
 from app.services.report_text import clean_report_payload
 
@@ -302,7 +303,14 @@ def _normalize_task(task: Any) -> Dict[str, Any]:
         coverage["coverage_status"] = declared_coverage
         if declared_coverage == "unknown" and not coverage.get("unscanned"):
             coverage["unscanned"] = ["历史任务未保存覆盖清单，无法确认实际扫描范围"]
-    normalized["coverage"] = coverage
+    # 导出入口可能拿到数据库里的原始 coverage（顶层 completed/total_chunks 只对应最后一个文件），
+    # 也可能拿到详情接口已整形的副本；两种情况都统一为逐文件回执汇总，缺回执的文件显示“未知”。
+    normalized["coverage"] = dict(with_chunk_receipts(
+        coverage,
+        total_files=normalized.get("total_files"),
+        review_type=normalized.get("review_type"),
+        status=normalized.get("status"),
+    ))
     return normalized
 
 
@@ -929,6 +937,8 @@ _MAX_SCOPE_TEXT_LENGTH = 500
 _MAX_SCOPE_LIST_ITEMS = 20
 _MAX_SCOPE_LINES = 200
 _MAX_SCOPE_DEPTH = 8
+# 由读取层派生、已在范围说明里单独成行的键，不计入“未展开的内部元数据”。
+_DERIVED_SCOPE_KEYS = frozenset({"chunk_receipts", "current_file_chunks"})
 
 
 def _format_scope_facts(value: Any, namespace: str) -> List[str]:
@@ -949,6 +959,8 @@ def _format_scope_facts(value: Any, namespace: str) -> List[str]:
             if len(lines) >= _MAX_SCOPE_LINES:
                 omitted_count += len(current) - index
                 return
+            if key in _DERIVED_SCOPE_KEYS:
+                continue
             label = _SCOPE_FIELD_LABELS.get(key)
             if label is None:
                 omitted_count += 1
@@ -1010,6 +1022,17 @@ def _build_scope_lines(context: Dict[str, Any]) -> List[str]:
             lines.append("覆盖完整性：未知，未记录，不能据此判定完整覆盖。")
     else:
         lines.append("覆盖记录：未记录，不能据此判定完整覆盖。")
+    # 任务级片段数只来自逐文件回执合计，缺回执的文件显示“未知”；顶层计数不参与。
+    receipts = coverage.get("chunk_receipts") if isinstance(coverage, dict) else None
+    if isinstance(receipts, dict) and receipts.get("label"):
+        lines.append(f"{receipts['label']}。{CHUNK_RECEIPT_NOTE}。")
+        missing_files = receipts.get("missing_receipt_files")
+        if isinstance(missing_files, list) and missing_files:
+            omitted = int(receipts.get("missing_receipt_files_omitted") or 0)
+            lines.append(
+                "缺少回执的文件：" + "、".join(str(name) for name in missing_files)
+                + (f" 等另外 {omitted} 个" if omitted else "")
+            )
     lines.append("覆盖状态说明：反映本次任务记录的范围口径，不应单独解读为逐行语义审查完整。")
 
     stats = context["statistics"]
