@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
@@ -63,6 +63,7 @@ class TestVerifierAgent(_SandboxAgent):
         test_mode: str = "whitebox",
         worker_code: str = "",
         source_revision_id: Optional[int] = None,
+        http_scope: Optional[list[dict[str, Any]]] = None,
         remote_target_url: str = "",
         remote_target_authorized: bool = False,
         ctx: Optional[AgentContext] = None,
@@ -79,6 +80,8 @@ class TestVerifierAgent(_SandboxAgent):
                     "test_mode": test_mode,
                     "worker_code": worker_code,
                     "source_revision_id": source_revision_id,
+                    # 本地黑盒的精确 GET 路径白名单；服务端会再次校验，缺失时对本地黑盒失败关闭。
+                    "http_scope": http_scope,
                     "remote_target_url": remote_target_url or None,
                     "remote_target_authorized": remote_target_authorized,
                     "ttl_hours": 24,

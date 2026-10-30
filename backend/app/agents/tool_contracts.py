@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple, Type
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from app.core.permission_codes import PermissionCode
+from app.schemas.agent_capability import SandboxHttpRequestScope
 from app.schemas.agent_team import AgentTeamMemberIn
 
 # 直接调用领域服务的工具不会经过 REST 权限依赖。Responses 的发现/执行
@@ -249,8 +250,43 @@ class RunProjectTestsArguments(FixedToolArguments):
         default=None,
         description="项目源码修复副本 ID(来自项目详情 source_revisions);不传则用原始源码",
     )
+    http_scope: Optional[List[SandboxHttpRequestScope]] = Field(
+        default=None,
+        max_length=20,
+        description=(
+            "本地黑盒(test_mode='blackbox' 且不传 remote_target_url)必须提供的精确 HTTP 路径白名单，1–20 项，仅 GET；"
+            "每项 path 必填(以 / 开头的精确路径，不支持通配符、查询串或目录穿越)，query 可选(精确键值对)，"
+            "expected_statuses 可选(预期状态码列表，不填则只记录回包事实、不做断言)。"
+            "沙箱只会请求这些路径，不跑项目测试和 AI 动态用例。"
+            "白盒、组合测试(combined)和远程目标黑盒不接受该字段；不想列出路径时改用 test_mode='combined' "
+            "或 run_full_project_validation"
+        ),
+    )
     remote_target_url: str = Field(default="", max_length=500)
     remote_target_authorized: bool = Field(default=False)
+
+    @model_validator(mode="after")
+    def validate_http_scope(self) -> "RunProjectTestsArguments":
+        """本地黑盒必须带白名单，其余模式不得带；与 sandbox_service 的服务端红线一致。
+
+        服务端仍会二次校验；这里在审批、监督复核和落库之前给模型一条可自愈的错误，
+        让它在本轮补齐参数或改用 combined，而不是等到沙箱创建时才被拒绝。
+        """
+        local_blackbox = self.test_mode == "blackbox" and not self.remote_target_url.strip()
+        if local_blackbox and not self.http_scope:
+            raise ValueError(
+                "本地黑盒测试(test_mode='blackbox' 且未提供 remote_target_url)必须同时提供 http_scope："
+                "1–20 条精确 GET 路径白名单，例如 "
+                '[{"path": "/"}, {"path": "/about.php", "query": {"page": "1"}, "expected_statuses": [200]}]；'
+                "请补充后重新调用。不想限定路径时，改用 test_mode='combined' 或调用 run_full_project_validation，"
+                "二者都不需要白名单"
+            )
+        if self.http_scope and not local_blackbox:
+            raise ValueError(
+                "http_scope 仅适用于本地黑盒测试(test_mode='blackbox' 且不传 remote_target_url)；"
+                "白盒、组合测试和远程目标黑盒不接受该字段，请去掉 http_scope"
+            )
+        return self
 
 
 class FullProjectValidationArguments(FixedToolArguments):
@@ -759,7 +795,9 @@ _FIXED_TOOL_CONTRACTS: Tuple[FixedToolContract, ...] = (
     ),
     FixedToolContract(
         "run_project_tests",
-        "调用测试验证 Agent 在隔离 worker 上执行项目级白盒、黑盒或组合测试",
+        "调用测试验证 Agent 在隔离 worker 上执行项目级白盒、黑盒或组合测试。"
+        "本地黑盒(test_mode='blackbox')必须同时给出 1–20 条精确 GET 路径白名单 http_scope；"
+        "不想列出路径时用 test_mode='combined' 或 run_full_project_validation，白盒与组合测试不接受 http_scope",
         RunProjectTestsArguments,
         True,
     ),
