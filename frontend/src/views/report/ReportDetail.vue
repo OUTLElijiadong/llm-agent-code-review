@@ -394,7 +394,8 @@
           <p class="card-desc">代码规范 / 命名 / 注释 / 维护 / 性能 / 异常 / Bug / 安全</p>
         </header>
         <BaseChart v-if="hasDimData" :option="radarOption" height="360px" />
-        <EmptyState v-else description="暂无 8 维度数据" compact />
+        <p v-if="dimensionNote" class="dimension-radar-note" data-testid="dimension-radar-note" role="note">{{ dimensionNote }}</p>
+        <p class="dimension-radar-basis">{{ dimensionBasis }}</p>
       </section>
 
       <!-- ============ 文件列表 ============ -->
@@ -1235,33 +1236,77 @@ const severityRows = computed(() => {
   return rows.filter((row) => row.value > 0)
 })
 
-import { DIM_KEYS, DIM_LABELS, normalizeDimKey } from '@/constants/dim'
+import { DIM_KEYS, DIM_LABELS, normalizeDimKey, type DimKey } from '@/constants/dim'
 import { ElMessage } from 'element-plus/es/components/message/index'
 
 const dimKeys = DIM_KEYS
-const dimLabels = dimKeys.map((k) => DIM_LABELS[k])
 
-const dimScores = computed<number[]>(() => {
-  const rawMap: Record<string, number> = {}
-  const dim = (stats.value.dim_scores as Record<string, number>) ?? {}
-  // 兼容后端可能用 maintainability/bug 等同义键
-  for (const [k, v] of Object.entries(dim)) {
-    const norm = normalizeDimKey(k)
-    if (norm && typeof v === 'number') rawMap[norm] = v
+interface DimensionRow {
+  key: DimKey
+  label: string
+  /** null 表示该维度没有评分依据（无数据）；真实 0 分保留为 0。 */
+  score: number | null
+  reason: string
+}
+
+const NO_DIMENSION_DATA_REASON = '本任务没有记录该维度的问题，缺少评分依据（不代表满分）'
+
+// 后端 stats.dimension_scores（读取时由已保存的问题集派生，标准审查与圆桌同一规则）优先；
+// 旧响应只有 dim_scores 时按同一结构兜底。缺失维度永远是“无数据”，不当作 0 分，也不用整体评分填充。
+const dimensionRows = computed<DimensionRow[]>(() => {
+  const detail = stats.value.dimension_scores as { items?: Array<Record<string, unknown>> } | undefined
+  const fromServer = new Map<string, DimensionRow>()
+  for (const item of Array.isArray(detail?.items) ? detail.items : []) {
+    const key = normalizeDimKey(String(item.key ?? ''))
+    if (!key) continue
+    const score = typeof item.score === 'number' && Number.isFinite(item.score) ? Math.round(item.score) : null
+    fromServer.set(key, { key, label: DIM_LABELS[key], score, reason: String(item.reason ?? '') })
   }
-  return dimKeys.map((k) => {
-    const v = rawMap[k]
-    // 缺失维度用 NaN, ECharts 雷达图会显示为缺口,不再用整体 score 兜底掩盖
-    return typeof v === 'number' && v > 0 ? Math.round(v) : NaN
+  const legacy: Record<string, number> = {}
+  const rawLegacy = (stats.value.dim_scores as Record<string, number> | undefined) ?? {}
+  for (const [k, v] of Object.entries(rawLegacy)) {
+    const norm = normalizeDimKey(k)
+    if (norm && typeof v === 'number' && Number.isFinite(v)) legacy[norm] = Math.round(v)
+  }
+  return dimKeys.map((key) => {
+    const server = fromServer.get(key)
+    if (server) return server
+    return key in legacy
+      ? { key, label: DIM_LABELS[key], score: legacy[key], reason: '' }
+      : { key, label: DIM_LABELS[key], score: null, reason: NO_DIMENSION_DATA_REASON }
   })
 })
 
-const hasDimData = computed(() => dimScores.value.some((v) => !Number.isNaN(v) && v > 0))
+const dimensionPlotted = computed(() => dimensionRows.value.filter((row) => row.score !== null))
+const dimensionOmitted = computed(() => dimensionRows.value.filter((row) => row.score === null))
+// 雷达至少要 3 条轴才构成多边形；少于 3 个维度有数据时改为文字说明，避免画出线段或点的假图形。
+const hasDimData = computed(() => dimensionPlotted.value.length >= 3)
+const dimensionBasis = computed(() => String(
+  (stats.value.dimension_scores as { basis?: unknown } | undefined)?.basis
+  || '各维度分按该维度已记录且未证伪问题的严重度扣分，与整体评分同一规则；各维度分不能相加或平均得到整体评分。',
+))
+const dimensionNote = computed(() => {
+  const plotted = dimensionPlotted.value
+  const omitted = dimensionOmitted.value
+  const parts: string[] = []
+  if (plotted.length === 0) {
+    const reasons = [...new Set(omitted.map((row) => row.reason).filter(Boolean))]
+    parts.push(`没有任何维度有评分依据${reasons.length === 1 && reasons[0] !== NO_DIMENSION_DATA_REASON ? `：${reasons[0]}` : ''}。`)
+  } else if (plotted.length < 3) {
+    parts.push(`仅 ${plotted.length} 个维度有数据（${plotted.map((row) => `${row.label} ${row.score}`).join('、')}），不足以绘制雷达图。`)
+  }
+  if (plotted.length > 0 && omitted.length > 0) {
+    parts.push(`未绘制 ${omitted.length} 个维度（${omitted.map((row) => row.label).join('、')}）：无数据，不是 0 分。`)
+  } else if (omitted.length > 0) {
+    parts.push(`未绘制 ${omitted.length} 个维度：无数据，不是 0 分。`)
+  }
+  return parts.join('')
+})
 
 const radarOption = computed<EChartsOption>(() => ({
   tooltip: {},
   radar: {
-    indicator: dimLabels.map((name) => ({ name, max: 100 })),
+    indicator: dimensionPlotted.value.map((row) => ({ name: row.label, max: 100 })),
     radius: '68%',
     splitArea: { areaStyle: { color: ['#FAFAFE', '#F7F8FA'] } },
     axisLine: { lineStyle: { color: '#E0E3EA' } },
@@ -1270,9 +1315,9 @@ const radarOption = computed<EChartsOption>(() => ({
   },
   series: [{
     type: 'radar',
-    name: '8 维度评分',
+    name: '维度评分',
     data: [{
-      value: dimScores.value,
+      value: dimensionPlotted.value.map((row) => row.score as number),
       name: '本次评分',
       areaStyle: { color: 'rgba(91, 88, 232, 0.18)' },
       lineStyle: { color: '#5B58E8', width: 2 },
@@ -2339,6 +2384,18 @@ useAgentPageRefresh({ pages: ['/reports', '/reviews', '/issues'], refresh: loadR
 .card-desc {
   margin-top: 4px;
   font-size: 12px;
+  color: var(--gray-500);
+}
+
+.dimension-radar-note,
+.dimension-radar-basis {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--gray-600);
+}
+
+.dimension-radar-basis {
   color: var(--gray-500);
 }
 

@@ -25,6 +25,7 @@ from app.models.review_task_file import ReviewTaskFile
 from app.models.user import User
 from app.services import rbac_service
 from app.services.chunk_receipts import with_chunk_receipts
+from app.services.dimension_scores import compute_dimension_scores
 from app.services.project_member_service import (
     get_visible_project_ids,
     project_resource_capabilities,
@@ -803,6 +804,15 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
             error_message=task.error_message,
             coverage=clean_report_payload(report_coverage),
         )
+    # 8 维度评分在读取时由已保存的问题集派生：标准审查与圆桌走同一条路径，历史任务无需回填。
+    dimension_scores = (
+        compute_dimension_scores(
+            _dimension_issue_rows(db, task_id),
+            available=score_available,
+            unavailable_reason=str(score_scope.get("reason") or "") or None,
+        )
+        if should_derive_dimension_scores(task) else None
+    )
     return {
         "can_delete": (rbac_service.check_permission(db, int(user.id), PermissionCode.REVIEW_CANCEL)
                        and capabilities.get("can_execute", False)),
@@ -841,6 +851,10 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
             "score_version": score_breakdown.get("version"),
             "score_breakdown": score_breakdown,
             "risk_level": score_breakdown.get("risk_level"),
+            **(
+                {"dim_scores": dimension_scores["scores"], "dimension_scores": dimension_scores}
+                if dimension_scores is not None else {}
+            ),
         },
         "source": source,
         "summary": clean_report_markdown(
@@ -1020,6 +1034,22 @@ def _sandbox_native_exports(db: Session, user: User, task: ReviewTask, content: 
                 "download_api": f"/api/sandboxes/{public_id}/artifacts/{artifact.id}",
             }]
     return []
+
+
+def should_derive_dimension_scores(task: ReviewTask) -> bool:
+    """8 维度评分只针对按代码问题类别计分的报告；沙箱/渗透是领域报告，不画代码质量雷达。"""
+    return task.review_type not in {"sandbox_test", "pentest"}
+
+
+def _dimension_issue_rows(db: Session, task_id: int) -> list[tuple[str, str, int]]:
+    """按 (问题类型, 严重度) 汇总已保存且未证伪的问题；标准审查与圆桌共用，读取时即时计算。"""
+    rows = db.query(
+        ReviewIssue.issue_type, ReviewIssue.severity, func.count(ReviewIssue.id),
+    ).filter(
+        ReviewIssue.task_id == task_id,
+        ReviewIssue.status != "refuted",
+    ).group_by(ReviewIssue.issue_type, ReviewIssue.severity).all()
+    return [(kind, severity, int(count)) for kind, severity, count in rows]
 
 
 def _empty_issue_stats(task: ReviewTask, basis: str) -> dict:
