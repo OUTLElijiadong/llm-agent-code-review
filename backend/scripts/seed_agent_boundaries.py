@@ -22,6 +22,7 @@ from app.agents.contracts import (
     PROTECTED_AGENT_CODES,
     validate_contract_catalog,
 )
+from app.agents.orchestrator import get_orchestrator
 from app.core.database import SessionLocal
 from app.models.agent_governance import AgentProfile, AgentToolPermission, ToolCallLog
 from app.models.audit_log import AuditLog
@@ -60,6 +61,13 @@ BOUNDARIES = {
     "memory_manager": _spec("记忆索引与检索", ("experience_reader", "governance_reader"), ("knowledge_store",)),
     "model_evaluator": _spec("模型与黄金集评测", ("evaluation_runner", "experience_reader"), ("workflow_dispatch",)),
     "monitor": _spec("指标与 SLA 监控", ("observability_reader",)),
+    # 运维写操作的逐项确认、超管校验和白名单参数由 agent_responses_service / ops_service 把关；
+    # 网关入口 admin_execute_operation 必须在白名单，否则只读巡检也会被"不在职责边界内"拒绝。
+    "operations": _spec(
+        "全服巡检与受控运维",
+        ("admin_execute_operation", "observability_reader", "governance_reader"),
+        ("workflow_dispatch",),
+    ),
     "orchestrator": _spec("跨 Agent 任务编排", ("governance_reader", "observability_reader"), ("workflow_dispatch",)),
     "policy": _spec("风险策略评估", ("policy_evaluator", "governance_reader"), ("release_publisher",)),
     "project_analyzer": _spec("项目结构与依赖分析", ("source_reader", "evidence_verifier")),
@@ -72,8 +80,15 @@ BOUNDARIES = {
     "rule_manager": _spec(
         "审查规则维护", ("governance_reader", "evidence_verifier"), ("knowledge_store", "release_publisher")
     ),
+    "sandbox_deployer": _spec(
+        "沙箱部署与生命周期管理", ("observability_reader", "governance_reader"), ("workflow_dispatch",)
+    ),
     "scheduler": _spec("定时任务触发", ("governance_reader", "observability_reader"), ("workflow_dispatch",)),
     "security_sentinel": _spec("安全风险审查", ("source_reader", "evidence_verifier"), ("workflow_dispatch",)),
+    # 站点执行的业务权限、团队租约和账号确认在 site_agent_service 内校验；这里只放行页面桥入口。
+    "site_operator": _spec("站点页面执行与结果核验", ("operate_current_page", "evidence_verifier")),
+    # 只读监督：不执行任务、不授予权限，因此没有任何审批或写入类工具。
+    "supervisor": _spec("动作计划与结果证据只读复核", ("governance_reader", "evidence_verifier")),
     "test_verifier": _spec(
         "回归验证与证据归档", ("source_reader", "evidence_verifier", "evaluation_runner"), ("workflow_dispatch",)
     ),
@@ -190,6 +205,9 @@ def main() -> None:
             f"missing={sorted(expected_boundaries - set(BOUNDARIES))} "
             f"unexpected={sorted(set(BOUNDARIES) - expected_boundaries)}"
         )
+    # 独立脚本进程不会经历 FastAPI 启动，先构造元数据单例触发运行时 Agent 注册；
+    # 否则 sync_profiles 只能看到治理默认表(19 个)，缺少 chat_assistant 等 15 个运行时画像。
+    get_orchestrator()
     db = SessionLocal()
     try:
         profiles = agent_governance_service.sync_profiles(db)
