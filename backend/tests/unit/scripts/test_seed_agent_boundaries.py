@@ -126,12 +126,7 @@ def _run_seed(workdir: Path, db_name: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-I", "-X", "utf8", "-c", _COLD_DRIVER, str(BACKEND), str(SCRIPT)],
         cwd=workdir,
-        env={
-            "PATH": os.environ.get("PATH", ""),
-            "HOME": os.environ.get("HOME", ""),
-            "DB_HOST": "sqlite",
-            "DB_NAME": db_name,
-        },
+        env={**os.environ, "DB_HOST": "sqlite", "DB_NAME": db_name},
         capture_output=True,
         text=True,
         encoding="utf-8",

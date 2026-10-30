@@ -247,12 +247,7 @@ def test_alembic_command_path_upgrades_a_064_baseline_to_065(tmp_path: Path) -> 
     result = subprocess.run(
         [sys.executable, "-I", "-X", "utf8", "-c", _STAMP_064_THEN_UPGRADE, str(BACKEND), REVISION],
         cwd=tmp_path,
-        env={
-            "PATH": os.environ.get("PATH", ""),
-            "HOME": os.environ.get("HOME", ""),
-            "DB_HOST": "sqlite",
-            "DB_NAME": "baseline",
-        },
+        env={**os.environ, "DB_HOST": "sqlite", "DB_NAME": "baseline"},
         capture_output=True,
         text=True,
         encoding="utf-8",

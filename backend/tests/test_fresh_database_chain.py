@@ -89,8 +89,7 @@ def _execute_sql_file(connection, path: Path) -> None:
 
 def _alembic_upgrade_head(url: URL) -> None:
     environment = {
-        "PATH": os.environ.get("PATH", ""),
-        "HOME": os.environ.get("HOME", ""),
+        **os.environ,
         "DB_HOST": url.host,
         "DB_PORT": str(url.port or 3306),
         "DB_USER": url.username,
@@ -189,7 +188,7 @@ def test_review_rule_has_language_and_severity_columns(fresh_chain) -> None:
     assert severity["comment"] == "严重|高|中|低"
 
 
-def test_orm_tables_and_columns_are_all_created_by_the_chain(fresh_chain) -> None:
+def test_alembic_chain_creates_every_orm_table_and_column(fresh_chain) -> None:
     from app.core.database import Base
     from app.models import load_all_models
 
@@ -232,7 +231,7 @@ def test_rule_service_language_filter_runs_on_the_fresh_database(fresh_chain) ->
     assert {rule.rule_code for rule in python_rules} == {rule.rule_code for rule in unfiltered}
 
 
-def test_065_on_mysql_keeps_hand_patched_columns_and_adds_only_the_missing_one(fresh_chain_url: URL) -> None:
+def test_migration_065_on_mysql_keeps_hand_patched_columns_and_adds_only_the_missing_one(fresh_chain_url: URL) -> None:
     """老生产库当年手工补过列(可能只补了一列，定义也不同)：065 只补缺的，已有的原样保留。"""
     probe = "prism_065_hand_patched_probe"
     spec = spec_from_file_location(
