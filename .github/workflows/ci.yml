@@ -74,6 +74,45 @@ jobs:
             exit 1
           fi
 
+      - name: 启动一次性空 MySQL 建库链夹具
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          # 全新建库链校验：空 MySQL 依次执行 init.sql → seed.sql → alembic upgrade head。
+          # SQLite 测试库由 ORM create_all 建表，发现不了"ORM 有、基线与迁移都没有"的缺列。
+          name="prism-fresh-chain-${RUN_ID}-${RUN_ATTEMPT}"
+          password="$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
+          echo "::add-mask::$password"
+          docker run --detach --name "$name" \
+            --publish 127.0.0.1::3306 \
+            --tmpfs /var/lib/mysql:rw \
+            --env MYSQL_ROOT_PASSWORD="$password" \
+            mysql:8.0 \
+              --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci \
+              --max-allowed-packet=64M --performance-schema=OFF
+          port="$(docker port "$name" 3306/tcp | head -n 1 | sed 's/.*://')"
+          ready=0
+          for ((attempt = 1; attempt <= 60; attempt++)); do
+            # 初始化阶段的临时服务不监听 TCP，--protocol=TCP 才不会把它误判为就绪。
+            if docker exec --env MYSQL_PWD="$password" "$name" \
+              mysql --protocol=TCP -h 127.0.0.1 -uroot --batch --skip-column-names -e 'SELECT 1' >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            docker logs "$name"
+            exit 1
+          fi
+          {
+            echo "PRISM_FRESH_CHAIN_CONTAINER=$name"
+            echo "PRISM_FRESH_CHAIN_MYSQL_URL=mysql+pymysql://root:${password}@127.0.0.1:${port}/"
+            echo "PRISM_FRESH_CHAIN_REQUIRED=1"
+          } >> "$GITHUB_ENV"
+
       - name: 后端全量测试与覆盖率
         run: python -m pytest -q -rs --cov=app --cov-report=term --cov-report=xml
 
@@ -96,6 +135,15 @@ jobs:
           socket_path="${PRISM_LOGIN_TEST_REDIS_SOCKET:-}"
           if [[ "$socket_path" =~ ^/tmp/prism-login-redis-[0-9]+-[0-9]+/redis\.sock$ ]]; then
             rm -rf -- "${socket_path%/redis.sock}"
+          fi
+
+      - name: 清理 MySQL 建库链夹具
+        if: always()
+        working-directory: .
+        run: |
+          name="${PRISM_FRESH_CHAIN_CONTAINER:-}"
+          if [[ "$name" =~ ^prism-fresh-chain-[0-9]+-[0-9]+$ ]]; then
+            docker rm --force "$name" >/dev/null 2>&1 || true
           fi
 
   frontend:
