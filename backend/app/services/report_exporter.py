@@ -48,8 +48,8 @@ from app.ai.scoring import (
 )
 from app.constants.compliance import build_compliance_summary
 from app.core.exceptions import ConflictError
-from app.services.chunk_receipts import CHUNK_RECEIPT_NOTE, with_chunk_receipts
 from app.core.server_time import iso_utc, localize_fields
+from app.services.chunk_receipts import CHUNK_RECEIPT_NOTE, with_chunk_receipts
 from app.services.report_markdown import markdown_to_html, markdown_to_safe_html
 from app.services.report_text import clean_report_payload
 
