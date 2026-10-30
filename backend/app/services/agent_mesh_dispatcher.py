@@ -768,12 +768,15 @@ def _runtime_handler(
                 ctx=ctx,
             )
         elif operation == "run_project_tests":
+            # 本地黑盒的精确 GET 路径白名单；缺省时不带该键，沙箱服务端对缺失白名单的本地黑盒失败关闭。
+            scope_kwargs = {"http_scope": data["http_scope"]} if data.get("http_scope") is not None else {}
             result = orch.run_project_tests(
                 project_id=int(project_id),
                 language=language,
                 test_mode=str(data.get("test_mode") or "combined"),
                 worker_code=str(data.get("worker_code") or ""),
                 source_revision_id=data.get("source_revision_id"),
+                **scope_kwargs,
                 remote_target_url=str(data.get("remote_target_url") or ""),
                 remote_target_authorized=bool(data.get("remote_target_authorized", False)),
                 ctx=ctx,

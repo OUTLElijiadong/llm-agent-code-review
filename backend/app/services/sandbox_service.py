@@ -8379,10 +8379,19 @@ def _normalize_sandbox_http_scope(value: Any, *, required: bool) -> list[dict[st
     """在服务层再次校验本地黑盒范围，防止内部调用绕过 API schema。"""
     if value is None:
         if required:
-            raise ValidationError("本地黑盒测试必须提供精确 HTTP 路径白名单", code=40001)
+            # 团队成员、MCP 等不经过工具契约的入口只能看到这条报错，需要告诉调用方如何补齐或改用什么。
+            raise ValidationError(
+                "本地黑盒测试必须提供精确 HTTP 路径白名单(http_scope，1–20 条精确 GET 路径)；"
+                "不想限定路径时请改用 test_mode='combined' 的组合测试，二者都不需要白名单",
+                code=40001,
+            )
         return None
     if not required or not isinstance(value, list) or not 1 <= len(value) <= 20:
-        raise ValidationError("HTTP 路径白名单仅适用于本地黑盒测试，且必须为 1–20 项", code=40001)
+        raise ValidationError(
+            "HTTP 路径白名单仅适用于本地黑盒测试，且必须为 1–20 项；"
+            "白盒、组合测试和远程目标黑盒请不要传 http_scope",
+            code=40001,
+        )
     try:
         items = [SandboxHttpRequestScope.model_validate(item) for item in value]
     except (TypeError, ValueError) as exc:
