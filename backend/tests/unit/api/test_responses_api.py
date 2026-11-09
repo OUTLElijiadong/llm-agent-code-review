@@ -11,10 +11,12 @@ import pytest
 from fastapi import FastAPI
 
 from app.api import responses as module
+from app.services.billing_ledger_service import BillingError
 from app.services.deepseek_responses_service import (
     BufferedGatewayResponse,
     DeepSeekResponsesService,
     MemoryTranscriptStore,
+    ResponsesGatewayError,
     StreamingGatewayResponse,
 )
 
@@ -220,6 +222,32 @@ async def test_create_stream_relays_exact_sse_without_blank_payload_events(
 
 
 @pytest.mark.asyncio
+async def test_create_hides_internal_billing_error_details(
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = AsyncMock()
+    service.create.side_effect = BillingError("private ledger row 77: mysql host=db-internal")
+    monkeypatch.setattr(module, "_service", service)
+
+    async for client in _client(app):
+        response = await client.post(
+            "/v1/responses",
+            headers={"Authorization": "Bearer key"},
+            json={"model": "deepseek-v4-flash", "input": "hello"},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["error"] == {
+        "message": "Billing could not be completed. Check usage status before retrying.",
+        "type": "invalid_request_error",
+        "param": None,
+        "code": "billing_error",
+    }
+    assert "db-internal" not in response.text
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("body", "code"),
     [
@@ -305,12 +333,103 @@ async def test_local_service_errors_keep_openai_error_envelope(
     assert response.status_code == 404
     assert response.json() == {
         "error": {
-            "message": "Response 'resp_missing' not found.",
+            "message": "The requested response was not found.",
             "type": "invalid_request_error",
             "param": "response_id",
             "code": "response_not_found",
         }
     }
+
+
+@pytest.mark.asyncio
+async def test_error_response_hides_internal_gateway_exception_details(
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services.deepseek_responses_service import ResponsesGatewayError
+
+    service = AsyncMock()
+    service.retrieve.side_effect = ResponsesGatewayError(
+        "Traceback: mysql://db-internal/private-schema", status_code=500, code="unexpected_internal_error"
+    )
+    monkeypatch.setattr(module, "_service", service)
+
+    async for client in _client(app):
+        response = await client.get("/v1/responses/resp_1", headers={"Authorization": "Bearer key"})
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "error": {
+            "message": "The request could not be completed.",
+            "type": "server_error",
+            "param": None,
+            "code": "gateway_error",
+        }
+    }
+    assert "db-internal" not in response.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status_code", "code", "param", "expected_status", "expected_type", "expected_message", "expected_param"),
+    [
+        (
+            503,
+            "upstream_unavailable",
+            None,
+            503,
+            "server_error",
+            "The upstream API is unavailable.",
+            None,
+        ),
+        (
+            400,
+            "invalid_cursor",
+            "after",
+            400,
+            "invalid_request_error",
+            "The requested input item cursor was not found.",
+            "after",
+        ),
+        (
+            413,
+            "context_compaction_failed",
+            "input",
+            413,
+            "invalid_request_error",
+            "Context compaction failed; input could not be processed safely.",
+            "input",
+        ),
+    ],
+)
+async def test_error_response_preserves_safe_status_and_parameter(
+    app: FastAPI,
+    status_code: int,
+    code: str,
+    param: str | None,
+    expected_status: int,
+    expected_type: str,
+    expected_message: str,
+    expected_param: str | None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = AsyncMock()
+    service.retrieve.side_effect = ResponsesGatewayError(
+        "internal database details", status_code=status_code, code=code, param=param
+    )
+    monkeypatch.setattr(module, "_service", service)
+
+    async for client in _client(app):
+        response = await client.get("/v1/responses/resp_1", headers={"Authorization": "Bearer key"})
+
+    assert response.status_code == expected_status
+    assert response.json()["error"] == {
+        "message": expected_message,
+        "type": expected_type,
+        "param": expected_param,
+        "code": code,
+    }
+    assert "internal database details" not in response.text
 
 
 @pytest.mark.asyncio

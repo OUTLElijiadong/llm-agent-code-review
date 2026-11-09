@@ -23,7 +23,8 @@ class MemberReaderProbeTest(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
 
     def expect(self, expected, code=0):
-        result = subprocess.run([sys.executable, str(PROBE), str(self.root)], capture_output=True, text=True, timeout=20)
+        result = subprocess.run([sys.executable, str(PROBE), str(self.root)], check=False,
+                                capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode, code, result.stderr)
         self.assertEqual(result.stdout.strip(), expected)
 
@@ -49,6 +50,14 @@ class MemberReaderProbeTest(unittest.TestCase):
         )
         role_set = assignment.value.args[0]
         role_set.elts.append(ast.Constant("viewer"))
+        self.source.write_text(ast.unparse(ast.fix_missing_locations(tree)), encoding="utf-8")
+        self.expect("unsupported")
+
+    def test_enterprise_binding_is_required_for_enterprise_project_access(self):
+        tree = ast.parse(self.source.read_text(encoding="utf-8"))
+        function = next(node for node in tree.body
+                        if isinstance(node, ast.FunctionDef) and node.name == "_enterprise_binding")
+        function.body = ast.parse("return None").body
         self.source.write_text(ast.unparse(ast.fix_missing_locations(tree)), encoding="utf-8")
         self.expect("unsupported")
 

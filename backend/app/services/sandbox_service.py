@@ -7701,6 +7701,41 @@ def _record_worker_stop_receipts(db: Session, environment: SandboxEnvironment, w
     return current
 
 
+def _normalize_worker_preview_path(path: str) -> str:
+    """Decode and validate the caller path before placing it under a worker route."""
+    if len(path) > 2048 or "\r" in path or "\n" in path:
+        raise ValidationError("预览路径或查询参数过长", code=40001)
+    if re.search(r"%(?![0-9A-Fa-f]{2})", path):
+        raise ValidationError("预览路径包含无效百分号编码", code=40001)
+
+    decoded = path or "/"
+    for _ in range(9):
+        try:
+            next_value = urllib.parse.unquote(decoded, errors="strict")
+        except UnicodeDecodeError as exc:
+            raise ValidationError("预览路径编码不合法", code=40001) from exc
+        if next_value == decoded:
+            break
+        decoded = next_value
+        if _unsafe_worker_preview_path(decoded):
+            raise ValidationError("预览路径不能包含上级目录或控制字符", code=40001)
+    else:
+        raise ValidationError("预览路径编码层级过深", code=40001)
+
+    if _unsafe_worker_preview_path(decoded):
+        raise ValidationError("预览路径不能包含上级目录或控制字符", code=40001)
+    return "/" + decoded.lstrip("/")
+
+
+def _unsafe_worker_preview_path(path: str) -> bool:
+    return (
+        "\\" in path
+        or "\x00" in path
+        or any(ord(character) < 32 or ord(character) == 127 for character in path)
+        or any(part in {".", ".."} for part in path.split("/"))
+    )
+
+
 def _proxy_worker_preview(
     worker: SandboxWorker,
     public_id: str,
@@ -7716,7 +7751,8 @@ def _proxy_worker_preview(
         raise ValidationError("预览路径或查询参数过长", code=40001)
     if len(body) > 1_048_576:
         raise ValidationError("预览请求体超过 1 MiB", code=40001)
-    quoted_path = urllib.parse.quote("/" + path.lstrip("/"), safe="/!$&'()*+,-./:;=@_~")
+    normalized_path = _normalize_worker_preview_path(path)
+    quoted_path = urllib.parse.quote(normalized_path, safe="/!$&'()*+,-./:;=@_~")
     worker_path = f"/preview/{public_id}{quoted_path}" + (f"?{query}" if query else "")
     token = _worker_token(worker)
     headers = {"Authorization": f"Bearer {token}"}

@@ -357,16 +357,20 @@ lock_owner_file() {
 # 参数: $1 为锁目录。
 # 返回: 始终返回 0。
 write_lock_owner() {
-  local owner_file tmp_file process_start
+  local owner_file tmp_file process_identity process_start boot_id
   owner_file="$(lock_owner_file "$1")"
   tmp_file="$owner_file.$$"
-  process_start="$(process_start_ticks "$$" 2>/dev/null || true)"
+  process_identity="$(linux_process_identity "$$" 2>/dev/null || true)"
+  process_start="${process_identity#* }"
+  [[ "$process_identity" == "$process_start" ]] && process_start=""
+  boot_id="$(linux_boot_id 2>/dev/null || true)"
   {
     printf 'pid=%s\n' "$$"
     printf 'started_epoch=%s\n' "$(date -u '+%s')"
     printf 'command=%s\n' "${0##*/}"
-    if [[ -n "$process_start" ]]; then
+    if [[ -n "$process_identity" && -n "$process_start" && -n "$boot_id" ]]; then
       printf 'process_start_ticks=%s\n' "$process_start"
+      printf 'boot_id=%s\n' "$boot_id"
     fi
   } > "$tmp_file" 2>/dev/null && mv -f "$tmp_file" "$owner_file" 2>/dev/null || rm -f "$tmp_file" 2>/dev/null
   return 0
@@ -393,35 +397,82 @@ lock_owner_field() {
   return 1
 }
 
-# Linux 上读取进程启动 tick。进程 exec 成其他程序时 PID 和启动 tick 不变，
-# 因此比命令名更适合作为 PID 复用的身份校验；非 Linux 环境返回失败。
-# 参数: $1 为 PID。返回: stdout 输出 /proc/<pid>/stat 的第 22 字段。
-process_start_ticks() {
-  local pid="$1" stat_line
+# Linux 上一次读取进程状态与启动 tick。进程 exec 成其他程序时 PID 和启动 tick 不变，
+# 可识别 PID 复用，也能把 zombie 与仍在运行的进程区分开。非 Linux 环境返回失败。
+# 参数: $1 为 PID。返回: stdout 输出 state 与 /proc/<pid>/stat 的第 22 字段。
+linux_process_identity() {
+  local pid="$1" stat_line proc_root="${PRISM_PROC_ROOT:-/proc}"
   local -a fields
-  [[ "$pid" =~ ^[0-9]+$ && -r "/proc/$pid/stat" ]] || return 1
-  IFS= read -r stat_line < "/proc/$pid/stat" || return 1
+  [[ "$pid" =~ ^[0-9]+$ && -r "$proc_root/$pid/stat" ]] || return 1
+  IFS= read -r stat_line < "$proc_root/$pid/stat" || return 1
   # comm 可包含空格和右括号；删除到最后一个 ") " 后再按空格解析字段 3..22。
   stat_line="${stat_line##*) }"
   read -r -a fields <<< "$stat_line"
-  (( ${#fields[@]} >= 20 )) || return 1
-  [[ "${fields[19]}" =~ ^[0-9]+$ ]] || return 1
-  printf '%s\n' "${fields[19]}"
+  (( ${#fields[@]} >= 20 )) || return 2
+  [[ "${fields[0]}" =~ ^[[:alpha:]]$ && "${fields[19]}" =~ ^[0-9]+$ ]] || return 2
+  printf '%s %s\n' "${fields[0]}" "${fields[19]}"
+}
+
+# Linux 启动标识用于避免重启后 PID 与启动 tick 恰好重合。
+linux_boot_id() {
+  local proc_root="${PRISM_PROC_ROOT:-/proc}" boot_id
+  IFS= read -r boot_id < "$proc_root/sys/kernel/random/boot_id" || return 1
+  [[ "$boot_id" =~ ^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$ ]] || return 1
+  printf '%s\n' "$boot_id"
 }
 
 # 判断锁的记录持有者是否仍在运行。
 # 参数: $1 为锁目录。
 # 返回: 0=仍在运行；1=持有进程已不存在（含 pid 被其他程序复用）；2=无法判断。
 lock_owner_alive() {
-  local lock_dir="$1" pid command process_start current_start cmdline
+  local lock_dir="$1" pid command process_start owner_boot_id current_boot_id current_identity current_state current_start proc_root kill_error cmdline
   pid="$(lock_owner_field "$lock_dir" pid)" || return 2
   [[ "$pid" =~ ^[0-9]+$ ]] || return 2
   process_start="$(lock_owner_field "$lock_dir" process_start_ticks || true)"
-  if [[ -n "$process_start" ]]; then
-    current_start="$(process_start_ticks "$pid" 2>/dev/null || true)"
-    [[ "$current_start" =~ ^[0-9]+$ ]] || return 1
-    [[ "$current_start" == "$process_start" ]] || return 1
-    return 0
+  owner_boot_id="$(lock_owner_field "$lock_dir" boot_id || true)"
+  if [[ -n "$process_start" || -n "$owner_boot_id" ]]; then
+    [[ "$process_start" =~ ^[0-9]+$ && "$owner_boot_id" =~ ^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$ ]] || return 2
+    proc_root="${PRISM_PROC_ROOT:-/proc}"
+    current_boot_id="$(linux_boot_id 2>/dev/null || true)"
+    if [[ -n "$current_boot_id" ]]; then
+      [[ "$current_boot_id" == "$owner_boot_id" ]] || return 1
+      current_identity="$(linux_process_identity "$pid" 2>/dev/null)"
+      case $? in
+        0) ;;
+        1)
+          # A present proc directory with unreadable/vanished stat is ambiguous; never call it stale.
+          [[ -d "$proc_root/$pid" ]] && return 2
+          ;;
+        *) return 2 ;;
+      esac
+      [[ "$(linux_boot_id 2>/dev/null || true)" == "$current_boot_id" ]] || return 2
+      if [[ -z "$current_identity" ]]; then
+        if kill_error="$(kill -0 "$pid" 2>&1)"; then
+          return 2
+        fi
+        case "$kill_error" in
+          *"No such process"*) return 1 ;;
+          *) return 2 ;;
+        esac
+      fi
+      current_state="${current_identity%% *}"
+      current_start="${current_identity#* }"
+      [[ "$current_state" == Z || "$current_state" == X ]] && return 1
+      [[ "$current_start" == "$process_start" ]] || return 1
+      return 0
+    fi
+    # If procfs is unavailable (for example, a lock moved to macOS), retain the
+    # conservative kill -0 behavior; a live PID is never declared stale by name.
+    if [[ ! -d "$proc_root" ]]; then
+      if kill_error="$(kill -0 "$pid" 2>&1)"; then
+        return 0
+      fi
+      case "$kill_error" in
+        *"No such process"*) return 1 ;;
+        *) return 2 ;;
+      esac
+    fi
+    return 2
   fi
   command="$(lock_owner_field "$lock_dir" command || true)"
   if [[ -r "/proc/$pid/cmdline" ]]; then

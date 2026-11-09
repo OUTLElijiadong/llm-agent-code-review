@@ -39,6 +39,32 @@ _EXCLUDED_RELAY_HEADERS = {
     "upgrade",
 }
 
+_PUBLIC_ERROR_RESPONSES = {
+    "billing_error": (
+        409,
+        "invalid_request_error",
+        "Billing could not be completed. Check usage status before retrying.",
+    ),
+    "context_compaction_failed": (
+        413,
+        "invalid_request_error",
+        "Context compaction failed; input could not be processed safely.",
+    ),
+    "gateway_error": (500, "server_error", "The request could not be completed."),
+    "invalid_api_key": (401, "authentication_error", "The Bearer credential is invalid."),
+    "invalid_cursor": (400, "invalid_request_error", "The requested input item cursor was not found."),
+    "invalid_json": (400, "invalid_request_error", "Request body must be a valid JSON object."),
+    "invalid_request": (400, "invalid_request_error", "Request body must be a JSON object."),
+    "invalid_value": (400, "invalid_request_error", "A request parameter has an invalid value."),
+    "permission_denied": (403, "permission_error", "The credential does not have permission for this request."),
+    "response_not_found": (404, "invalid_request_error", "The requested response was not found."),
+    "storage_unavailable": (503, "server_error", "The response store is temporarily unavailable."),
+    "upstream_payment_required": (402, "billing_error", "The upstream API requires payment or additional quota."),
+    "upstream_rate_limited": (429, "rate_limit_error", "The upstream API is rate limited."),
+    "upstream_timeout": (504, "server_error", "The upstream API request timed out."),
+    "upstream_unavailable": (502, "server_error", "The upstream API is unavailable."),
+}
+
 
 def get_responses_service() -> DeepSeekResponsesService:
     """Return the process-level gateway service (replaceable in tests)."""
@@ -47,7 +73,34 @@ def get_responses_service() -> DeepSeekResponsesService:
 
 
 def _error_response(error: ResponsesGatewayError) -> JSONResponse:
-    return JSONResponse(status_code=error.status_code, content=error.as_dict())
+    code = (
+        error.code
+        if isinstance(error.code, str) and error.code in _PUBLIC_ERROR_RESPONSES
+        else "gateway_error"
+    )
+    status_code, error_type, message = _PUBLIC_ERROR_RESPONSES[code]
+    if code == "upstream_unavailable" and error.status_code == 503:
+        status_code = 503
+    param = None
+    if code == "invalid_value" and isinstance(error.param, str) and error.param in {"limit", "order"}:
+        if error.param == "limit":
+            param = "limit"
+            message = "Invalid limit; expected an integer from 1 to 100."
+        else:
+            param = "order"
+            message = "Invalid order; expected 'asc' or 'desc'."
+    elif code == "invalid_cursor":
+        param = "after"
+    elif code == "response_not_found":
+        param = "response_id"
+    elif code == "context_compaction_failed":
+        param = "input"
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": {"message": message, "type": error_type, "param": param, "code": code}
+        },
+    )
 
 
 def _relay_headers(headers: Dict[str, str]) -> Dict[str, str]:
@@ -106,10 +159,15 @@ async def create_response(
         upstream = await get_responses_service().create(payload, authorization)
     except ResponsesGatewayError as error:
         return _error_response(error)
-    except BillingError as error:
-        return _error_response(ResponsesGatewayError(
-            str(error), status_code=409, code="billing_error", error_type="invalid_request_error"
-        ))
+    except BillingError:
+        return _error_response(
+            ResponsesGatewayError(
+                "Billing could not be completed. Check usage status before retrying.",
+                status_code=409,
+                code="billing_error",
+                error_type="invalid_request_error",
+            )
+        )
 
     headers = _relay_headers(dict(upstream.headers))
     if isinstance(upstream, StreamingGatewayResponse):

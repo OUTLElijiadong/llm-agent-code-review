@@ -9,6 +9,7 @@ import importlib.util
 import io
 import json
 import shutil
+import socket
 import stat
 import subprocess
 import sys
@@ -120,7 +121,9 @@ def test_worker_requires_and_revalidates_exact_local_http_scope() -> None:
     )
     assert decoded == archive
     assert normalized["http_scope"] == root_scope
-    non_root_scope = [{"method": "GET", "path": "/about.php", "query": {"page": "about.php"}, "expected_statuses": [200]}]
+    non_root_scope = [
+        {"method": "GET", "path": "/about.php", "query": {"page": "about.php"}, "expected_statuses": [200]}
+    ]
     non_root_normalized, _, _ = executor._validate_execute(
         _payload(archive, test_mode="blackbox", http_scope=non_root_scope)
     )
@@ -1369,6 +1372,145 @@ def test_preview_proxy_uses_exact_container_and_never_accepts_upstream(
     assert observed[4:7] == ["/opt/prism/runner.sh", "proxy", "GET"]
     assert observed[-1] == "http://127.0.0.1:8080/hello"
     assert "--publish" not in observed
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "../admin",
+        "foo/../../admin",
+        "%2e%2e/admin",
+        "%252e%252e/admin",
+        "foo%2f..%2f..%2fadmin",
+        "%5c..%5cadmin",
+        "folder/%0aadmin",
+        "%FF",
+        ("%" + "25" * 10 + "2e") * 2 + "/admin",
+    ],
+)
+def test_worker_preview_rejects_traversal_before_reading_worker_token(path: str, monkeypatch) -> None:
+    def unexpected_token_read(_worker):
+        raise AssertionError("invalid preview path must be rejected before reading worker credentials")
+
+    monkeypatch.setattr(sandbox_service, "_worker_token", unexpected_token_read)
+    worker = SimpleNamespace(transport="unix", endpoint="/tmp/unused-worker.sock", encrypted_token="unused")
+
+    with pytest.raises(sandbox_service.ValidationError):
+        sandbox_service._proxy_worker_preview(worker, "sandbox01", path, "", "GET", {}, b"")
+
+
+@pytest.mark.parametrize(
+    ("path", "expected_worker_path"),
+    [
+        ("//attacker.example/admin", "/preview/sandbox01/attacker.example/admin"),
+        ("https://attacker.example/admin", "/preview/sandbox01/https://attacker.example/admin"),
+    ],
+)
+def test_worker_preview_keeps_untrusted_authority_inside_fixed_worker_route(
+    path: str, expected_worker_path: str, monkeypatch,
+) -> None:
+    observed: dict[str, str] = {}
+    expected_transport = object()
+
+    class FakeResponse:
+        status_code = 200
+        headers: dict[str, str] = {}
+        content = b"ok"
+
+    class FakeClient:
+        def __init__(self, *, transport, base_url, **_kwargs):
+            assert transport is expected_transport
+            observed["base_url"] = str(base_url)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def request(self, _method, worker_path, **_kwargs):
+            observed["worker_path"] = worker_path
+            return FakeResponse()
+
+    monkeypatch.setattr(sandbox_service.httpx, "HTTPTransport", lambda **_kwargs: expected_transport)
+    monkeypatch.setattr(sandbox_service.httpx, "Client", FakeClient)
+    monkeypatch.setattr(sandbox_service, "_worker_token", lambda _worker: "test-worker-token")
+    worker = SimpleNamespace(transport="unix", endpoint="/tmp/fixed-worker.sock", encrypted_token="unused")
+
+    status, _headers, body = sandbox_service._proxy_worker_preview(
+        worker, "sandbox01", path, "", "GET", {}, b""
+    )
+
+    assert status == 200 and body == b"ok"
+    assert observed == {
+        "base_url": "http://sandbox",
+        "worker_path": expected_worker_path,
+    }
+
+
+@pytest.mark.parametrize(
+    ("path", "expected_path"),
+    [
+        ("//attacker.example/admin", "/preview/sandbox01/attacker.example/admin"),
+        ("https://attacker.example/admin", "/preview/sandbox01/https://attacker.example/admin"),
+    ],
+)
+def test_http_worker_preview_pins_configured_authority_for_untrusted_paths(
+    path: str, expected_path: str, monkeypatch,
+) -> None:
+    from app.utils import public_http
+
+    observed: dict[str, object] = {}
+
+    def fake_getaddrinfo(host, port, *, type):
+        observed["dns_host"] = host
+        observed["dns_port"] = port
+        assert type == socket.SOCK_STREAM
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", port))]
+
+    class FakeResponse:
+        status_code = 200
+        headers: dict[str, str] = {}
+        content = b"ok"
+
+    class FakeClient:
+        def __init__(self, *, trust_env, follow_redirects, **_kwargs):
+            observed["trust_env"] = trust_env
+            observed["follow_redirects"] = follow_redirects
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def request(self, _method, request_url, *, headers, extensions, **_kwargs):
+            observed["request_url"] = request_url
+            observed["headers"] = headers
+            observed["extensions"] = extensions
+            return FakeResponse()
+
+    monkeypatch.setattr(public_http.socket, "getaddrinfo", fake_getaddrinfo)
+    monkeypatch.setattr(sandbox_service.httpx, "Client", FakeClient)
+    monkeypatch.setattr(sandbox_service, "_worker_token", lambda _worker: "test-worker-token")
+    worker = SimpleNamespace(
+        transport="http",
+        endpoint="https://worker.example",
+        encrypted_token="unused",
+    )
+
+    status, _headers, body = sandbox_service._proxy_worker_preview(
+        worker, "sandbox01", path, "", "GET", {}, b""
+    )
+
+    assert status == 200 and body == b"ok"
+    assert observed["dns_host"] == "worker.example"
+    assert observed["dns_port"] == 443
+    assert observed["request_url"] == f"https://8.8.8.8{expected_path}"
+    assert observed["headers"]["Host"] == "worker.example"
+    assert observed["extensions"] == {"sni_hostname": "worker.example"}
+    assert observed["trust_env"] is False
+    assert observed["follow_redirects"] is False
 
 
 def test_preview_proxy_decodes_chunked_response(

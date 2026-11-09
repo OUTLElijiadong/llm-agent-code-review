@@ -25,6 +25,7 @@ from app.models.user import User
 from app.services import sandbox_service
 from app.services.sandbox_service import (
     _DEPLOY_VERIFY_RUNNER,
+    SANDBOX_SCORE_VERSION,
     _append_bounded_browser_coverage,
     _artifact_documents,
     _build_deterministic_test_report,
@@ -40,7 +41,6 @@ from app.services.sandbox_service import (
     _remote_blackbox_passed,
     _sandbox_execution_disclosure,
     _sandbox_result_score,
-    SANDBOX_SCORE_VERSION,
     _sandbox_verification_coverage,
     _worker_execution_passed,
     _worker_status_is_terminal,
@@ -142,7 +142,8 @@ def test_deterministic_fallback_report_discloses_remote_probe_facts_and_scope() 
         },
     })
     assert "远程网站检查范围" in report
-    assert "https://example.test" in report
+    target_line = next(line for line in report.splitlines() if line.startswith("- 目标源站："))
+    assert target_line == "- 目标源站：https://example.test（不在报告中复述路径或查询参数）"
     assert "HTTP 302" in report
     assert "42 ms" in report
     assert "text/html" in report
