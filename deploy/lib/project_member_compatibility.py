@@ -14,7 +14,10 @@ import types
 
 def _namespace(root: pathlib.Path) -> dict:
     tree = ast.parse((root / "services/project_member_service.py").read_text(encoding="utf-8"))
-    names = {"_require_visible_project", "is_project_member", "require_project_access", "require_project_execution"}
+    names = {
+        "_require_visible_project", "_enterprise_binding", "is_project_member",
+        "require_project_access", "require_project_execution",
+    }
     definitions = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names]
     if {node.name for node in definitions} != names:
         raise ValueError("required access contract unavailable")
@@ -52,6 +55,7 @@ def _probe(root: pathlib.Path) -> bool:
         pass
 
     project_model = type("Project", (), {"id": Column()})
+    enterprise_project_model = type("EnterpriseProject", (), {})
     member_model = type("ProjectMember", (), {name: Column() for name in ("project_id", "user_id")})
     actor = types.SimpleNamespace(id=17)
     state = {"admin": False, "owner": False, "role": "viewer", "status": "active", "exists": True}
@@ -66,17 +70,23 @@ def _probe(root: pathlib.Path) -> bool:
         def filter(self, *conditions):
             return self
 
+        def filter_by(self, **conditions):
+            return self
+
         def first(self):
             if self.model is project_model:
                 if not state["exists"]:
                     return None
                 return types.SimpleNamespace(user_id=actor.id if state["owner"] else 29, status=state["status"])
+            if self.model is enterprise_project_model:
+                return None
             return types.SimpleNamespace(role_in_project=state["role"]) if state["role"] else None
 
         one_or_none = first
 
     database = types.SimpleNamespace(query=lambda model: Query(model))
     namespace.update({"Project": project_model, "ProjectMember": member_model,
+                      "EnterpriseProject": enterprise_project_model,
                       "NotFoundError": Missing, "ForbiddenError": Denied,
                       "is_admin_user": lambda db, user_id: state["admin"],
                       "_audit_project_access": lambda *args, **kwargs: None})

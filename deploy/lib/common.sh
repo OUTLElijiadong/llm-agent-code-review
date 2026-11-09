@@ -357,13 +357,17 @@ lock_owner_file() {
 # 参数: $1 为锁目录。
 # 返回: 始终返回 0。
 write_lock_owner() {
-  local owner_file tmp_file
+  local owner_file tmp_file process_start
   owner_file="$(lock_owner_file "$1")"
   tmp_file="$owner_file.$$"
+  process_start="$(process_start_ticks "$$" 2>/dev/null || true)"
   {
     printf 'pid=%s\n' "$$"
     printf 'started_epoch=%s\n' "$(date -u '+%s')"
     printf 'command=%s\n' "${0##*/}"
+    if [[ -n "$process_start" ]]; then
+      printf 'process_start_ticks=%s\n' "$process_start"
+    fi
   } > "$tmp_file" 2>/dev/null && mv -f "$tmp_file" "$owner_file" 2>/dev/null || rm -f "$tmp_file" 2>/dev/null
   return 0
 }
@@ -389,13 +393,36 @@ lock_owner_field() {
   return 1
 }
 
+# Linux 上读取进程启动 tick。进程 exec 成其他程序时 PID 和启动 tick 不变，
+# 因此比命令名更适合作为 PID 复用的身份校验；非 Linux 环境返回失败。
+# 参数: $1 为 PID。返回: stdout 输出 /proc/<pid>/stat 的第 22 字段。
+process_start_ticks() {
+  local pid="$1" stat_line
+  local -a fields
+  [[ "$pid" =~ ^[0-9]+$ && -r "/proc/$pid/stat" ]] || return 1
+  IFS= read -r stat_line < "/proc/$pid/stat" || return 1
+  # comm 可包含空格和右括号；删除到最后一个 ") " 后再按空格解析字段 3..22。
+  stat_line="${stat_line##*) }"
+  read -r -a fields <<< "$stat_line"
+  (( ${#fields[@]} >= 20 )) || return 1
+  [[ "${fields[19]}" =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "${fields[19]}"
+}
+
 # 判断锁的记录持有者是否仍在运行。
 # 参数: $1 为锁目录。
 # 返回: 0=仍在运行；1=持有进程已不存在（含 pid 被其他程序复用）；2=无法判断。
 lock_owner_alive() {
-  local lock_dir="$1" pid command cmdline
+  local lock_dir="$1" pid command process_start current_start cmdline
   pid="$(lock_owner_field "$lock_dir" pid)" || return 2
   [[ "$pid" =~ ^[0-9]+$ ]] || return 2
+  process_start="$(lock_owner_field "$lock_dir" process_start_ticks || true)"
+  if [[ -n "$process_start" ]]; then
+    current_start="$(process_start_ticks "$pid" 2>/dev/null || true)"
+    [[ "$current_start" =~ ^[0-9]+$ ]] || return 1
+    [[ "$current_start" == "$process_start" ]] || return 1
+    return 0
+  fi
   command="$(lock_owner_field "$lock_dir" command || true)"
   if [[ -r "/proc/$pid/cmdline" ]]; then
     cmdline="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"

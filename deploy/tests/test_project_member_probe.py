@@ -41,8 +41,15 @@ class MemberReaderProbeTest(unittest.TestCase):
         self.expect("unsupported")
 
     def test_write_gate_must_deny_viewer(self):
-        source = self.source.read_text(encoding="utf-8")
-        self.source.write_text(source.replace('frozenset({"admin", "owner"})', 'frozenset({"admin", "owner", "viewer"})'), encoding="utf-8")
+        tree = ast.parse(self.source.read_text(encoding="utf-8"))
+        assignment = next(
+            node for node in tree.body
+            if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "PROJECT_WRITE_ROLES" for target in node.targets)
+        )
+        role_set = assignment.value.args[0]
+        role_set.elts.append(ast.Constant("viewer"))
+        self.source.write_text(ast.unparse(ast.fix_missing_locations(tree)), encoding="utf-8")
         self.expect("unsupported")
 
     def test_reject_everything_is_not_compatibility(self):
