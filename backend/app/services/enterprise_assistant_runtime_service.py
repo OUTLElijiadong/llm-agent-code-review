@@ -4140,10 +4140,12 @@ def get_clarification(db: Session, *, enterprise_id: int, conversation_id: int,
         choice = latest.decision if latest is not None else "pending"
         author = int(candidate["author_id"])
         allowed_actor = actor_rank > 0 and (user_id == author or actor_rank > int(candidate["rank"]))
+        higher_review = (latest is not None and user_id != author
+                         and actor_rank > int(candidate["rank"])
+                         and actor_rank > int(latest.decider_rank or 0))
         allowed_revision = (choice == "pending" or (user_id == author and latest is not None
                             and int(latest.decided_by or 0) == user_id)
-                            or (choice == "deny" and latest is not None
-                                and actor_rank > int(latest.decider_rank or 0)))
+                            or higher_review)
         candidates.append({**candidate, "decision": choice,
                            "can_decide": status in {"waiting", "complete", "denied"}
                            and allowed_actor and allowed_revision})

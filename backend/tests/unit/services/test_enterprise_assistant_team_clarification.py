@@ -363,6 +363,64 @@ def test_denial_preserves_pending_for_author_revision_and_blocks_lower_rank(reco
     assert _decision(records_db, request_id, user_id=1, decision="allow")["status"] == "complete"
 
 
+def test_lower_candidate_allow_cannot_resume_while_higher_candidate_is_pending(records_db, monkeypatch):
+    records_db.get(EnterpriseChatMessage, 100).sender_id = 1
+    records_db.get(EnterpriseChatMessage, 100).content = "@小菱 不要创建团队"
+    records_db.add(EnterpriseChatMessage(
+        id=99, enterprise_id=10, conversation_id=30, sender_id=4, sender_type="human",
+        client_message_id="peer-directive", content="@小菱 可以创建团队",
+    ))
+    room = records_db.get(EnterpriseConversation, 30)
+    messages = records_db.query(EnterpriseChatMessage).filter_by(
+        enterprise_id=10, conversation_id=30, sender_type="human",
+    ).order_by(EnterpriseChatMessage.id).all()
+    snapshot = runtime._role_snapshot(records_db, enterprise_id=10, room=room, messages=messages, initiator_id=3)
+    state = records_db.get(EnterpriseAssistantRuntimeState, 300)
+    state.permission_snapshot_json, state.permission_snapshot_sha256 = (
+        runtime._json(snapshot),
+        runtime._digest(snapshot),
+    )
+    records_db.commit()
+
+    request_id = _pending(records_db, monkeypatch, author_id=1)
+    preview = runtime.get_clarification(
+        records_db, enterprise_id=10, conversation_id=30, run_public_id="clarify-run", user_id=3
+    )
+    assert [candidate["message_id"] for candidate in preview["candidates"]] == [99, 100]
+    records_db.rollback()
+
+    decision = runtime.decide_clarification(
+        records_db,
+        enterprise_id=10,
+        conversation_id=30,
+        run_public_id="clarify-run",
+        request_id=request_id,
+        source_message_id=99,
+        user_id=4,
+        decision="allow",
+        expected_token_version=0,
+        expected_token_expires_at=int(datetime.now(timezone.utc).timestamp()) + 60,
+    )
+    assert decision["status"] == "waiting"
+    records_db.rollback()
+
+    resumed = asyncio.run(
+        runtime.resume_clarification(
+            records_db,
+            enterprise_id=10,
+            conversation_id=30,
+            run_public_id="clarify-run",
+            request_id=request_id,
+            user_id=3,
+            expected_token_version=0,
+            expected_token_expires_at=int(datetime.now(timezone.utc).timestamp()) + 60,
+        )
+    )
+    assert resumed["status"] == "awaiting_clarification"
+    assert resumed["clarification_status"] == "waiting"
+    assert resumed["pending"]["preview"]["request_id"] == request_id
+
+
 def test_decision_rechecks_expired_token(records_db, monkeypatch):
     request_id = _pending(records_db, monkeypatch)
     with pytest.raises(AuthError):
@@ -466,6 +524,40 @@ def test_subscription_expiring_during_team_write_rolls_back(records_db, monkeypa
     result = asyncio.run(executor.execute(call))
     assert result.failure_kind == "clarification_closed" and checks == [False, True]
     assert records_db.query(Project).filter_by(project_name="expired-probe").count() == 0
+
+
+@pytest.mark.parametrize("initial_decision", ["allow", "deny", "unrelated"])
+def test_higher_authority_review_is_available_for_every_lower_decision(records_db, monkeypatch,
+                                                                      initial_decision):
+    records_db.query(EnterpriseMember).filter_by(enterprise_id=10, user_id=2).one().role = "member"
+    records_db.commit()
+    request_id = _pending(records_db, monkeypatch, author_id=2)
+    assert _decision(records_db, request_id, user_id=2, decision=initial_decision)["status"] in {
+        "complete", "denied",
+    }
+
+    owner_preview = runtime.get_clarification(
+        records_db, enterprise_id=10, conversation_id=30, run_public_id="clarify-run", user_id=1
+    )
+
+    assert owner_preview["candidates"][0]["decision"] == initial_decision
+    assert owner_preview["candidates"][0]["can_decide"] is True
+    assert owner_preview["can_resume"] is False
+    records_db.rollback()
+    assert _decision(records_db, request_id, user_id=1, decision="deny")["status"] == "denied"
+    waiting = asyncio.run(
+        runtime.resume_clarification(
+            records_db,
+            enterprise_id=10,
+            conversation_id=30,
+            run_public_id="clarify-run",
+            request_id=request_id,
+            user_id=3,
+            expected_token_version=0,
+            expected_token_expires_at=int(datetime.now(timezone.utc).timestamp()) + 60,
+        )
+    )
+    assert waiting["status"] == "awaiting_clarification" and waiting["clarification_status"] == "denied"
 
 
 def test_resume_replays_exact_pending_call_after_decision(records_db, monkeypatch):

@@ -1,10 +1,13 @@
 """Clarification evidence is invalid after authorization ABA and reviews remain append-only."""
 import pytest
+from test_enterprise_assistant_clarification_records import _request
 
+from app.core.exceptions import ConflictError, ForbiddenError
+from app.models.enterprise_assistant_clarification import EnterpriseAssistantClarificationReview
+from app.models.enterprise_chat import EnterpriseChatMessage
 from app.models.enterprise_org import EnterpriseMember
 from app.models.user import User
 from app.services import enterprise_assistant_clarification_service as clarification
-from test_enterprise_assistant_clarification_records import _request
 
 pytest_plugins = ("test_enterprise_assistant_clarification_records",)
 
@@ -36,6 +39,89 @@ def test_higher_authority_review_preserves_deny_and_is_idempotent(records_db):
     from app.models.enterprise_assistant_clarification import EnterpriseAssistantClarificationDecision, EnterpriseAssistantClarificationReview
     assert records_db.query(EnterpriseAssistantClarificationDecision).filter_by(request_id=request.id).one().decision == "deny"
     assert records_db.query(EnterpriseAssistantClarificationReview).filter_by(request_id=request.id).count() == 1
+
+
+@pytest.mark.parametrize("initial_decision,review_decision,expected_status", [
+    ("allow", "deny", "denied"),
+    ("unrelated", "deny", "denied"),
+    ("allow", "unrelated", "complete"),
+])
+def test_higher_authority_can_supersede_any_lower_decision(records_db, initial_decision, review_decision,
+                                                           expected_status):
+    from app.models.enterprise_assistant_clarification import (
+        EnterpriseAssistantClarificationDecision,
+        EnterpriseAssistantClarificationReview,
+    )
+
+    request = _request(records_db)
+    clarification.decide(records_db, enterprise_id=10, conversation_id=30, request_id=request.id,
+                         source_message_id=100, user_id=2, decision=initial_decision)
+    records_db.commit()
+
+    clarification.decide(records_db, enterprise_id=10, conversation_id=30, request_id=request.id,
+                         source_message_id=100, user_id=1, decision=review_decision)
+    records_db.commit()
+
+    assert clarification.decision_status(records_db, enterprise_id=10, conversation_id=30,
+                                         request_id=request.id) == expected_status
+    original = records_db.query(EnterpriseAssistantClarificationDecision).filter_by(
+        request_id=request.id, source_message_id=100,
+    ).one()
+    assert original.decision == initial_decision and original.decided_by == 2
+    reviews = records_db.query(EnterpriseAssistantClarificationReview).filter_by(
+        request_id=request.id, source_message_id=100,
+    ).all()
+    assert len(reviews) == 1
+    assert reviews[0].review_kind == "higher_review"
+    assert reviews[0].decision == review_decision and reviews[0].decided_by == 1
+
+
+def test_lower_allow_does_not_resolve_another_higher_authority_candidate(records_db):
+    from app.models.enterprise_assistant_clarification import EnterpriseAssistantClarificationDecision
+    from app.models.enterprise_assistant_runtime import EnterpriseAssistantRuntimeState
+    from app.models.enterprise_chat import EnterpriseChatMessage, EnterpriseConversation
+    from app.services import enterprise_assistant_runtime_service as runtime
+
+    records_db.get(EnterpriseChatMessage, 100).sender_id = 1
+    records_db.get(EnterpriseChatMessage, 100).content = "@小菱 不要创建团队"
+    records_db.add(EnterpriseChatMessage(
+        id=99, enterprise_id=10, conversation_id=30, sender_id=4, sender_type="human",
+        client_message_id="peer-directive", content="@小菱 可以创建团队",
+    ))
+    state = records_db.get(EnterpriseAssistantRuntimeState, 300)
+    room = records_db.get(EnterpriseConversation, 30)
+    messages = records_db.query(EnterpriseChatMessage).filter_by(
+        enterprise_id=10, conversation_id=30, sender_type="human",
+    ).order_by(EnterpriseChatMessage.id).all()
+    snapshot = runtime._role_snapshot(records_db, enterprise_id=10, room=room, messages=messages, initiator_id=3)
+    state.permission_snapshot_json = runtime._json(snapshot)
+    state.permission_snapshot_sha256 = runtime._digest(snapshot)
+    records_db.commit()
+
+    request = _request(records_db)
+    decisions = records_db.query(EnterpriseAssistantClarificationDecision).filter_by(
+        request_id=request.id,
+    ).order_by(EnterpriseAssistantClarificationDecision.source_message_id).all()
+    assert [(row.source_message_id, row.author_user_id) for row in decisions] == [(99, 4), (100, 1)]
+
+    clarification.decide(records_db, enterprise_id=10, conversation_id=30, request_id=request.id,
+                         source_message_id=99, user_id=4, decision="allow")
+    records_db.commit()
+    assert clarification.decision_status(records_db, enterprise_id=10, conversation_id=30,
+                                         request_id=request.id) == "waiting"
+
+    with pytest.raises(ForbiddenError):
+        clarification.decide(records_db, enterprise_id=10, conversation_id=30, request_id=request.id,
+                             source_message_id=100, user_id=3, decision="allow")
+    records_db.rollback()
+    assert clarification.decision_status(records_db, enterprise_id=10, conversation_id=30,
+                                         request_id=request.id) == "waiting"
+
+    clarification.decide(records_db, enterprise_id=10, conversation_id=30, request_id=request.id,
+                         source_message_id=100, user_id=1, decision="deny")
+    records_db.commit()
+    assert clarification.decision_status(records_db, enterprise_id=10, conversation_id=30,
+                                         request_id=request.id) == "denied"
 
 
 def test_account_status_aba_invalidates_decision(records_db):
@@ -118,20 +204,64 @@ def test_same_value_does_not_advance_version(records_db):
     assert before == after
 
 
-def test_same_or_lower_rank_cannot_review_denial(records_db):
-    from app.core.exceptions import ForbiddenError, ConflictError
+@pytest.mark.parametrize("initial_decision", ["allow", "deny", "unrelated"])
+def test_same_or_lower_rank_cannot_review_any_decision(records_db, initial_decision):
     records_db.query(EnterpriseMember).filter_by(enterprise_id=10, user_id=4).one().role = "admin"
     records_db.commit()
     request = _request(records_db)
     clarification.decide(records_db, enterprise_id=10, conversation_id=30, request_id=request.id,
-                         source_message_id=100, user_id=2, decision="deny")
+                         source_message_id=100, user_id=2, decision=initial_decision)
     records_db.commit()
     for user_id in (3, 4):
         with pytest.raises((ForbiddenError, ConflictError)):
             clarification.decide(records_db, enterprise_id=10, conversation_id=30, request_id=request.id,
                                  source_message_id=100, user_id=user_id, decision="allow")
         records_db.rollback()
-    assert clarification.decision_status(records_db, enterprise_id=10, conversation_id=30, request_id=request.id) == "denied"
+    expected = "denied" if initial_decision == "deny" else "complete"
+    assert clarification.decision_status(records_db, enterprise_id=10, conversation_id=30,
+                                         request_id=request.id) == expected
+
+
+def test_equal_rank_cannot_supersede_a_higher_review(records_db):
+    records_db.get(EnterpriseChatMessage, 100).sender_id = 4
+    records_db.add(User(id=5, username="user-5", password="x", email="5@example.test", role="user", status=1))
+    records_db.add(EnterpriseMember(enterprise_id=10, user_id=5, role="admin", status="active"))
+    records_db.commit()
+    request = _request(records_db)
+    clarification.decide(records_db, enterprise_id=10, conversation_id=30, request_id=request.id,
+                         source_message_id=100, user_id=4, decision="allow")
+    clarification.decide(records_db, enterprise_id=10, conversation_id=30, request_id=request.id,
+                         source_message_id=100, user_id=2, decision="deny")
+    records_db.commit()
+
+    with pytest.raises(ConflictError):
+        clarification.decide(records_db, enterprise_id=10, conversation_id=30, request_id=request.id,
+                             source_message_id=100, user_id=5, decision="allow")
+    records_db.rollback()
+
+    assert clarification.decision_status(records_db, enterprise_id=10, conversation_id=30,
+                                         request_id=request.id) == "denied"
+    assert records_db.query(EnterpriseAssistantClarificationReview).filter_by(request_id=request.id).count() == 1
+
+
+def test_reviewer_member_role_aba_invalidates_higher_review(records_db):
+    records_db.get(EnterpriseChatMessage, 100).sender_id = 4
+    records_db.commit()
+    request = _request(records_db)
+    clarification.decide(records_db, enterprise_id=10, conversation_id=30, request_id=request.id,
+                         source_message_id=100, user_id=4, decision="allow")
+    clarification.decide(records_db, enterprise_id=10, conversation_id=30, request_id=request.id,
+                         source_message_id=100, user_id=2, decision="deny")
+    records_db.commit()
+
+    reviewer = records_db.query(EnterpriseMember).filter_by(enterprise_id=10, user_id=2).one()
+    reviewer.role = "member"
+    records_db.commit()
+    reviewer.role = "admin"
+    records_db.commit()
+
+    assert clarification.decision_status(records_db, enterprise_id=10, conversation_id=30,
+                                         request_id=request.id) == "stale"
 
 
 def test_higher_decider_account_aba_invalidates_review(records_db):

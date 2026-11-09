@@ -559,3 +559,11 @@
 - 新增同会话预览、逐条决议及原发起人显式恢复 API；服务重新锁定当前身份并核对 token 版本、有效期、请求版本和精确动作。拒绝保留澄清并禁止继续，允许作者修订或更高权限者复核；上下文失效、新高权指令和参数不匹配会停止原运行。恢复中断后普通 retry 不绕过，团队写入后最终校验失败会回滚同事务写入。
 - SQLite 企业助手/团队、通用 Responses 和澄清路由最终组合 **341 passed、1 xfailed**。小组和私聊候选范围通过合成数据服务测试，部分运行器、团队创建和模型为替身；新增普通成员拒绝后 owner 复核允许、原调用重放、owner 拒绝后低权限不可代改，以及订阅中途到期回滚。隔离 MySQL 8.0.45 建队澄清 **3 项通过**：Run 行锁等待后决议与重复决议、锁等待期间 JWT 过期拒绝、高权限复核拒绝；锁等待由 `performance_schema` 验证。同一次隔离运行的 118 DELETE/REPLACE 防护 **1 项通过**。以上不代表所有角色或竞态均已覆盖。
 - 尚未验证真实模型、真实多账号浏览器、生产数据库和支付渠道；也没有接入其他副作用工具、模型发送或自由文本冲突。公司群和私聊新运行仍受原有跨空间计费归属开关限制。支付销售锁保持关闭。
+
+## 2026-11-09：更高权限复核可覆盖任一低权决议
+
+- 先新增 `allow → deny`、`unrelated → deny`、`allow → unrelated` 三个用例并确认旧逻辑均拒绝复核；独立复核发现预览 API 会隐藏按钮后，又补齐 GET、POST、组合候选、恢复接口与界面用例。澄清 API 路由、服务、权限版本、运行时预览/决议相关后端组合 **79 项通过**；前端悬浮聊天复核按钮交互 **1 项通过**。
+- 后端结果可用 `cd backend && .venv/bin/pytest -q --no-cov tests/unit/api/test_enterprise_clarification_routes.py tests/unit/services/test_enterprise_assistant_clarification_records.py tests/unit/services/test_enterprise_assistant_clarification_authority_version.py tests/unit/services/test_enterprise_assistant_clarification_open_gaps.py tests/unit/services/test_enterprise_assistant_team_clarification.py` 重现；结果为 79 passed、3 warnings。
+- 更高权限者的复核仍要求当前会话成员有效、权限级别高于原作者及上一决议人；同级不能覆盖较高复核。决议审计只追加不改写，复核者角色降级再恢复后旧证据失效。
+- 更高权限复核是可行的纠正路径，不是每条较低/同级 `allow` 的强制二次审批；但已识别的更高权限候选需独立决议，不能由低权候选替代。组合候选回归确认低权 `allow` 后原发起人恢复仍返回 `awaiting_clarification/waiting`；高权最终拒绝后返回 `awaiting_clarification/denied`。
+- 这是决议优先级的局部修复。代码尚未推送、尚未进入 CI；未扩展自然语言冲突覆盖范围、未解除公司/私聊跨空间计费门，也不是企业/小菱运行的全部副作用门禁验收。

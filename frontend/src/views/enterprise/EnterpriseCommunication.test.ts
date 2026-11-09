@@ -816,6 +816,35 @@ describe('企业沟通', () => {
     } finally { wrapper.unmount() }
   })
 
+  it('较高权限成员能在会话中复核较低权限者已允许的意见', async () => {
+    const waiting = {
+      run_id: 'ear_review_lower_allow', status: 'awaiting_clarification', assistant_mode: 'enterprise_agent_runtime',
+      message: null, pending: { kind: 'clarification', call_id: 'team-1', operation: '创建团队',
+        approval_id: 78, question: null, preview: { request_id: 78, action: 'create_registered_enterprise_agent_team' } },
+      recoverable: false, initiator_user_id: 3, source_message_id: 61,
+    }
+    mock.listEnterpriseAssistantRuns.mockResolvedValueOnce({ items: [waiting], assistant_mode: 'enterprise_agent_runtime' })
+    mock.getEnterpriseAssistantClarification.mockResolvedValueOnce({
+      request_id: 78, version: 1, call_id: 'team-1', action: 'create_registered_enterprise_agent_team',
+      title: '团队', status: 'complete', can_resume: false,
+      candidates: [{ message_id: 60, author_id: 2, rank: 1, content: '@小菱 建立小组',
+        decision: 'allow', can_decide: true }],
+    })
+
+    const wrapper = mount(EnterpriseCommunication)
+    try {
+      await flushPromises()
+      await wrapper.findAll('button').find(item => item.text() === '公司群')!.trigger('click')
+      await flushPromises()
+
+      expect(wrapper.text()).toContain('允许本次')
+      expect(wrapper.text()).toContain('阻止本次')
+      expect(wrapper.text()).toContain('与本次无关')
+      expect(wrapper.text()).toContain('允许')
+      expect(wrapper.find('.clarification-resume').exists()).toBe(false)
+    } finally { wrapper.unmount() }
+  })
+
   it('小菱失败后可对原消息重试，不会再次发送聊天消息', async () => {
     vi.stubGlobal('crypto', {
       randomUUID: () => 'message-retry-key',

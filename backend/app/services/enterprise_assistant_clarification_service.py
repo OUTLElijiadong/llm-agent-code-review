@@ -322,8 +322,8 @@ def status(db: Session, *, enterprise_id: int, conversation_id: int, request_id:
         actor_id = int(review.decided_by)
         revision = (review.review_kind == "author_revision" and actor_id == authors[source_id]
                     and previous_decider[source_id] == actor_id and rank == int(rows[source_id]["rank"]))
-        higher = (review.review_kind == "higher_review" and effective[source_id] == "deny"
-                  and rank > previous_rank[source_id] and rank > int(rows[source_id]["rank"]))
+        higher = (review.review_kind == "higher_review" and rank > previous_rank[source_id]
+                  and rank > int(rows[source_id]["rank"]))
         if (rank != int(review.decider_rank) or not (revision or higher)
                 or review.decider_version_sha256 != _version_fingerprint(db, room, enterprise_id, {actor_id})):
             return "stale"
@@ -375,9 +375,10 @@ def decide(db: Session, *, enterprise_id: int, conversation_id: int, request_id:
         if latest.decision == decision and int(latest.decided_by or 0) == user_id:
             return
         own_revision = user_id == int(row.author_user_id) and int(latest.decided_by or 0) == user_id
-        higher_review = latest.decision == "deny" and decider_rank > int(latest.decider_rank or 0)
+        higher_review = (decider_rank > int(latest.decider_rank or 0)
+                         and decider_rank > author_rank)
         if not (own_revision or higher_review):
-            raise ConflictError("仅作者本人可以修订自己的决定，或更高权限成员复核已有拒绝")
+            raise ConflictError("仅作者本人可以修订自己的决定，或更高权限成员可以复核已有决定")
         db.add(EnterpriseAssistantClarificationReview(
             request_id=request_id, enterprise_id=enterprise_id, conversation_id=conversation_id,
             source_message_id=source_message_id, decided_by=user_id, decider_rank=decider_rank,
