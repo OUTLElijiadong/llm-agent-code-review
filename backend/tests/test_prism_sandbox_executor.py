@@ -10,6 +10,7 @@ import io
 import json
 import shutil
 import socket
+import socketserver
 import stat
 import subprocess
 import sys
@@ -18,6 +19,7 @@ import time
 import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime, timedelta, timezone
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -1400,27 +1402,28 @@ def test_worker_preview_rejects_traversal_before_reading_worker_token(path: str,
 
 
 @pytest.mark.parametrize(
-    ("path", "expected_worker_path"),
+    ("path", "expected_preview_path"),
     [
-        ("//attacker.example/admin", "/preview/sandbox01/attacker.example/admin"),
-        ("https://attacker.example/admin", "/preview/sandbox01/https://attacker.example/admin"),
+        ("//attacker.example/admin", "/attacker.example/admin"),
+        ("https://attacker.example/admin", "/https://attacker.example/admin"),
     ],
 )
-def test_worker_preview_keeps_untrusted_authority_inside_fixed_worker_route(
-    path: str, expected_worker_path: str, monkeypatch,
+def test_worker_preview_keeps_untrusted_path_out_of_fixed_rpc_url(
+    path: str, expected_preview_path: str, monkeypatch,
 ) -> None:
-    observed: dict[str, str] = {}
+    observed: dict[str, object] = {}
     expected_transport = object()
 
     class FakeResponse:
         status_code = 200
-        headers: dict[str, str] = {}
+        headers = {"x-prism-preview-rpc-version": "1"}
         content = b"ok"
 
     class FakeClient:
-        def __init__(self, *, transport, base_url, **_kwargs):
+        def __init__(self, *, transport, base_url, follow_redirects, **_kwargs):
             assert transport is expected_transport
             observed["base_url"] = str(base_url)
+            observed["follow_redirects"] = follow_redirects
 
         def __enter__(self):
             return self
@@ -1428,8 +1431,11 @@ def test_worker_preview_keeps_untrusted_authority_inside_fixed_worker_route(
         def __exit__(self, *_args):
             return None
 
-        def request(self, _method, worker_path, **_kwargs):
-            observed["worker_path"] = worker_path
+        def request(self, method, rpc_path, *, headers, json):
+            observed["method"] = method
+            observed["rpc_path"] = rpc_path
+            observed["headers"] = headers
+            observed["payload"] = json
             return FakeResponse()
 
     monkeypatch.setattr(sandbox_service.httpx, "HTTPTransport", lambda **_kwargs: expected_transport)
@@ -1444,19 +1450,277 @@ def test_worker_preview_keeps_untrusted_authority_inside_fixed_worker_route(
     assert status == 200 and body == b"ok"
     assert observed == {
         "base_url": "http://sandbox",
-        "worker_path": expected_worker_path,
+        "follow_redirects": False,
+        "method": "POST",
+        "rpc_path": sandbox_service.PREVIEW_RPC_PATH,
+        "headers": {"Authorization": "Bearer test-worker-token"},
+        "payload": {
+            "request_id": "sandbox01",
+            "method": "GET",
+            "path": expected_preview_path,
+            "query": "",
+            "headers": {},
+            "body_base64": "",
+        },
     }
 
 
+def test_preview_rpc_requires_a_versioned_worker_response(monkeypatch) -> None:
+    class FakeResponse:
+        status_code = 404
+        headers = {"content-type": "application/json"}
+        content = b'{"ok":false,"error":"not found"}'
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            return None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def request(self, method, path, **_kwargs):
+            assert method == "POST"
+            assert path == sandbox_service.PREVIEW_RPC_PATH
+            return FakeResponse()
+
+    monkeypatch.setattr(sandbox_service.httpx, "HTTPTransport", lambda **_kwargs: object())
+    monkeypatch.setattr(sandbox_service.httpx, "Client", FakeClient)
+    monkeypatch.setattr(sandbox_service, "_worker_token", lambda _worker: "test-worker-token")
+    worker = SimpleNamespace(transport="unix", endpoint="/tmp/legacy-worker.sock", encrypted_token="unused")
+
+    with pytest.raises(sandbox_service.ServiceUnavailableError, match="预览 RPC v1"):
+        sandbox_service._proxy_worker_preview(worker, "sandbox01", "/", "", "GET", {}, b"")
+
+
 @pytest.mark.parametrize(
-    ("path", "expected_path"),
+    "endpoint",
     [
-        ("//attacker.example/admin", "/preview/sandbox01/attacker.example/admin"),
-        ("https://attacker.example/admin", "/preview/sandbox01/https://attacker.example/admin"),
+        "https://worker.example?route=other",
+        "https://worker.example/#preview",
+        "https://worker.example?",
+        "https://worker.example/#",
+    ],
+)
+def test_http_worker_endpoint_rejects_query_and_fragment_before_dns(endpoint: str, monkeypatch) -> None:
+    monkeypatch.setattr(
+        sandbox_service,
+        "pin_public_http_url",
+        lambda *_args, **_kwargs: pytest.fail("invalid worker endpoint must fail before DNS resolution"),
+    )
+
+    with pytest.raises(sandbox_service.ValidationError, match="查询参数或片段"):
+        sandbox_service._assert_worker_endpoint("http", endpoint)
+
+
+@pytest.mark.parametrize(
+    ("upstream_status", "sandbox_status", "runner_returncode", "expected_status", "expected_content_type"),
+    [
+        (200, "running", 0, 200, "text/plain"),
+        (404, "running", 0, 404, "text/plain"),
+        (429, "running", 0, 429, "text/plain"),
+        (200, "queued", 0, 409, "application/json; charset=utf-8"),
+        (200, "running", 1, 502, "application/json; charset=utf-8"),
+    ],
+)
+def test_preview_rpc_v1_uses_fixed_url_and_preserves_upstream_status(
+    isolated_paths: Path,
+    monkeypatch,
+    upstream_status: int,
+    sandbox_status: str,
+    runner_returncode: int,
+    expected_status: int,
+    expected_content_type: str,
+) -> None:
+    request_id = "preview-rpc-01"
+    profile = executor._load_profiles()["python"]
+    payload = _payload(_archive({"app.py": "print('app')"}), purpose="deploy", request_id=request_id)
+    state = executor._new_state(payload, profile, executor._request_digest(payload))
+    state.update({"status": sandbox_status, "container_name": executor._container_name(request_id)})
+    executor._write_state(state)
+    observed: dict[str, object] = {}
+
+    class Completed:
+        returncode = runner_returncode
+        stdout = (
+            f"HTTP/1.1 {upstream_status} Upstream\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\nok"
+        ).encode()
+        stderr = b"upstream failure"
+
+    def fake_run(args, **_kwargs):
+        observed["runner_url"] = args[-1]
+        return Completed()
+
+    monkeypatch.setattr(executor, "TOKEN", "preview-rpc-test-token")
+    monkeypatch.setattr(executor.subprocess, "run", fake_run)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), executor.Handler)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    try:
+        port = server.server_address[1]
+        rpc_url = f"http://127.0.0.1:{port}{executor.PREVIEW_RPC_PATH}"
+        with sandbox_service.httpx.Client(trust_env=False) as client:
+            unauthorized = client.post(rpc_url, json={})
+            assert unauthorized.status_code == 401
+            assert unauthorized.headers["x-prism-preview-rpc-version"] == "1"
+
+            invalid_payload = client.post(
+                rpc_url,
+                headers={"Authorization": "Bearer preview-rpc-test-token"},
+                json={},
+            )
+            assert invalid_payload.status_code == 400
+            assert invalid_payload.headers["x-prism-preview-rpc-version"] == "1"
+
+        def pin_to_test_worker(url: str, *, require_https: bool):
+            assert require_https is True
+            assert url == f"https://worker.example{sandbox_service.PREVIEW_RPC_PATH}"
+            return SimpleNamespace(
+                request_url=f"http://127.0.0.1:{port}{executor.PREVIEW_RPC_PATH}",
+                host_header="worker.example",
+                request_extensions={},
+            )
+
+        monkeypatch.setattr(sandbox_service, "pin_public_http_url", pin_to_test_worker)
+        monkeypatch.setattr(sandbox_service, "_worker_token", lambda _worker: "preview-rpc-test-token")
+        query = "next=https%3A%2F%2F169.254.169.254%2Flatest%2Fmeta-data"
+        worker = SimpleNamespace(transport="http", endpoint="https://worker.example", encrypted_token="unused")
+
+        status, headers, body = sandbox_service._proxy_worker_preview(
+            worker, request_id, "/hello", query, "GET", {"Accept": "text/plain"}, b""
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        server_thread.join(timeout=5)
+
+    assert status == expected_status
+    assert headers["content-type"] == expected_content_type
+    if expected_status in {200, 404, 429}:
+        assert body == b"ok"
+        assert observed["runner_url"] == f"http://127.0.0.1:8080/hello?{query}"
+    else:
+        assert b'"ok":false' in body
+        if expected_status == 409:
+            assert "runner_url" not in observed
+        else:
+            assert observed["runner_url"] == f"http://127.0.0.1:8080/hello?{query}"
+
+
+def test_preview_rpc_v1_uses_real_unix_socket_transport(isolated_paths: Path, monkeypatch) -> None:
+    request_id = "preview-uds-01"
+    profile = executor._load_profiles()["python"]
+    payload = _payload(_archive({"app.py": "print('app')"}), purpose="deploy", request_id=request_id)
+    state = executor._new_state(payload, profile, executor._request_digest(payload))
+    state.update({"status": "running", "container_name": executor._container_name(request_id)})
+    executor._write_state(state)
+    observed: dict[str, str] = {}
+
+    class Completed:
+        returncode = 0
+        stdout = b"HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 7\r\n\r\nmissing"
+        stderr = b""
+
+    def fake_run(args, **_kwargs):
+        observed["runner_url"] = args[-1]
+        return Completed()
+
+    class ThreadingUnixHTTPServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+        daemon_threads = True
+        allow_reuse_address = True
+
+    monkeypatch.setattr(executor, "TOKEN", "preview-uds-test-token")
+    monkeypatch.setattr(executor.subprocess, "run", fake_run)
+    socket_path = Path("/tmp") / f"preview-{time.monotonic_ns()}.sock"
+    server = ThreadingUnixHTTPServer(str(socket_path), executor.Handler)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    worker = SimpleNamespace(transport="unix", endpoint=str(socket_path), encrypted_token="unused")
+    monkeypatch.setattr(sandbox_service, "_worker_token", lambda _worker: "preview-uds-test-token")
+    try:
+        status, headers, body = sandbox_service._proxy_worker_preview(
+            worker, request_id, "/missing", "", "GET", {"Accept": "text/plain"}, b""
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        server_thread.join(timeout=5)
+        socket_path.unlink(missing_ok=True)
+
+    assert status == 404
+    assert headers["content-type"] == "text/plain"
+    assert body == b"missing"
+    assert observed["runner_url"] == "http://127.0.0.1:8080/missing"
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("method", "DELETE"),
+        ("path", "//attacker.example/admin"),
+        ("path", "/%252e%252e/admin"),
+        ("path", "/%FF"),
+        ("query", "bad=%"),
+        ("body_base64", "not base64"),
+    ],
+)
+def test_worker_rejects_invalid_preview_rpc_envelopes(key: str, value: str) -> None:
+    payload = {
+        "request_id": "preview-rpc-01",
+        "method": "GET",
+        "path": "/",
+        "query": "",
+        "headers": {},
+        "body_base64": "",
+    }
+    payload[key] = value
+
+    with pytest.raises(ValueError):
+        executor._decode_preview_rpc_payload(payload)
+
+
+def test_preview_rpc_body_limit_covers_maximal_unicode_post_payload() -> None:
+    payload = {
+        "request_id": "preview-rpc-01",
+        "method": "POST",
+        "path": "/" + ("😀" * 2047),
+        "query": "q=" + ("😀" * 2046),
+        "headers": {
+            "Accept": "😀" * 512,
+            "Accept-Language": "😀" * 512,
+            "Content-Type": "😀" * 512,
+        },
+        "body_base64": base64.b64encode(b"x" * executor.MAX_PREVIEW_REQUEST_BYTES).decode("ascii"),
+    }
+
+    encoded = json.dumps(payload).encode("utf-8")
+    assert len(encoded) <= executor.MAX_PREVIEW_RPC_BYTES
+    _, _, path, query, headers, body = executor._decode_preview_rpc_payload(payload)
+    assert len(path) == 2048
+    assert len(query) == 2048
+    assert len(headers) == 3
+    assert len(body) == executor.MAX_PREVIEW_REQUEST_BYTES
+
+
+@pytest.mark.parametrize(
+    ("path", "query", "expected_preview_path", "method", "body"),
+    [
+        ("//attacker.example/admin", "", "/attacker.example/admin", "GET", b""),
+        ("https://attacker.example/admin", "", "/https://attacker.example/admin", "GET", b""),
+        (
+            "/",
+            "next=https%3A%2F%2F169.254.169.254%2Flatest%2Fmeta-data",
+            "/",
+            "GET",
+            b"",
+        ),
+        ("/upload", "", "/upload", "POST", b"payload"),
     ],
 )
 def test_http_worker_preview_pins_configured_authority_for_untrusted_paths(
-    path: str, expected_path: str, monkeypatch,
+    path: str, query: str, expected_preview_path: str, method: str, body: bytes, monkeypatch,
 ) -> None:
     from app.utils import public_http
 
@@ -1470,7 +1734,7 @@ def test_http_worker_preview_pins_configured_authority_for_untrusted_paths(
 
     class FakeResponse:
         status_code = 200
-        headers: dict[str, str] = {}
+        headers = {"x-prism-preview-rpc-version": "1"}
         content = b"ok"
 
     class FakeClient:
@@ -1484,10 +1748,12 @@ def test_http_worker_preview_pins_configured_authority_for_untrusted_paths(
         def __exit__(self, *_args):
             return None
 
-        def request(self, _method, request_url, *, headers, extensions, **_kwargs):
+        def request(self, request_method, request_url, *, headers, extensions, json):
+            observed["request_method"] = request_method
             observed["request_url"] = request_url
             observed["headers"] = headers
             observed["extensions"] = extensions
+            observed["payload"] = json
             return FakeResponse()
 
     monkeypatch.setattr(public_http.socket, "getaddrinfo", fake_getaddrinfo)
@@ -1499,18 +1765,27 @@ def test_http_worker_preview_pins_configured_authority_for_untrusted_paths(
         encrypted_token="unused",
     )
 
-    status, _headers, body = sandbox_service._proxy_worker_preview(
-        worker, "sandbox01", path, "", "GET", {}, b""
+    status, _headers, response_body = sandbox_service._proxy_worker_preview(
+        worker, "sandbox01", path, query, method, {"Accept": "text/html"}, body
     )
 
-    assert status == 200 and body == b"ok"
+    assert status == 200 and response_body == b"ok"
     assert observed["dns_host"] == "worker.example"
     assert observed["dns_port"] == 443
-    assert observed["request_url"] == f"https://8.8.8.8{expected_path}"
+    assert observed["request_method"] == "POST"
+    assert observed["request_url"] == f"https://8.8.8.8{sandbox_service.PREVIEW_RPC_PATH}"
     assert observed["headers"]["Host"] == "worker.example"
     assert observed["extensions"] == {"sni_hostname": "worker.example"}
     assert observed["trust_env"] is False
     assert observed["follow_redirects"] is False
+    assert observed["payload"] == {
+        "request_id": "sandbox01",
+        "method": method,
+        "path": expected_preview_path,
+        "query": query,
+        "headers": {"Accept": "text/html"},
+        "body_base64": base64.b64encode(body).decode("ascii") if method == "POST" else "",
+    }
 
 
 def test_preview_proxy_decodes_chunked_response(

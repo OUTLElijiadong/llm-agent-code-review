@@ -64,6 +64,10 @@ MAX_ARCHIVE_FILES = int(os.environ.get("SANDBOX_MAX_ARCHIVE_FILES", "10000"))
 MAX_COMPRESSION_RATIO = int(os.environ.get("SANDBOX_MAX_COMPRESSION_RATIO", "200"))
 MAX_PREVIEW_REQUEST_BYTES = 1024 * 1024
 MAX_PREVIEW_RESPONSE_BYTES = 2 * 1024 * 1024
+# JSON may escape astral Unicode characters as 12 ASCII bytes each in both the
+# path and query, so keep enough bounded metadata room for their 2 KiB limits.
+MAX_PREVIEW_RPC_BYTES = ((MAX_PREVIEW_REQUEST_BYTES + 2) // 3) * 4 + 96 * 1024
+PREVIEW_RPC_PATH = "/preview-rpc/v1"
 PREVIEW_PORT = 8080
 PROTOCOL_VERSION = "1.0"
 
@@ -2012,8 +2016,29 @@ def health() -> dict[str, Any]:
 def _normalize_preview_target(raw_path: str, query: str) -> str:
     if len(raw_path) > 2048 or len(query) > 2048 or "\r" in raw_path + query or "\n" in raw_path + query:
         raise ValueError("预览路径或查询参数过长")
-    decoded = urllib.parse.unquote(raw_path or "/")
-    decoded_twice = urllib.parse.unquote(decoded)
+    if re.search(r"%(?![0-9A-Fa-f]{2})", raw_path) or re.search(r"%(?![0-9A-Fa-f]{2})", query):
+        raise ValueError("预览路径或查询参数包含无效百分号编码")
+    decoded = raw_path or "/"
+    for _ in range(9):
+        try:
+            next_value = urllib.parse.unquote(decoded, errors="strict")
+        except UnicodeDecodeError as exc:
+            raise ValueError("预览路径编码不合法") from exc
+        if next_value == decoded:
+            break
+        decoded = next_value
+        if (
+            not decoded.startswith("/")
+            or decoded.startswith("//")
+            or "\\" in decoded
+            or "\x00" in decoded
+            or any(ord(character) < 32 or ord(character) == 127 for character in decoded)
+        ):
+            raise ValueError("预览路径不合法")
+        if any(part in {".", ".."} for part in decoded.split("/")):
+            raise ValueError("预览路径不能包含上级目录")
+    else:
+        raise ValueError("预览路径编码层级过深")
     if (
         not decoded.startswith("/")
         or decoded.startswith("//")
@@ -2022,12 +2047,8 @@ def _normalize_preview_target(raw_path: str, query: str) -> str:
         or any(ord(character) < 32 or ord(character) == 127 for character in decoded)
     ):
         raise ValueError("预览路径不合法")
-    if any(part == ".." for part in PurePosixPath(decoded).parts) or any(
-        part == ".." for part in PurePosixPath(decoded_twice).parts
-    ):
+    if any(part in {".", ".."} for part in decoded.split("/")):
         raise ValueError("预览路径不能包含上级目录")
-    if re.search(r"%(?![0-9A-Fa-f]{2})", query):
-        raise ValueError("预览查询参数包含无效百分号编码")
     quoted = urllib.parse.quote(decoded, safe="/!$&'()*+,-./:;=@_~")
     quoted_query = urllib.parse.quote(query, safe="!$&'()*+,-./:;=?@_~%")
     return f"http://127.0.0.1:{PREVIEW_PORT}{quoted}" + (f"?{quoted_query}" if quoted_query else "")
@@ -2037,7 +2058,7 @@ def _proxy_preview(
     request_id: str, raw_path: str, query: str, method: str, request_headers: dict[str, str], body: bytes,
 ) -> tuple[int, dict[str, str], bytes]:
     request_id = _validate_request_id(request_id)
-    if method not in {"GET", "HEAD", "POST"}:
+    if not isinstance(method, str) or method not in {"GET", "HEAD", "POST"}:
         raise ValueError("预览只支持 GET、HEAD 和 POST")
     with STATE_LOCK:
         state = _read_state(request_id)
@@ -2134,6 +2155,40 @@ def _proxy_preview(
     return status_code, forwarded, b"" if method == "HEAD" else response_body
 
 
+def _decode_preview_rpc_payload(payload: dict[str, Any]) -> tuple[str, str, str, str, dict[str, str], bytes]:
+    expected_keys = {"request_id", "method", "path", "query", "headers", "body_base64"}
+    if set(payload) != expected_keys:
+        raise ValueError("预览 RPC 字段不合法")
+    request_id = _validate_request_id(payload["request_id"])
+    method = payload["method"]
+    path = payload["path"]
+    query = payload["query"]
+    headers = payload["headers"]
+    body_base64 = payload["body_base64"]
+    if not isinstance(method, str) or method not in {"GET", "HEAD", "POST"}:
+        raise ValueError("预览只支持 GET、HEAD 和 POST")
+    if not isinstance(path, str) or not isinstance(query, str):
+        raise ValueError("预览路径或查询参数类型不合法")
+    if not isinstance(headers, dict) or set(headers).difference({"Accept", "Accept-Language", "Content-Type"}):
+        raise ValueError("预览请求头不合法")
+    clean_headers: dict[str, str] = {}
+    for name, value in headers.items():
+        if not isinstance(value, str) or len(value) > 512 or "\r" in value or "\n" in value:
+            raise ValueError("预览请求头不合法")
+        clean_headers[name] = value
+    _normalize_preview_target(path, query)
+    max_base64_length = ((MAX_PREVIEW_REQUEST_BYTES + 2) // 3) * 4
+    if not isinstance(body_base64, str) or len(body_base64) > max_base64_length:
+        raise ValueError("预览请求体大小不合法")
+    try:
+        body = base64.b64decode(body_base64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("预览请求体编码不合法") from exc
+    if len(body) > MAX_PREVIEW_REQUEST_BYTES or (method != "POST" and body):
+        raise ValueError("预览请求体大小或方法不合法")
+    return request_id, method, path, query, clean_headers, body
+
+
 def _decode_chunked_body(raw: bytes) -> bytes:
     output = bytearray()
     position = 0
@@ -2177,10 +2232,10 @@ class Handler(BaseHTTPRequestHandler):
         expected = f"Bearer {TOKEN}"
         return bool(TOKEN) and hmac.compare_digest(self.headers.get("Authorization", ""), expected)
 
-    def _require_auth(self) -> bool:
+    def _require_auth(self, *, response_headers: dict[str, str] | None = None) -> bool:
         if self._authorized():
             return True
-        self._json(401, {"ok": False, "error": "unauthorized"})
+        self._json(401, {"ok": False, "error": "unauthorized"}, response_headers=response_headers)
         return False
 
     def _read_body(self, maximum: int) -> bytes:
@@ -2204,17 +2259,25 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("请求体必须是 JSON 对象")
         return payload
 
-    def _json(self, status_code: int, payload: dict[str, Any]) -> None:
+    def _json(
+        self,
+        status_code: int,
+        payload: dict[str, Any],
+        *,
+        response_headers: dict[str, str] | None = None,
+    ) -> None:
         encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         self.send_response(status_code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(encoded)))
         self.send_header("Cache-Control", "no-store")
+        for name, value in (response_headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(encoded)
 
-    def _handle_error(self, exc: Exception) -> None:
+    def _handle_error(self, exc: Exception, *, response_headers: dict[str, str] | None = None) -> None:
         if isinstance(exc, NotFoundError):
             status_code = 404
         elif isinstance(exc, ConflictError):
@@ -2227,7 +2290,11 @@ class Handler(BaseHTTPRequestHandler):
             status_code = 400
         else:
             status_code = 502
-        self._json(status_code, {"ok": False, "error": _redact(str(exc))[:4000]})
+        self._json(
+            status_code,
+            {"ok": False, "error": _redact(str(exc))[:4000]},
+            response_headers=response_headers,
+        )
 
     def _preview_route(self) -> tuple[str, str, str] | None:
         parsed = urllib.parse.urlsplit(self.path)
@@ -2265,6 +2332,27 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:  # noqa: BLE001
             self._handle_error(exc)
 
+    def _handle_preview_rpc(self) -> None:
+        rpc_headers = {"X-Prism-Preview-Rpc-Version": "1"}
+        if not self._require_auth(response_headers=rpc_headers):
+            return
+        try:
+            payload = self._read_json(MAX_PREVIEW_RPC_BYTES)
+            request_id, method, path, query, headers, body = _decode_preview_rpc_payload(payload)
+            status_code, response_headers, response_body = _proxy_preview(
+                request_id, path, query, method, headers, body
+            )
+            self.send_response(status_code)
+            for name, value in response_headers.items():
+                self.send_header(name, value)
+            self.send_header("X-Prism-Preview-Rpc-Version", "1")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            if method != "HEAD":
+                self.wfile.write(response_body)
+        except Exception as exc:  # noqa: BLE001
+            self._handle_error(exc, response_headers=rpc_headers)
+
     def do_GET(self) -> None:  # noqa: N802
         if self.path == "/health":
             if self._require_auth():
@@ -2277,6 +2365,9 @@ class Handler(BaseHTTPRequestHandler):
         self._handle_preview()
 
     def do_POST(self) -> None:  # noqa: N802
+        if self.path == PREVIEW_RPC_PATH:
+            self._handle_preview_rpc()
+            return
         if self.path.startswith("/preview/"):
             self._handle_preview()
             return

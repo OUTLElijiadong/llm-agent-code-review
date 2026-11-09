@@ -98,6 +98,7 @@ ACTIVE_STATES = ("queued", "recovering", "dispatching", "running", "finalizing",
 TERMINAL_STATES = ("succeeded", "failed", "blocked", "stopped", "expired")
 PREVIEW_COOKIE_NAME = "prism_sandbox_preview"
 PREVIEW_SESSION_SECONDS = 300
+PREVIEW_RPC_PATH = "/preview-rpc/v1"
 _IMAGE_REFS = {
     "python": "prism-sandbox-python:3.11",
     "node": "prism-sandbox-node:20",
@@ -7458,6 +7459,9 @@ def _assert_worker_endpoint(transport: str, endpoint: str) -> str:
         if not (production_path or local_path) or not value.endswith(".sock"):
             raise ValidationError("Unix worker 路径不在允许目录内", code=40001)
         return value
+    parsed_endpoint = urllib.parse.urlsplit(value)
+    if parsed_endpoint.query or parsed_endpoint.fragment or "?" in value or "#" in value:
+        raise ValidationError("Worker 地址不能包含查询参数或片段", code=40001)
     target = pin_public_http_url(value, require_https=True)
     if target.original_url.rstrip("/") != value.rstrip("/"):
         raise ValidationError("Worker 地址格式无效", code=40001)
@@ -7752,31 +7756,45 @@ def _proxy_worker_preview(
     if len(body) > 1_048_576:
         raise ValidationError("预览请求体超过 1 MiB", code=40001)
     normalized_path = _normalize_worker_preview_path(path)
-    quoted_path = urllib.parse.quote(normalized_path, safe="/!$&'()*+,-./:;=@_~")
-    worker_path = f"/preview/{public_id}{quoted_path}" + (f"?{query}" if query else "")
-    token = _worker_token(worker)
-    headers = {"Authorization": f"Bearer {token}"}
+    preview_headers: dict[str, str] = {}
+    worker_headers: dict[str, str] = {"Authorization": f"Bearer {_worker_token(worker)}"}
     for name in ("Accept", "Accept-Language", "Content-Type"):
         value = str(request_headers.get(name) or "")
         if value:
             if len(value) > 512 or "\r" in value or "\n" in value:
                 raise ValidationError("预览请求头不合法", code=40001)
-            headers[name] = value
+            preview_headers[name] = value
+    rpc_payload = {
+        "request_id": public_id,
+        "method": method,
+        "path": normalized_path,
+        "query": query,
+        "headers": preview_headers,
+        "body_base64": base64.b64encode(body).decode("ascii") if method == "POST" else "",
+    }
     timeout = httpx.Timeout(30.0, connect=10.0)
     if worker.transport == "unix":
         transport = httpx.HTTPTransport(uds=worker.endpoint)
-        with httpx.Client(transport=transport, base_url="http://sandbox", timeout=timeout, trust_env=False) as client:
-            response = client.request(method, worker_path, headers=headers, content=body if method == "POST" else None)
+        with httpx.Client(
+            transport=transport,
+            base_url="http://sandbox",
+            timeout=timeout,
+            trust_env=False,
+            follow_redirects=False,
+        ) as client:
+            response = client.request("POST", PREVIEW_RPC_PATH, headers=worker_headers, json=rpc_payload)
     else:
-        target = pin_public_http_url(f"{worker.endpoint.rstrip('/')}{worker_path}", require_https=True)
+        target = pin_public_http_url(f"{worker.endpoint.rstrip('/')}{PREVIEW_RPC_PATH}", require_https=True)
         with httpx.Client(timeout=timeout, trust_env=False, follow_redirects=False) as client:
             response = client.request(
-                method,
+                "POST",
                 target.request_url,
-                headers={**headers, "Host": target.host_header},
-                content=body if method == "POST" else None,
+                headers={**worker_headers, "Host": target.host_header},
+                json=rpc_payload,
                 extensions=target.request_extensions,
             )
+    if response.headers.get("x-prism-preview-rpc-version") != "1":
+        raise ServiceUnavailableError("Sandbox worker 不支持预览 RPC v1，请升级并检查 worker")
     if len(response.content) > 2_097_152:
         raise RuntimeError("预览响应超过 2 MiB")
     safe_headers: dict[str, str] = {}

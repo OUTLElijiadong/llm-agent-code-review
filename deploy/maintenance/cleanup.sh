@@ -9,7 +9,7 @@ readonly maintenance_lock="$release_dir/.maintenance.lock"
 # 以下三个路径默认指向生产位置；PRISM_* 覆盖项只供 deploy/tests 把脚本指到临时目录，
 # systemd 单元不设置它们。
 readonly log_dir="${PRISM_MAINTENANCE_LOG_DIR:-/var/log/prism-maintenance}"
-readonly proc_root="${PRISM_PROC_ROOT:-/proc}"
+readonly maintenance_proc_root="${PRISM_PROC_ROOT:-/proc}"
 readonly flock_file="${PRISM_MAINTENANCE_FLOCK_FILE:-/run/lock/prism-maintenance.lock}"
 readonly retention_minutes=10080
 readonly cache_until=168h
@@ -174,7 +174,7 @@ fi
 
 active_operation() {
   local proc_dir pid comm cmdline
-  for proc_dir in "$proc_root"/[0-9]*; do
+  for proc_dir in "$maintenance_proc_root"/[0-9]*; do
     [[ -d "$proc_dir" ]] || continue
     pid="${proc_dir##*/}"
     [[ "$pid" != "$$" ]] || continue
@@ -201,7 +201,7 @@ fi
 resource_snapshot() {
   df -Pk / | awk 'NR == 2 { printf "root_available_kib=%s root_used_percent=%s\n", $4, $5 }' || true
   awk '/^MemAvailable:/ { printf "memory_available_kib=%s\n", $2 } /^SwapFree:/ { printf "swap_free_kib=%s\n", $2 }' \
-    "$proc_root/meminfo" 2>/dev/null || true
+    "$maintenance_proc_root/meminfo" 2>/dev/null || true
 }
 
 # ---- 诊断信息 ---------------------------------------------------------------

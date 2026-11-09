@@ -1,5 +1,11 @@
 # 待办：企业与计费体系
 
+## 2026-11-09 最新 follow-up
+
+- Linux CI 报错已在 Linux 容器复现并修正：维护脚本与共用锁函数的 Bash 只读变量重名。首次修复 Linux `deploy/tests` **225 通过、2 跳过**；当前最新 follow-up 的 Mac 部署全套为 **224 通过、3 跳过**，Linux job 尚待 CI 验证。后端沙箱回归 **133 通过**，包括真实 Unix socket/HTTP handler、worker 错误状态、最大 Unicode POST、旧协议失败关闭与 query/fragment 配置拒绝。
+- SHA `3bca80e` 上的 CodeQL 预览代理告警已通过固定 RPC URL 和字段白名单信封从结构上消除用户路径对 backend URL 的影响，但最新 GitHub CodeQL aggregate 尚未运行，不能标记为已关闭。推送后检查 CodeQL aggregate、全量后端/前端/部署 CI；远端 worker 必须先升级到 RPC v1 才能提供预览。
+- 当前最新 follow-up 尚未提交/推送。未部署生产；生产仍需完整迁移链、备份恢复演练、真实账号浏览器验收、支付宝/微信商户沙箱及真实供应商成本核账。销售门保持关闭。
+
 ## 本轮续验状态（2026-11-09）
 
 - 最近一次已核验生产为 4.1.42 / `a165f94ed4c208fb05251e4c7d12accb427c8ba3`；4.1.43 候选 PR 已打开。`e60c718` 上部署、前端和两种语言的 CodeQL job 通过，聚合 CodeQL 因预览路径、异常响应和报告测试断言 3 条告警失败；后端全量回归当时仍在运行。本地未提交补丁已处理这 3 项，并经独立复核后补齐 Unix/HTTP worker authority 正向用例、保留 HTTP 503 与安全参数，相关后端 221 项、部署 224 项通过；发布脚本故障注入、目标 Ruff、ShellCheck 和 `bash -n` 通过。新补丁尚无远端 CI 结果。发布前需重新读取线上状态。

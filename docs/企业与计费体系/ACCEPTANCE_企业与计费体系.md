@@ -1,5 +1,12 @@
 # 验收记录：企业与计费体系
 
+## 2026-11-09：Linux CI 复现、修复与预览 RPC 边界
+
+- GitHub 对候选 SHA `3bca80e` 的部署回归在 Linux 失败。复现确认 `cleanup.sh` 的只读全局变量 `proc_root` 与公共锁函数的同名局部变量冲突；初次修复遗漏引用已由 Linux 回归捕获并修正。首次修复提交的 Linux `deploy/tests` 为 **225 通过、2 跳过**。本轮追加 fake `/proc/<pid>/stat` 与 `boot_id` 的锁身份回归后，Mac 完整 `deploy/tests` 为 **224 通过、3 跳过**；当前这一最终 follow-up 尚待 GitHub Linux job 验证。
+- SHA `3bca80e` 的 CodeQL 聚合检查曾报告预览代理 `py/partial-ssrf`。后端现以固定 `/preview-rpc/v1` 请求 worker，把 method、path、query、受限请求头和 Base64 请求体放入字段白名单 JSON；worker 重验后只代理到关联沙箱的 loopback。Unix 与 HTTP worker 通道都有真实 handler 集成回归；响应成功、认证失败、业务错误和 worker 错误均带协议版本标记，旧 worker 缺少标记时失败关闭。worker 地址含 query/fragment 会在 DNS 解析前拒绝。
+- 最终 follow-up 后端沙箱回归 **133 项通过**；包含最大 Unicode path/query/headers 加 1 MiB POST 的 JSON 字节边界测试。发布绑定/故障注入脚本矩阵、worker/backend 目标 Ruff、Python 编译、ShellCheck、`bash -n` 与 `git diff --check` 通过。该 follow-up 记录时尚未推送；新 GitHub CodeQL、完整 CI 和 Linux deploy 回归待执行，不能据本地静态结构宣称 CodeQL 告警已关闭。
+- 生产仍是最近核验的 4.1.42；本轮没有部署、生产数据迁移或商户收款验收。
+
 ## 2026-11-09 续验：供应商官方价格变更与发布状态
 
 - 最新重新打开的 DeepSeek 英文与中文官方价格页显示：Flash 高峰缓存未命中输入/输出为 US$0.30/US$1.20 与 ¥2/¥8 每百万 Token；Search、Fetch 各 US$0.75/¥5 每千次成功请求。本轮较早一次页面读取曾显示输出 US$1.32/¥9，已记录为读取差异，不作为当前价。
