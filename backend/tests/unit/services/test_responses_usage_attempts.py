@@ -56,7 +56,9 @@ async def test_native_non_200_usage_reaches_failed_round(monkeypatch):
     monkeypatch.setattr(
         service.httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(handler), **kw)
     )
-    transport = NativeResponsesTransport(ApiConfig(api_key="unit", base_url="https://unit.example/v1", model="unit"))
+    transport = NativeResponsesTransport(ApiConfig(
+        api_key="unit", base_url="https://unit.example/v1", model="unit", source="user",
+    ))
     result = await _runtime(transport, logs.append).start("unit")
     assert result.status == "failed" and len(requests) == len(logs) == 1
     assert logs[0]["model"] == "actual-model" and logs[0]["usage"]["total_tokens"] == 5
@@ -82,7 +84,9 @@ async def test_native_402_keeps_status_and_hides_provider_error_body(monkeypatch
     monkeypatch.setattr(
         service.httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(handler), **kw)
     )
-    transport = NativeResponsesTransport(ApiConfig(api_key="unit", base_url="https://unit.example/v1", model="unit"))
+    transport = NativeResponsesTransport(ApiConfig(
+        api_key="unit", base_url="https://unit.example/v1", model="unit", source="user",
+    ))
     events = await transport.create_response({"model": "deepseek-v4-pro", "input": "unit"})
 
     with pytest.raises(ObservedResponseError) as error:
@@ -117,7 +121,9 @@ async def test_native_402_runtime_logs_no_provider_body_and_never_falls_back(mon
     monkeypatch.setattr(
         service.httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(handler), **kw)
     )
-    transport = NativeResponsesTransport(ApiConfig(api_key="unit", base_url="https://unit.example/v1", model="unit"))
+    transport = NativeResponsesTransport(ApiConfig(
+        api_key="unit", base_url="https://unit.example/v1", model="unit", source="user",
+    ))
     runtime = _runtime(transport, logs.append)
     result = await runtime.start("unit", run_id="run_native_billing_error")
 
@@ -224,7 +230,7 @@ async def test_native_sink_cancel_after_terminal_read_keeps_usage(monkeypatch):
         service.httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(handler), **kw)
     )
     transport = NativeResponsesTransport(
-        ApiConfig(api_key="unit", base_url="https://unit.example/v1", model="unit"), cancel_sink
+        ApiConfig(api_key="unit", base_url="https://unit.example/v1", model="unit", source="user"), cancel_sink
     )
     with pytest.raises(asyncio.CancelledError):
         await _runtime(transport, logs.append).start("unit")
@@ -269,7 +275,9 @@ async def test_user_cancel_closes_native_http_stream(monkeypatch):
     )
     store = InMemoryCheckpointStore()
     logs = []
-    transport = NativeResponsesTransport(ApiConfig(api_key="unit", base_url="https://unit.example/v1", model="unit"))
+    transport = NativeResponsesTransport(ApiConfig(
+        api_key="unit", base_url="https://unit.example/v1", model="unit", source="user",
+    ))
     runtime = DeepSeekResponsesRuntime(
         transport=transport,
         tool_executor=SimpleNamespace(),

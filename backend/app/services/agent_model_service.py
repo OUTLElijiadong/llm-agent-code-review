@@ -32,6 +32,8 @@ def configure_subagent(db, agent, user_id=None):
     agent._base_url = config.base_url
     agent._api_key = config.api_key
     agent._model = config.model
+    agent._billing_provider = config.provider
+    agent._billing_credential_source = config.billing_credential_source
     agent._assigned_model = config.model
     for field, attribute in (
         ("timeout_seconds", "_timeout"), ("max_retries", "_max_retries"), ("temperature", "_temperature"),

@@ -1,5 +1,6 @@
 """后台正式审查须在执行与每次模型请求前复核实时授权。"""
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -107,7 +108,10 @@ def test_worker_rechecks_authorization_after_queue_before_entering_executor(
     monkeypatch.setattr(review_service, "load_task_inputs", lambda *_args: [])
     monkeypatch.setattr(review_service, "_emit_review_event", Mock())
     monkeypatch.setattr(review_service, "_enabled_review_profiles", lambda _db, profiles: profiles)
-    monkeypatch.setattr("app.services.declarative_agent_runtime.DeclarativeReviewAgentFactory.snapshot_profiles", lambda *_a, **_k: ())
+    monkeypatch.setattr(
+        "app.services.declarative_agent_runtime.DeclarativeReviewAgentFactory.snapshot_profiles",
+        lambda *_a, **_k: (),
+    )
     monkeypatch.setattr("app.services.experience_service.retrieve", lambda *_a, **_k: [])
     monkeypatch.setattr("app.services.personalization_service.build_review_context", lambda *_a, **_k: "")
     monkeypatch.setattr("app.services.agent_model_service.resolve_subagent_config", lambda _db, config, **_k: config)
@@ -161,6 +165,8 @@ def test_parallel_agent_rechecks_authorization_before_each_http_retry(monkeypatc
         base_url="https://api.deepseek.com", api_key="isolated", model="unit",
         max_retries=2,
     )
+    agent._billing_credential_source = "user"
+    agent.api_config = SimpleNamespace(source="user")
     with pytest.raises(ForbiddenError, match="授权已撤销"):
         agent.call_raw("system", "user", before_request=revoke_on_retry)
 

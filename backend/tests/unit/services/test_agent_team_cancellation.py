@@ -19,6 +19,8 @@ from app.services import agent_mesh_dispatcher, agent_team_dispatcher, agent_tea
 from app.services import agent_scheduler_runtime as runtime
 from app.services.ai_usage_context import UsageAccountingError, current_attribution, record_usage_attempt
 
+pytestmark = pytest.mark.usefixtures("mark_fake_model_credentials_as_user")
+
 
 @pytest.fixture
 def team_execution(tmp_path, monkeypatch):

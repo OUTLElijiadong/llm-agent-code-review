@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 from datetime import timedelta
-from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine
@@ -21,6 +20,7 @@ from app.models.remote_pentest import RemotePentestEngagement
 from app.models.user import User
 from app.services import agent_mesh_dispatcher
 from app.services import remote_pentest_service as service
+from tests.unit.services.remote_rbac_test_helpers import grant_remote_approval
 
 TARGET = "https://example.com/"
 
@@ -40,7 +40,8 @@ def remote_db(tmp_path):
         engine.dispose()
 
 
-def _grant(monkeypatch, owner_id: int, approver_id: int) -> None:
+def _grant(db, monkeypatch, owner_id: int, approver_id: int) -> None:
+    grant_remote_approval(db, approver_id)
     monkeypatch.setattr(
         service.rbac_service,
         "check_permission",
@@ -62,7 +63,7 @@ def _approved(db, monkeypatch, *, target_url: str = TARGET, window_hours: int = 
     """走真实的创建、提交、独立批准流程，返回 (申请人, 批准人, 委托行)。"""
     owner = _user(db, "engagement-owner")
     approver = _user(db, "engagement-approver", role="reviewer")
-    _grant(monkeypatch, owner.id, approver.id)
+    _grant(db, monkeypatch, owner.id, approver.id)
     task = service.create_task(
         db,
         owner,
@@ -78,7 +79,7 @@ def test_authorization_exists_only_after_independent_approval(remote_db, monkeyp
     db = remote_db
     owner = _user(db, "draft-owner")
     approver = _user(db, "draft-approver", role="reviewer")
-    _grant(monkeypatch, owner.id, approver.id)
+    _grant(db, monkeypatch, owner.id, approver.id)
     task = service.create_task(
         db,
         owner,
@@ -178,7 +179,7 @@ def test_authorization_requires_a_valid_and_different_approver(remote_db, monkey
     )
     assert service.find_active_authorization(db, owner.id, TARGET) is None
 
-    _grant(monkeypatch, owner.id, approver.id)
+    _grant(db, monkeypatch, owner.id, approver.id)
     assert service.find_active_authorization(db, owner.id, TARGET) is not None
 
     row.authorized_by_user_id = owner.id

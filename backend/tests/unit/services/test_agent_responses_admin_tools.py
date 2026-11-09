@@ -8,6 +8,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from studio_rbac_test_support import grant_studio_actor
 
 from app.agents.discussion_bus import DiscussionBus
 from app.agents.events import DiscussionTurn
@@ -423,6 +424,8 @@ def test_batch_delete_protects_current_and_rejects_role_identity_drift(db, admin
 
 
 def _submitted_agent(db, owner: User, suffix: str):
+    grant_studio_actor(db, owner)
+    db.commit()
     agent, version = agent_studio_service.create_agent(
         db,
         owner,
@@ -514,6 +517,8 @@ async def test_release_detail_and_approve_reject_are_responses_approved(db, admi
 async def test_release_approval_blocks_binding_change_after_preview(db, admin_user) -> None:
     reviewer = User(username="release_snapshot_reviewer", password="x", role="reviewer", status=1)
     db.add(reviewer)
+    db.flush()
+    grant_studio_actor(db, reviewer)
     db.commit()
     _, version = agent_studio_service.create_agent(
         db,
@@ -589,6 +594,8 @@ async def test_release_approval_blocks_transitive_skill_change_after_preview(
         status=1,
     )
     db.add(reviewer)
+    db.flush()
+    grant_studio_actor(db, reviewer)
     db.commit()
     _, leaf_version = agent_studio_service.create_skill(
         db,
@@ -659,6 +666,8 @@ async def test_release_approval_blocks_transitive_skill_change_after_preview(
 async def test_release_approval_blocks_delegate_target_change_after_preview(db, admin_user) -> None:
     reviewer = User(username="release_delegate_snapshot", password="x", role="reviewer", status=1)
     db.add(reviewer)
+    db.flush()
+    grant_studio_actor(db, reviewer)
     db.commit()
     delegate_target, delegate_version = agent_studio_service.create_agent(
         db,

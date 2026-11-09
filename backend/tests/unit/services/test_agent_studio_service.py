@@ -3,6 +3,7 @@
 import json
 
 import pytest
+from studio_rbac_test_support import grant_studio_actor
 
 from app.core.exceptions import ConflictError, ForbiddenError, ValidationError
 from app.models.agent_governance import AgentProfile, ApprovalItem
@@ -25,8 +26,21 @@ from app.services.declarative_agent_runtime import DeclarativeReviewAgentFactory
 def _user(db, username: str, role: str) -> User:
     row = User(username=username, password="x", role=role, status=1)
     db.add(row)
+    db.flush()
+    if role in {"reviewer", "admin"}:
+        grant_studio_actor(db, row)
     db.commit()
     return row
+
+
+@pytest.fixture
+def admin_user(db):
+    user = User(username="studio-admin", password="x", role="admin", status=1)
+    db.add(user)
+    db.flush()
+    grant_studio_actor(db, user)
+    db.commit()
+    return user
 
 
 def _create_package(db, reviewer: User, suffix: str = "one"):

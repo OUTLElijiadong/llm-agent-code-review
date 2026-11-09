@@ -3,6 +3,8 @@
 import hashlib
 import json
 
+import pytest
+
 from app.ai.deepseek_agent import DeepSeekOutputTruncatedError
 from app.ai.exceptions import AiServiceError
 from app.services import personalization_service
@@ -141,3 +143,97 @@ def test_maximum_forum_draft_stays_within_source_call_budget(monkeypatch):
     assert result["suggestion"] == "完整草稿建议"
     assert len([call for call in calls if call["agent_label"] == "forum_context_compaction"]) <= 32
     assert "末尾目标必须保留" in calls[-1]["user_prompt"]
+
+
+def test_commercial_forum_assist_reserves_and_settles_personal_wallet(db, monkeypatch):
+    from app.ai import deepseek_agent
+    from app.models.billing_ledger import BillingReservation
+    from app.services import billing_ledger_service
+    from app.services.billing_runtime_gate import metered_response_request
+    from app.utils import api_resolver
+
+    wallet = billing_ledger_service.get_or_create_wallet(db, "user", 7)
+    billing_ledger_service.grant(
+        db, wallet_id=int(wallet.id), grant_key="forum-assist-test", kind="purchase", amount_milli=1_000_000,
+    )
+    db.commit()
+    monkeypatch.setattr(personalization_service.settings, "billing_commercial_metering_ready", True)
+    monkeypatch.setattr(personalization_service.knowledge_service, "retrieve", lambda *_a, **_k: [])
+    monkeypatch.setattr(personalization_service.profile_service, "get_summary_text", lambda *_a: "")
+    monkeypatch.setattr(api_resolver, "resolve_api_config", lambda *_a: object())
+    monkeypatch.setattr(personalization_service, "resolve_subagent_config", lambda *_a: object())
+
+    class FakeResponse:
+        def json(self):
+            return {"usage": {"prompt_tokens": 12, "completion_tokens": 4}}
+
+    class FakeAgent:
+        def __init__(self, **_kwargs):
+            pass
+
+        def chat(self, **kwargs):
+            payload = {
+                "model": "deepseek-flash",
+                "messages": [
+                    {"role": "system", "content": kwargs["system_prompt"]},
+                    {"role": "user", "content": kwargs["user_prompt"]},
+                ],
+                "max_tokens": kwargs["max_tokens"],
+            }
+            metered_response_request(
+                model_name="deepseek-flash", payload=payload,
+                provider_name="deepseek", base_url="https://api.deepseek.com/v1",
+                credential_source="system", send=lambda: (FakeResponse(), 1),
+            )
+            return '{"suggestion":"按个人钱包计费"}', {}
+
+    monkeypatch.setattr(deepseek_agent, "DeepSeekAgent", FakeAgent)
+    result = personalization_service.assist_forum_draft(db, 7, "标题", "草稿")
+
+    rows = db.query(BillingReservation).filter_by(user_id=7).all()
+    assert result["suggestion"] == "按个人钱包计费"
+    assert len(rows) == 1
+    assert rows[0].status == "settled"
+    assert rows[0].personal_wallet_id == wallet.id
+    assert rows[0].enterprise_wallet_id is None
+
+
+def test_commercial_forum_assist_without_personal_wallet_never_calls_model(db, monkeypatch):
+    from app.ai import deepseek_agent
+    from app.core.exceptions import PaymentRequiredError
+    from app.utils import api_resolver
+
+    calls = []
+    monkeypatch.setattr(personalization_service.settings, "billing_commercial_metering_ready", True)
+    monkeypatch.setattr(personalization_service.knowledge_service, "retrieve", lambda *_a, **_k: [])
+    monkeypatch.setattr(personalization_service.profile_service, "get_summary_text", lambda *_a: "")
+    monkeypatch.setattr(api_resolver, "resolve_api_config", lambda *_a: object())
+    monkeypatch.setattr(personalization_service, "resolve_subagent_config", lambda *_a: object())
+
+    class FakeAgent:
+        def __init__(self, **_kwargs):
+            calls.append("constructed")
+
+    monkeypatch.setattr(deepseek_agent, "DeepSeekAgent", FakeAgent)
+    with pytest.raises(PaymentRequiredError, match="个人积分账户"):
+        personalization_service.assist_forum_draft(db, 7, "标题", "草稿")
+    assert calls == []
+
+
+def test_forum_billing_failure_during_compaction_is_not_downgraded_to_rag(db, monkeypatch):
+    from app.core.exceptions import ServiceUnavailableError
+    from app.services import billing_ledger_service
+
+    billing_ledger_service.get_or_create_wallet(db, "user", 7)
+    db.commit()
+    monkeypatch.setattr(personalization_service.settings, "billing_commercial_metering_ready", True)
+    monkeypatch.setattr(personalization_service.settings, "deepseek_context_window_tokens", 20_000)
+
+    def fail_with_unknown_usage(_kwargs):
+        raise billing_ledger_service.BillingError("模型结果未知，费用待核对")
+
+    calls = _forum_dependencies(monkeypatch, response_fn=fail_with_unknown_usage)
+    with pytest.raises(ServiceUnavailableError, match="计费或用量状态尚未确认"):
+        personalization_service.assist_forum_draft(db, 7, "标题", "证据" * 10_000)
+    assert len(calls) == 1
+    assert calls[0]["agent_label"] == "forum_context_compaction"

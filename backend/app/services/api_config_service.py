@@ -181,8 +181,13 @@ def _request_with_retries(
     json_body: Optional[dict] = None,
     usage_db: Optional[Session] = None,
     usage_user_id: Optional[int] = None,
+    caller_pays_provider: bool = False,
 ) -> _RequestOutcome:
     """向固定公网目标发请求，仅对瞬时故障执行有限重试。"""
+    from app.services.billing_runtime_gate import reject_unpriced_call
+
+    resource = "模型连接测试" if method == "POST" else "模型列表查询"
+    reject_unpriced_call(resource, caller_pays=caller_pays_provider)
     target = pin_public_http_url(url)
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -321,7 +326,7 @@ def _extract_models(body) -> list[str]:
     return models
 
 
-def fetch_models(payload: LlmModelsIn) -> LlmModelsOut:
+def fetch_models(payload: LlmModelsIn, *, caller_pays_provider: bool = False) -> LlmModelsOut:
     """拉取 OpenAI-compatible 模型列表，不支持列表时保留手工模型。"""
     api_key = (payload.api_key or "").strip()
     manual_model = (payload.model or "").strip()
@@ -333,6 +338,9 @@ def fetch_models(payload: LlmModelsIn) -> LlmModelsOut:
             selected_model=manual_model,
             next_action="填写 API Key 后重试；也可以继续手工输入模型名称",
         )
+    from app.services.billing_ledger_service import BillingError
+    from app.services.billing_runtime_gate import reject_unpriced_call
+
     try:
         base_url = normalize_ai_base_url(
             payload.base_url or "",
@@ -346,6 +354,16 @@ def fetch_models(payload: LlmModelsIn) -> LlmModelsOut:
             models=[manual_model] if manual_model else [],
             selected_model=manual_model,
             next_action="请修正 Base URL 后重试",
+        )
+    try:
+        reject_unpriced_call("模型列表查询", caller_pays=caller_pays_provider)
+    except BillingError as exc:
+        return LlmModelsOut(
+            success=False,
+            message=str(exc),
+            models=[manual_model] if manual_model else [],
+            selected_model=manual_model,
+            next_action="手工填写模型名称；或由部署明确启用旧兼容模式",
         )
     try:
         outcome = _request_with_retries(
@@ -431,8 +449,13 @@ def fetch_models(payload: LlmModelsIn) -> LlmModelsOut:
     )
 
 
-def test_connection(payload: ApiConfigTestIn, *, db: Session, user_id: int) -> ApiConfigTestOut:
+def test_connection(
+    payload: ApiConfigTestIn, *, db: Session, user_id: int, caller_pays_provider: bool = False,
+) -> ApiConfigTestOut:
     """不保存 API 配置；每个实际模型请求以真实登录用户记录调用用量。"""
+    from app.services.billing_ledger_service import BillingError
+    from app.services.billing_runtime_gate import reject_unpriced_call
+
     try:
         base_url = normalize_ai_base_url(
             payload.base_url,
@@ -446,6 +469,14 @@ def test_connection(payload: ApiConfigTestIn, *, db: Session, user_id: int) -> A
             next_action="请修正 Base URL 后重试",
         )
     try:
+        reject_unpriced_call("模型连接测试", caller_pays=caller_pays_provider)
+    except BillingError as exc:
+        return ApiConfigTestOut(
+            success=False,
+            message=str(exc),
+            next_action="计量就绪前不要使用平台承担费用的连通性试调用；或由部署显式启用旧兼容模式",
+        )
+    try:
         outcome = _request_with_retries(
             "POST",
             f"{base_url}/chat/completions",
@@ -454,6 +485,7 @@ def test_connection(payload: ApiConfigTestIn, *, db: Session, user_id: int) -> A
             max_retries=payload.max_retries,
             usage_db=db,
             usage_user_id=user_id,
+            caller_pays_provider=caller_pays_provider,
             json_body={
                 "model": payload.model,
                 "messages": [{"role": "user", "content": "ping"}],

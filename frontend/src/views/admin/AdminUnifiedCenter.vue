@@ -26,6 +26,7 @@ const ReportTemplateManage = defineAsyncComponent(() => import('@/views/report/R
 const LlmConfig = defineAsyncComponent(() => import('./LlmConfig.vue'))
 const EmbeddingConfig = defineAsyncComponent(() => import('./EmbeddingConfig.vue'))
 const McpWorkerGovernance = defineAsyncComponent(() => import('./McpWorkerGovernance.vue'))
+const PentestEvidence = defineAsyncComponent(() => import('./PentestEvidence.vue'))
 
 const route = useRoute()
 const router = useRouter()
@@ -53,6 +54,7 @@ const tabs: Record<AdminCenterDomain, Tab[]> = {
     { name: 'jobs', label: '任务调度', component: JobCenter },
     { name: 'observability', label: '监控告警', component: ObservabilityCenter },
     { name: 'logs', label: '日志与审计', component: ActivityLogHub },
+    { name: 'pentest-evidence', label: '渗透执行核查', component: PentestEvidence, superAdmin: true },
     { name: 'rewards', label: '奖惩趋势', component: RewardCenter },
     { name: 'rollback', label: '版本回退', component: RollbackCenter },
   ],
@@ -113,7 +115,7 @@ function selectTab(value: string | number): void {
 <template>
   <div class="unified-center">
     <header class="unified-head">
-      <p class="unified-description">{{ sectionDescription }}</p>
+      <p v-if="activeName !== 'pentest-evidence'" class="unified-description">{{ sectionDescription }}</p>
       <el-tabs :model-value="activeName" @tab-change="selectTab">
         <el-tab-pane v-for="tab in visibleTabs" :key="tab.name" :label="tab.label" :name="tab.name" />
       </el-tabs>

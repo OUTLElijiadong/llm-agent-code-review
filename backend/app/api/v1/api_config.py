@@ -70,5 +70,7 @@ def test_connection(
 
     发送最小化请求验证连通性和认证，不保存 API 配置，记录实际调用用量。
     """
-    result = api_config_service.test_connection(payload, db=db, user_id=user.id)
+    result = api_config_service.test_connection(
+        payload, db=db, user_id=user.id, caller_pays_provider=True,
+    )
     return Resp(data=result, code=0 if result.success else -1, message=result.message)

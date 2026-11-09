@@ -10,10 +10,11 @@
 """
 import hashlib
 import json
+from contextlib import nullcontext
 from typing import Optional
 
 from loguru import logger
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
 from app.services import knowledge_service, profile_service
@@ -30,6 +31,36 @@ _FORUM_COMPACTION_INSTRUCTION = (
     "\"quote\":\"该片原文连续短引文\",\"summary\":\"该片事实与意图摘要\"}。"
     "引文必须直接摘自输入内容；无法理解时返回 error。"
 )
+
+
+def _forum_billing_scope(db: Session, user_id: int):
+    """Charge forum drafting to the authenticated user's personal wallet."""
+    if not settings.billing_commercial_metering_ready:
+        return nullcontext()
+
+    from app.core.exceptions import PaymentRequiredError
+    from app.models.billing_ledger import BillingWallet
+    from app.services.billing_runtime_gate import billing_scope
+
+    if db is None or type(user_id) is not int or user_id <= 0:
+        raise PaymentRequiredError("论坛助手缺少可信个人计费身份")
+    session_factory = sessionmaker(bind=db.get_bind(), autoflush=False, expire_on_commit=False)
+    with session_factory() as billing_db:
+        wallet = billing_db.query(BillingWallet).filter_by(
+            owner_type="user", owner_id=user_id,
+        ).first()
+        wallet_id = int(wallet.id) if wallet is not None else None
+    if wallet_id is None:
+        raise PaymentRequiredError("个人积分账户尚未开通，请先购买积分或会员")
+    return billing_scope(
+        session_factory=session_factory,
+        user_id=user_id,
+        personal_wallet_id=wallet_id,
+        max_input_tokens=int(settings.deepseek_context_window_tokens),
+        max_output_tokens=_FORUM_OUTPUT_TOKENS,
+        allow_personal=False,
+        usage_kind="member",
+    )
 
 
 class ForumContextError(ValueError):
@@ -118,6 +149,10 @@ def _compact_forum_prompt(agent, db: Session, user_id: int, *, system: str,
                     )
                     break
                 except Exception as exc:
+                    from app.services.billing_ledger_service import BillingError
+
+                    if isinstance(exc, BillingError):
+                        raise
                     if output_budget == _FORUM_COMPACTION_OUTPUT_TOKENS and _forum_output_truncated(exc):
                         continue
                     raise ForumContextError(f"论坛来源 {source_id} 压缩调用未完成") from exc
@@ -234,30 +269,18 @@ def assist_forum_draft(db: Session, user_id: int, title: str, draft: str) -> dic
     )
     summary = profile_service.get_summary_text(db, user_id)
 
+    from app.core.exceptions import PaymentRequiredError, ServiceUnavailableError
+    from app.services import billing_ledger_service
+
     try:
-        from app.ai.deepseek_agent import DeepSeekAgent
-        from app.utils.api_resolver import resolve_api_config
-        cfg = resolve_subagent_config(db, resolve_api_config(db, user_id))
-        agent = DeepSeekAgent(api_config=cfg)
-        system = (
-            "你是开发者论坛的发帖助手。基于用户画像和其个人知识库片段,"
-            "帮助用户把帖子写得更清晰、更专业,并补充可能遗漏的关键点。"
-            '严格输出 JSON: {"suggestion": "面向用户的Markdown建议"}。'
-        )
-        user_prompt = _compact_forum_prompt(
-            agent, db, user_id, system=system, summary=summary,
-            kb_text=kb_text, title=title, draft=draft,
-        )
-        content, _ = agent.chat(
-            system_prompt=system, user_prompt=user_prompt, db=db,
-            user_id=user_id, agent_label="forum_assist", max_tokens=_FORUM_OUTPUT_TOKENS,
-        )
-        suggestion = ""
-        try:
-            suggestion = json.loads(content).get("suggestion", "")
-        except (json.JSONDecodeError, TypeError):
-            suggestion = content
-        return {"suggestion": suggestion or "(暂无建议)", "references": references}
+        with _forum_billing_scope(db, user_id):
+            return _assist_forum_draft_with_model(db, user_id, title, draft, kb_text, summary, references)
+    except PaymentRequiredError:
+        raise
+    except billing_ledger_service.InsufficientCredits as exc:
+        raise PaymentRequiredError("个人积分不足，请充值后再使用论坛助手") from exc
+    except billing_ledger_service.BillingError as exc:
+        raise ServiceUnavailableError("论坛助手计费或用量状态尚未确认，请稍后查看个人用量记录") from exc
     except ForumContextError as e:
         logger.warning("[forum_assist] 上下文未完整覆盖: {}", e)
         return {
@@ -269,6 +292,34 @@ def assist_forum_draft(db: Session, user_id: int, title: str, draft: str) -> dic
         logger.warning(f"[forum_assist] LLM 失败,降级为纯检索: {e}")
         fallback = "根据你的知识库,以下资料可能与本帖相关:\n" + (kb_text or "（暂无相关资料）")
         return {"suggestion": fallback, "references": references}
+
+
+def _assist_forum_draft_with_model(db: Session, user_id: int, title: str, draft: str,
+                                   kb_text: str, summary: str, references: list[dict]) -> dict:
+    """Run all forum model calls inside the caller's personal billing scope."""
+    from app.ai.deepseek_agent import DeepSeekAgent
+    from app.utils.api_resolver import resolve_api_config
+
+    cfg = resolve_subagent_config(db, resolve_api_config(db, user_id))
+    agent = DeepSeekAgent(api_config=cfg)
+    system = (
+        "你是开发者论坛的发帖助手。基于用户画像和其个人知识库片段,"
+        "帮助用户把帖子写得更清晰、更专业,并补充可能遗漏的关键点。"
+        '严格输出 JSON: {"suggestion": "面向用户的Markdown建议"}。'
+    )
+    user_prompt = _compact_forum_prompt(
+        agent, db, user_id, system=system, summary=summary,
+        kb_text=kb_text, title=title, draft=draft,
+    )
+    content, _ = agent.chat(
+        system_prompt=system, user_prompt=user_prompt, db=db,
+        user_id=user_id, agent_label="forum_assist", max_tokens=_FORUM_OUTPUT_TOKENS,
+    )
+    try:
+        suggestion = json.loads(content).get("suggestion", "")
+    except (json.JSONDecodeError, TypeError):
+        suggestion = content
+    return {"suggestion": suggestion or "(暂无建议)", "references": references}
 
 
 def chat_context_for_agent(db: Session, user_id: Optional[int], query: str) -> str:

@@ -72,6 +72,8 @@ def test_published_report_inherits_persisted_origin_and_rerun_replaces_scope(db,
         window_end=None,
         **origin,
     )
+    if source == "pentest":
+        row.id = 1
 
     def publish():
         if source == "pentest":
@@ -194,6 +196,7 @@ def test_explicit_system_database_call_records_usage_without_inventing_owner(db)
     assert log.total_tokens == 7
 
 
+@pytest.mark.usefixtures("mark_fake_model_credentials_as_user")
 async def test_asgi_reentry_preserves_scope_through_auth_and_sync_model_endpoint(monkeypatch):
     from unittest.mock import MagicMock
 

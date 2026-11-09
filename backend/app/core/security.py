@@ -40,7 +40,7 @@ def verify_password(plain: str, hashed: str) -> bool:
     return pwd_ctx.verify(plain, hashed)
 
 
-def create_access_token(user_id: int, role: str, token_version: int = 0) -> str:
+def create_access_token(user_id: int, role: str, token_version: int = 0, *, expires_at: int | None = None) -> str:
     """生成JWT访问令牌
 
     Args:
@@ -59,6 +59,8 @@ def create_access_token(user_id: int, role: str, token_version: int = 0) -> str:
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(seconds=settings.jwt_expire_seconds)).timestamp()),
     }
+    if expires_at is not None:
+        payload["exp"] = min(payload["exp"], expires_at)
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 

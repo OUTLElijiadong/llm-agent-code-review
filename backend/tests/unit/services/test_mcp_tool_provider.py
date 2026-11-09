@@ -10,12 +10,190 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import ValidationError
 from app.services import mcp_tool_provider as module
+from app.services.billing_ledger_service import BillingError
+from app.services.billing_runtime_gate import billing_scope
 from app.services.mcp_tool_provider import (
     McpServerConfig,
     McpToolBinding,
     McpToolProvider,
     load_mcp_server_configs,
 )
+
+
+def _external_provider():
+    server = McpServerConfig("remote", "https://mcp.example.test/rpc", {})
+    provider = McpToolProvider([server])
+    binding = McpToolBinding(
+        model_name="mcp_remote_lookup",
+        server=server,
+        tool_name="lookup",
+        description="remote lookup",
+        input_schema={"type": "object", "properties": {}},
+        server_id=1,
+        tool_id=2,
+        transport="streamable_http",
+    )
+    provider._bindings[binding.model_name] = binding
+    return provider
+
+
+@pytest.mark.asyncio
+async def test_external_mcp_is_rejected_inside_paid_scope_before_network(monkeypatch) -> None:
+    monkeypatch.setattr(module.settings, "billing_commercial_metering_ready", True)
+    monkeypatch.setattr(module.settings, "billing_allow_unmetered_external_calls", True)
+    network_calls: list[str] = []
+
+    def fail_before_dns(_url: str):
+        network_calls.append("dns")
+        raise AssertionError("paid external MCP must be rejected before DNS")
+
+    class FailHttpClient:
+        def __init__(self, **_kwargs):
+            network_calls.append("http")
+            raise AssertionError("paid external MCP must be rejected before HTTP")
+
+    monkeypatch.setattr(module, "pin_public_http_url", fail_before_dns)
+    monkeypatch.setattr(module.httpx, "AsyncClient", FailHttpClient)
+    provider = _external_provider()
+    with billing_scope(
+        session_factory=lambda: None,
+        user_id=7,
+        personal_wallet_id=11,
+        max_input_tokens=100,
+        max_output_tokens=50,
+    ):
+        with pytest.raises(BillingError, match="外部 MCP 工具.*禁止付费作用域调用"):
+            await provider.call("mcp_remote_lookup", {"query": "private"})
+
+    assert network_calls == []
+
+
+@pytest.mark.asyncio
+async def test_external_mcp_is_rejected_without_scope_when_commercial_metering_is_ready(monkeypatch) -> None:
+    monkeypatch.setattr(module.settings, "billing_commercial_metering_ready", True)
+    network_calls: list[str] = []
+
+    def fail_before_dns(_url: str):
+        network_calls.append("dns")
+        raise AssertionError("unscoped external MCP must be rejected before DNS")
+
+    monkeypatch.setattr(module, "pin_public_http_url", fail_before_dns)
+    provider = _external_provider()
+    with pytest.raises(BillingError, match="未进入可信计费作用域"):
+        await provider.call("mcp_remote_lookup", {"query": "private"})
+
+    assert network_calls == []
+
+
+@pytest.mark.asyncio
+async def test_external_mcp_discovery_is_rejected_before_network_when_metering_is_ready(monkeypatch) -> None:
+    monkeypatch.setattr(module.settings, "billing_commercial_metering_ready", True)
+    network_calls: list[str] = []
+
+    def fail_before_dns(_url: str):
+        network_calls.append("dns")
+        raise AssertionError("external MCP discovery must be rejected before DNS")
+
+    class FailHttpClient:
+        def __init__(self, **_kwargs):
+            network_calls.append("http")
+            raise AssertionError("external MCP discovery must be rejected before HTTP")
+
+    monkeypatch.setattr(module, "pin_public_http_url", fail_before_dns)
+    monkeypatch.setattr(module.httpx, "AsyncClient", FailHttpClient)
+    provider = McpToolProvider([
+        McpServerConfig("remote", "https://mcp.example.test/rpc", {})
+    ])
+    with pytest.raises(BillingError, match="未进入可信计费作用域"):
+        await provider.discover()
+
+    assert network_calls == []
+
+
+@pytest.mark.asyncio
+async def test_external_mcp_discovery_is_rejected_inside_paid_scope_before_network(monkeypatch) -> None:
+    monkeypatch.setattr(module.settings, "billing_commercial_metering_ready", True)
+    network_calls: list[str] = []
+
+    def fail_before_dns(_url: str):
+        network_calls.append("dns")
+        raise AssertionError("paid external MCP discovery must be rejected before DNS")
+
+    monkeypatch.setattr(module, "pin_public_http_url", fail_before_dns)
+    provider = McpToolProvider([
+        McpServerConfig("remote", "https://mcp.example.test/rpc", {})
+    ])
+    with billing_scope(
+        session_factory=lambda: None,
+        user_id=7,
+        personal_wallet_id=11,
+        max_input_tokens=100,
+        max_output_tokens=50,
+    ):
+        with pytest.raises(BillingError, match="外部 MCP 工具.*禁止付费作用域调用"):
+            await provider.discover()
+
+    assert network_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["discover", "call"])
+async def test_external_mcp_is_rejected_in_unmetered_legacy_mode_by_default(
+    monkeypatch, operation
+) -> None:
+    monkeypatch.setattr(module.settings, "billing_commercial_metering_ready", False)
+    monkeypatch.setattr(module.settings, "billing_allow_unmetered_external_calls", False)
+    network_calls: list[str] = []
+
+    def fail_before_dns(_url: str):
+        network_calls.append("dns")
+        raise AssertionError("unmetered external MCP must be rejected before DNS")
+
+    monkeypatch.setattr(module, "pin_public_http_url", fail_before_dns)
+    provider = _external_provider()
+    with pytest.raises(BillingError, match="外部 MCP 工具.*未计量"):
+        if operation == "discover":
+            await provider.discover()
+        else:
+            await provider.call("mcp_remote_lookup", {"query": "private"})
+
+    assert network_calls == []
+
+
+@pytest.mark.asyncio
+async def test_managed_mcp_is_not_blocked_by_external_mcp_cost_gate(monkeypatch) -> None:
+    monkeypatch.setattr(module.settings, "billing_commercial_metering_ready", True)
+    managed_calls: list[tuple[Any, ...]] = []
+
+    def fake_managed_tool(*args):
+        managed_calls.append(args)
+        return {"ok": "managed"}
+
+    monkeypatch.setattr(
+        "app.services.managed_mcp_adapter.call_managed_tool", fake_managed_tool
+    )
+    provider = McpToolProvider(db=object(), user=SimpleNamespace(id=7))
+    binding = McpToolBinding(
+        model_name="mcp_prism_list",
+        server=McpServerConfig("internal", "", {}),
+        tool_name="list_project_source",
+        description="internal managed tool",
+        input_schema={"type": "object", "properties": {}},
+        managed_kind="prism-code",
+        transport="managed",
+    )
+    provider._bindings[binding.model_name] = binding
+
+    with billing_scope(
+        session_factory=lambda: None,
+        user_id=7,
+        personal_wallet_id=11,
+        max_input_tokens=100,
+        max_output_tokens=50,
+    ):
+        assert await provider.call("mcp_prism_list", {"project_id": 4}) == {"ok": "managed"}
+
+    assert len(managed_calls) == 1
 
 
 def test_mcp_approval_fingerprint_binds_endpoint_secret_schema_and_policy() -> None:
@@ -67,6 +245,8 @@ def test_load_mcp_configs_validates_names_urls_and_headers(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_discover_maps_tools_and_call_uses_original_name(monkeypatch) -> None:
+    monkeypatch.setattr(module.settings, "billing_commercial_metering_ready", False)
+    monkeypatch.setattr(module.settings, "billing_allow_unmetered_external_calls", True)
     configs = load_mcp_server_configs('[{"name":"repo","url":"https://mcp.example.com/rpc"}]')
     observed: list[tuple[str, Mapping[str, Any]]] = []
 
@@ -140,6 +320,7 @@ async def test_registry_query_failure_never_falls_back_to_environment(db, monkey
 async def test_session_rpc_pins_ip_preserves_host_sni_and_disables_env_proxy(monkeypatch) -> None:
     """MCP 请求必须连接已校验 IP，同时保留 Host 和 TLS SNI。"""
 
+    monkeypatch.setattr(module.settings, "billing_allow_unmetered_external_calls", True)
     pin_calls: list[str] = []
     client_options: list[dict[str, Any]] = []
     posts: list[tuple[str, dict[str, Any]]] = []
@@ -213,6 +394,7 @@ async def test_session_rpc_pins_ip_preserves_host_sni_and_disables_env_proxy(mon
 async def test_session_rpc_rejects_private_dns_before_opening_client(monkeypatch) -> None:
     """MCP 域名解析到私网时不得创建 HTTP 客户端。"""
 
+    monkeypatch.setattr(module.settings, "billing_allow_unmetered_external_calls", True)
     monkeypatch.setattr(
         "app.utils.public_http.socket.getaddrinfo",
         lambda *_args, **_kwargs: [(2, 1, 6, "", ("10.0.0.8", 443))],

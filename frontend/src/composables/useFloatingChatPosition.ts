@@ -11,13 +11,14 @@ const MIN_SIZE: Size = { width: 360, height: 420 }
 // 上限放宽到大屏可用：宽屏可把小菱拉成半屏工作区，最终仍受视口约束。
 const MAX_SIZE: Size = { width: 1600, height: 1400 }
 const KEYBOARD_RESIZE_STEP = 16
+const KEYBOARD_MOVE_STEP = 16
 
 function storageName(storageKey: string): string {
   return `prism-floating-chat-position:${storageKey}`
 }
 
-function responsive(): boolean {
-  return window.innerWidth <= 520 || window.innerHeight <= 520
+function responsive(responsiveWidth: number): boolean {
+  return window.innerWidth <= responsiveWidth || window.innerHeight <= 520
 }
 
 function bound(value: number, min: number, max: number): number {
@@ -38,7 +39,7 @@ function clampPosition(point: Point, size: Size): Point {
   }
 }
 
-export function useFloatingChatPosition(storageKey: string) {
+export function useFloatingChatPosition(storageKey: string, responsiveWidth = 520) {
   const panelRef = ref<HTMLElement | null>(null)
   const state = ref<PanelState | null>(null)
   const dragging = ref(false)
@@ -69,7 +70,7 @@ export function useFloatingChatPosition(storageKey: string) {
   function restoreOrAnchor(): void {
     const panel = panelRef.value
     if (!panel) return
-    if (responsive()) {
+    if (responsive(responsiveWidth)) {
       cancelRestore()
       state.value = null
       return
@@ -111,7 +112,7 @@ export function useFloatingChatPosition(storageKey: string) {
   }
 
   function startPointer(event: PointerEvent): boolean {
-    if (responsive() || event.button !== 0 || !panelRef.value || start) return false
+    if (responsive(responsiveWidth) || event.button !== 0 || !panelRef.value || start) return false
     if (!state.value) restoreOrAnchor()
     if (!state.value) return false
     event.preventDefault()
@@ -158,7 +159,7 @@ export function useFloatingChatPosition(storageKey: string) {
   }
 
   function resizeByKeyboard(event: KeyboardEvent): void {
-    if (responsive() || !panelRef.value) return
+    if (responsive(responsiveWidth) || !panelRef.value) return
     const step = event.shiftKey ? KEYBOARD_RESIZE_STEP * 4 : KEYBOARD_RESIZE_STEP
     const dx = event.key === 'ArrowRight' ? step : event.key === 'ArrowLeft' ? -step : 0
     const dy = event.key === 'ArrowDown' ? step : event.key === 'ArrowUp' ? -step : 0
@@ -168,6 +169,22 @@ export function useFloatingChatPosition(storageKey: string) {
     event.preventDefault()
     const size = clampSize({ width: state.value.width + dx, height: state.value.height + dy })
     state.value = { ...clampPosition(state.value, size), ...size }
+    persist()
+  }
+
+  function moveByKeyboard(event: KeyboardEvent): void {
+    if (responsive(responsiveWidth) || !panelRef.value) return
+    const step = event.shiftKey ? KEYBOARD_MOVE_STEP * 4 : KEYBOARD_MOVE_STEP
+    const dx = event.key === 'ArrowRight' ? step : event.key === 'ArrowLeft' ? -step : 0
+    const dy = event.key === 'ArrowDown' ? step : event.key === 'ArrowUp' ? -step : 0
+    if (!dx && !dy) return
+    if (!state.value) restoreOrAnchor()
+    if (!state.value) return
+    event.preventDefault()
+    state.value = {
+      ...state.value,
+      ...clampPosition({ left: state.value.left + dx, top: state.value.top + dy }, state.value),
+    }
     persist()
   }
 
@@ -190,7 +207,7 @@ export function useFloatingChatPosition(storageKey: string) {
   function clampToViewport(): void {
     endDrag()
     if (!panelRef.value) return
-    if (responsive()) {
+    if (responsive(responsiveWidth)) {
       cancelRestore()
       state.value = null
       return
@@ -216,5 +233,8 @@ export function useFloatingChatPosition(storageKey: string) {
     window.removeEventListener('blur', handleBlur)
   })
 
-  return { panelRef, style, dragging, resizing, restoreOrAnchor, beginDrag, beginResize, resizeByKeyboard, moveDrag, endDrag }
+  return {
+    panelRef, style, dragging, resizing, restoreOrAnchor, beginDrag, beginResize,
+    resizeByKeyboard, moveByKeyboard, moveDrag, endDrag,
+  }
 }

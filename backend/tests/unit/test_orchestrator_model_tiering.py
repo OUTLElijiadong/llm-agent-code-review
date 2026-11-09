@@ -247,7 +247,9 @@ def test_orchestrator_restores_pro_model_when_api_config_is_none(
             base_url="https://example.test/v1/",
             api_key="secret-test-key",
             model="custom-model",
+            provider="deepseek",
             source="user",
+            billing_credential_source="user",
         )
     )
 

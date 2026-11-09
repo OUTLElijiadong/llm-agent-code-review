@@ -361,7 +361,7 @@ def test_start_rejects_missing_project_and_partial_files(db: Any, monkeypatch: p
 
 def test_run_review_task_executes_with_degraded_optional_context(monkeypatch: pytest.MonkeyPatch) -> None:
     """经验和画像加载失败时后台入口仍应执行审查并释放全部资源。"""
-    task = SimpleNamespace(id=11, project_id=3, review_type="standard", status="running")
+    task = SimpleNamespace(id=11, project_id=3, review_type="standard", status="running", coverage=None)
     user = SimpleNamespace(id=22)
     project = SimpleNamespace(id=3, language="Python")
     code_file = SimpleNamespace(id=33)
@@ -674,7 +674,7 @@ def test_delete_cancel_and_cancel_check_enforce_task_state(db: Any, monkeypatch:
     finished = _make_task(db, user.id, project.id, task_id=1001, status="success")
     access_modes: list[bool] = []
 
-    def _allow_access(db_obj: Any, project_id: int, user_obj: Any, need_write: bool = False) -> str:
+    def _allow_access(db_obj: Any, project_id: int, user_obj: Any, need_write: bool = False, **_kwargs: Any) -> str:
         """记录权限检查模式并允许访问。"""
         access_modes.append(need_write)
         return "owner"

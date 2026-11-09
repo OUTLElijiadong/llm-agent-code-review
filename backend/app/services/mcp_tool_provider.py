@@ -369,6 +369,8 @@ class McpToolProvider:
                 binding.tool_name,
                 arguments,
             )
+        if binding.transport != "streamable_http":
+            raise RuntimeError("不支持的外部 MCP 传输类型")
         return await self._session_rpc(
             binding.server,
             "tools/call",
@@ -381,6 +383,12 @@ class McpToolProvider:
         method: str,
         params: Mapping[str, Any],
     ) -> Mapping[str, Any]:
+        # Remote MCP discovery and execution can incur costs outside Prism's
+        # token ledger. Keep the shared gate here so tools/list, initialize,
+        # and tools/call all fail before DNS or HTTP in commercial mode.
+        from app.services.billing_runtime_gate import reject_unpriced_call
+
+        reject_unpriced_call("外部 MCP 工具")
         # 一个 MCP 会话内所有请求复用同一次 DNS 校验结果，避免初始化与工具调用之间发生重绑定。
         target = pin_public_http_url(server.url)
         timeout = httpx.Timeout(settings.mcp_timeout)

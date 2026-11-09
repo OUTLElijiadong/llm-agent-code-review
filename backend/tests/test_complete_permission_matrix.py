@@ -75,7 +75,13 @@ def route_inventory():
     # 本次新增管理员只读 Token 趋势端点，已在下方逐条验证 require_admin 守卫。
     # 4.1.19 新增 /api/agent-teams/{team_id}/tasks/cancel（agent:chat + 账号私有，见下方矩阵）。
     # CNVD/CNNVD 新增两条只读接口，均复用 security:view 守卫。
-    assert len(rows) == 363, "完整路由基线变化，需逐项复核后显式更新矩阵"
+    # 098 新增费率目录的五条最高管理员接口；安全报告 GET/HEAD 另由服务层做企业/项目交集授权。
+    # Search/Fetch 陈旧预占恢复接口仅限平台最高管理员。
+    # 两条个人渗透证据查询仅允许平台最高管理员，并对每页留存访问审计。
+    # 新增企业本人会话计费预览；由服务层校验会话与企业成员权限。
+    # 微信资金账单新增四条超管接口，写入时还会重验原 JWT 与当前角色。
+    # 澄清 GET、decision、resume 三条接口均有当前用户依赖，资源权限由服务层按会话成员和权限等级复核。
+    assert len(rows) == 538, "完整路由基线变化，需逐项复核后显式更新矩阵"
     return rows
 
 
@@ -85,11 +91,19 @@ GUARDED_ROUTES = [row for row in AUTHENTICATED_ROUTES if row["guards"]]
 
 
 def test_route_inventory_is_complete_and_studio_guard_is_included():
-    assert len(ROUTES) == 363
-    assert len({(row["method"], row["path"]) for row in ROUTES}) == 363
-    assert len({row["source"] for row in ROUTES}) == 45
-    assert len(AUTHENTICATED_ROUTES) == 349
-    assert len(GUARDED_ROUTES) == 284
+    assert len(ROUTES) == 538
+    assert len({(row["method"], row["path"]) for row in ROUTES}) == 538
+    assert len({row["source"] for row in ROUTES}) == 58
+    assert len(AUTHENTICATED_ROUTES) == 522
+    assert len(GUARDED_ROUTES) == 322
+    funds = [row for row in ROUTES if row['source'].endswith('/api/v1/wechat_fund_admin.py')]
+    assert {(row['method'], row['path']) for row in funds} == {
+        ('POST', '/api/billing/admin/fund-statements/import'),
+        ('POST', '/api/billing/admin/fund-statements/download'),
+        ('GET', '/api/billing/admin/fund-statements'),
+        ('GET', '/api/billing/admin/fund-statements/{batch_id}/rows'),
+    }
+    assert all(row['authenticated'] and row['guards'] == ['require_super_admin'] for row in funds)
     studio = [row for row in ROUTES if row["source"].endswith("/api/v1/agent_studio.py")]
     assert len(studio) == 15
     assert all("require_studio_role" in row["guards"] for row in studio)
@@ -106,6 +120,80 @@ def test_route_inventory_is_complete_and_studio_guard_is_included():
     assert len(catalog) == 1
     assert catalog[0]["guards"] == ["security:view"]
     expected_new_routes = {
+        ("GET", "/api/enterprises/{enterprise_id}/conversations/proactive-settings"): [],  # 服务层校验企业成员
+        ("PUT", "/api/enterprises/{enterprise_id}/conversations/proactive-settings"): [],  # 服务层校验企业管理员
+        ("GET", ("/api/enterprises/{enterprise_id}/conversations/{conversation_id}/"
+                 "assistant-runs/{run_id}/clarification")): [],
+        ("POST", ("/api/enterprises/{enterprise_id}/conversations/{conversation_id}/"
+                  "assistant-runs/{run_id}/clarification/{request_id}/decision")): [],
+        ("POST", ("/api/enterprises/{enterprise_id}/conversations/{conversation_id}/"
+                  "assistant-runs/{run_id}/clarification/{request_id}/resume")): [],
+        ("GET", "/api/pentest/admin/evidence/{public_id}"): ["require_super_admin"],
+        ("GET", "/api/pentest/admin/evidence/{public_id}/executions/{execution_id}/activities"):
+            ["require_super_admin"],
+        ("GET", "/api/me/agents"): [],
+        ("GET", "/api/me/agent-runs"): [],  # 查询在服务层限定当前账号
+        ("POST", "/api/enterprise-asset-catalog/{publication_id}/runs"): [],  # 服务层校验公开版本与本人钱包
+        ("GET", "/api/enterprise-asset-catalog/{publication_id}/runs/{run_id}"): [],  # 仅本人运行
+        ("GET", "/api/enterprise-asset-catalog/{publication_id}/runs/by-request/{request_key}"): [],
+        ("PUT", "/api/billing/admin/refund-reviewers/{user_id}"): ["require_super_admin"],
+        ("GET", "/api/billing/admin/refund-reviewers"): ["require_super_admin"],
+        ("GET", "/api/billing/refund-reviews"): [],  # 委任权限在服务层校验
+        ("POST", "/api/me/agents"): [],
+        ("GET", "/api/me/agents/{agent_id}"): [],
+        ("PUT", "/api/me/agents/{agent_id}"): [],
+        ("GET", "/api/me/agents/{agent_id}/versions"): [],
+        ("POST", "/api/me/agents/{agent_id}/disable"): [],
+        ("POST", "/api/me/agents/{agent_id}/runs"): [],
+        ("GET", "/api/me/agents/{agent_id}/runs/by-request/{request_key}"): [],
+        ("GET", "/api/me/agents/{agent_id}/runs/{run_id}"): [],
+        ("POST", "/api/me/agents/{agent_id}/publication-requests"): [],
+        ("GET", "/api/me/personal-agent-publications"): [],
+        ("POST", "/api/me/personal-agent-publications/{publication_id}/withdraw"): [],
+        ("GET", "/api/admin/personal-agent-publications"): ["require_super_admin"],
+        ("POST", "/api/admin/personal-agent-publications/{publication_id}/decision"): ["require_super_admin"],
+        ("POST", "/api/admin/personal-agent-publications/{publication_id}/revoke"): ["require_super_admin"],
+        ("GET", "/api/personal-agent-catalog"): [],
+        ("POST", "/api/personal-agent-catalog/{publication_id}/runs"): [],
+        ("GET", "/api/personal-agent-catalog/{publication_id}/runs/by-request/{request_key}"): [],
+        ("GET", "/api/personal-agent-catalog/{publication_id}/runs/{run_id}"): [],
+        ("PUT", "/api/billing/admin/rate-reviewers/{user_id}"): ["require_super_admin"],
+        ("GET", "/api/billing/admin/rate-reviewers"): ["require_super_admin"],
+        # 费率复核授权在服务层以当前账号及独立委任记录验证。
+        ("GET", "/api/billing/rate-reviews"): [],
+        ("GET", "/api/billing/rate-reviews/{catalog_id}"): [],
+        ("POST", "/api/billing/rate-reviews/{catalog_id}/approve"): [],
+        ("POST", "/api/billing/rate-reviews/{catalog_id}/reject"): [],
+        ("POST", "/api/billing/rate-catalogs/{catalog_id}/cancel-requests"): [],
+        ("GET", "/api/billing/rate-cancel-requests"): [],
+        ("POST", "/api/billing/rate-cancel-requests/{request_id}/decision"): [],
+        ("GET", "/api/billing/admin/rate-catalogs"): ["require_super_admin"],
+        ("POST", "/api/billing/admin/rate-catalogs"): ["require_super_admin"],
+        ("POST", "/api/billing/admin/rate-catalogs/{catalog_id}/approve"): ["require_super_admin"],
+        ("POST", "/api/billing/admin/rate-catalogs/{catalog_id}/reject"): ["require_super_admin"],
+        ("POST", "/api/billing/admin/rate-catalogs/{catalog_id}/cancel"): ["require_super_admin"],
+        ("GET", "/api/enterprises/{enterprise_id}/agent-teams/{team_id}/security-artifacts/{artifact_id}"): [],
+        ("HEAD", "/api/enterprises/{enterprise_id}/agent-teams/{team_id}/security-artifacts/{artifact_id}"): [],
+        ("GET", "/api/billing/enterprises/{enterprise_id}/orders"): [],
+        ("GET", "/api/billing/admin/statements"): ["require_super_admin"],
+        ("GET", "/api/billing/admin/reservations/reconciliation"): ["require_super_admin"],
+        ("GET", "/api/billing/admin/reservations/{reservation_id}/reconciliation/events"): ["require_super_admin"],
+        ("POST", "/api/billing/admin/reservations/{reservation_id}/reconciliation/recover-stale"): [
+            "require_super_admin",
+        ],
+        ("POST", "/api/billing/admin/reservations/{reservation_id}/reconciliation/proposals"): ["require_super_admin"],
+        # 委任复核者由事务内服务端授权，实际依赖链与撤权并发另有专项覆盖。
+        ("POST", "/api/billing/admin/reservations/{reservation_id}/reconciliation/decision"): [],
+        ("PUT", "/api/billing/admin/reconciliation/reviewers/{user_id}"): ["require_super_admin"],
+        ("GET", "/api/billing/admin/reconciliation/reviewers"): ["require_super_admin"],
+        ("GET", "/api/billing/reconciliation/reviews"): [],
+        ("GET", "/api/billing/reconciliation/reviews/{reservation_id}"): [],
+        ("GET", "/api/billing/admin/statements/rows/{row_id}/reviews"): ["require_super_admin"],
+        ("GET", "/api/billing/admin/statements/{batch_id}"): ["require_super_admin"],
+        ("GET", "/api/billing/admin/statements/{batch_id}/rows"): ["require_super_admin"],
+        ("POST", "/api/billing/admin/statements/download"): ["require_super_admin"],
+        ("POST", "/api/billing/admin/statements/import"): ["require_super_admin"],
+        ("POST", "/api/billing/admin/statements/{batch_id}/rows/{row_id}/review"): ["require_super_admin"],
         ("GET", "/api/security/vulnerability-sources"): ["security:view"],
         ("GET", "/api/security/vulnerability-records"): ["security:view"],
         ("POST", "/api/ai-prompt/issue"): ["issue:view"],
@@ -152,12 +240,117 @@ def test_route_inventory_is_complete_and_studio_guard_is_included():
         ("GET", "/api/remote-pentest/tasks/{public_id}"): ["pentest:view"],
         ("GET", "/api/remote-pentest/tasks/{public_id}/report"): ["pentest:view"],
         ("GET", "/api/remote-pentest/tasks/{public_id}/report/export"): ["pentest:view"],
+        # 企业及计费路由逐项固定 HTTP 方法、路径和登录依赖；组织角色由服务层按企业/小组校验。
+        ("GET", "/api/billing/pricing"): [],
+        ("GET", "/api/billing/wallet"): [],
+        ("GET", "/api/billing/entitlement"): [],
+        ("POST", "/api/billing/permanent-reviewers/{user_id}"): ["require_super_admin"],
+        ("GET", "/api/billing/enterprises/{enterprise_id}/wallet"): [],
+        ("GET", "/api/billing/usage"): [],
+        ("GET", "/api/billing/enterprises/{enterprise_id}/usage"): [],
+        ("GET", "/api/billing/enterprises/{enterprise_id}/limits"): [],
+        ("PUT", "/api/billing/enterprises/{enterprise_id}/limits"): [],
+        ("GET", "/api/billing/orders"): [],
+        ("GET", "/api/billing/orders/{order_no}"): [],
+        ("POST", "/api/billing/orders"): [],
+        ("POST", "/api/billing/orders/{order_no}/refresh"): [],
+        ("POST", "/api/billing/orders/{order_no}/cancel"): [],
+        ("POST", "/api/billing/orders/{order_no}/refunds"): [],
+        ("GET", "/api/billing/orders/{order_no}/refunds"): [],
+        ("GET", "/api/billing/admin/refunds"): ["require_super_admin"],
+        ("POST", "/api/billing/admin/refunds/{refund_no}/decision"): [],  # 委任权限在服务层校验
+        ("POST", "/api/billing/admin/refunds/{refund_no}/execute"): ["require_super_admin"],
+        ("POST", "/api/billing/admin/refunds/{refund_no}/reconcile"): ["require_super_admin"],
+        ("GET", "/api/enterprises/mine"): [],
+        ("POST", "/api/enterprises/invitations/accept"): [],
+        ("GET", "/api/enterprises/{enterprise_id}/members"): [],
+        ("GET", "/api/enterprises/{enterprise_id}/directory"): [],
+        ("POST", "/api/enterprises/{enterprise_id}/invitations"): [],
+        ("GET", "/api/enterprises/{enterprise_id}/invitations"): [],
+        ("DELETE", "/api/enterprises/{enterprise_id}/invitations/{invitation_id}"): [],
+        ("POST", "/api/enterprises/{enterprise_id}/owner-transfer"): [],
+        ("PUT", "/api/enterprises/{enterprise_id}/members/{user_id}/role"): [],
+        ("DELETE", "/api/enterprises/{enterprise_id}/members/{user_id}"): [],
+        ("PUT", "/api/enterprises/{enterprise_id}/members/{user_id}/default-group"): [],
+        ("GET", "/api/enterprises/{enterprise_id}/groups"): [],
+        ("POST", "/api/enterprises/{enterprise_id}/groups"): [],
+        ("GET", "/api/enterprises/{enterprise_id}/groups/{group_id}/members"): [],
+        ("PUT", "/api/enterprises/{enterprise_id}/groups/{group_id}/members"): [],
+        ("DELETE", "/api/enterprises/{enterprise_id}/groups/{group_id}/members/{user_id}"): [],
+        ("GET", "/api/enterprises/{enterprise_id}/asset-drafts"): [],
+        ("POST", "/api/enterprises/{enterprise_id}/asset-drafts"): [],
+        ("GET", "/api/enterprises/{enterprise_id}/asset-drafts/{draft_id}"): [],
+        ("GET", "/api/enterprises/{enterprise_id}/asset-drafts/{draft_id}/versions"): [],
+        ("POST", "/api/enterprises/{enterprise_id}/asset-drafts/{draft_id}/versions"): [],
+        ("DELETE", "/api/enterprises/{enterprise_id}/asset-drafts/{draft_id}"): [],
+        ("POST", "/api/enterprises/{enterprise_id}/asset-drafts/{draft_id}/publication-requests"): [],
+        ("GET", "/api/enterprises/{enterprise_id}/asset-publications/mine"): [],
+        ("POST", "/api/enterprises/{enterprise_id}/asset-publications/{publication_id}/withdraw"): [],
+        ("GET", "/api/enterprises/{enterprise_id}/asset-publications/pending"): [],
+        ("POST", "/api/enterprises/{enterprise_id}/asset-publications/{publication_id}/decision"): [],
+        ("POST", "/api/enterprises/{enterprise_id}/asset-publications/{publication_id}/revoke"): [],
+        ("GET", "/api/enterprises/{enterprise_id}/asset-catalog"): [],
+        ("GET", "/api/enterprise-asset-catalog"): [],
+        ("GET", "/api/admin/enterprise-asset-publications"): ["require_super_admin"],
+        ("POST", "/api/admin/enterprise-asset-publications/{publication_id}/decision"): ["require_super_admin"],
+        ("POST", "/api/admin/enterprise-asset-publications/{publication_id}/revoke"): ["require_super_admin"],
+        ("GET", "/api/enterprises/{enterprise_id}/conversations"): [],
+        ("POST", "/api/enterprises/{enterprise_id}/conversations"): [],
+        ("GET", "/api/enterprises/{enterprise_id}/conversations/{conversation_id}/messages"): [],
+        ("GET", "/api/enterprises/{enterprise_id}/conversations/{conversation_id}/assistant-billing-context"): [],
+        ("POST", "/api/enterprises/{enterprise_id}/conversations/{conversation_id}/messages"): [],
+        ("POST", "/api/enterprises/{enterprise_id}/conversations/{conversation_id}/assistant-runs"): [],
+        ("GET", "/api/enterprises/{enterprise_id}/conversations/{conversation_id}/assistant-runs"): [],
+        ("GET", "/api/enterprises/{enterprise_id}/conversations/{conversation_id}/assistant-runs/{run_id}"): [],
+        ("POST", "/api/enterprises/{enterprise_id}/conversations/{conversation_id}/assistant-runs/{run_id}/answer"): [],
+        ("POST", "/api/enterprises/{enterprise_id}/conversations/{conversation_id}/assistant-runs/{run_id}/cancel"): [],
+        ("POST", "/api/enterprises/{enterprise_id}/conversations/{conversation_id}/assistant-runs/{run_id}/retry"): [],
+        ("GET", "/api/enterprises/{enterprise_id}/conversations/assistant-approvals"): [],
+        ("POST", "/api/enterprises/{enterprise_id}/conversations/assistant-approvals/{approval_id}/decision"): [],
+        ("GET", "/api/enterprises/{enterprise_id}/forum/posts"): [],
+        ("POST", "/api/enterprises/{enterprise_id}/forum/posts"): [],
+        ("GET", "/api/enterprises/{enterprise_id}/forum/posts/{post_id}"): [],
+        ("DELETE", "/api/enterprises/{enterprise_id}/forum/posts/{post_id}"): [],
+        ("PUT", "/api/enterprises/{enterprise_id}/forum/posts/{post_id}"): [],
+        ("POST", "/api/enterprises/{enterprise_id}/forum/posts/{post_id}/replies"): [],
+        ("DELETE", "/api/enterprises/{enterprise_id}/forum/posts/{post_id}/replies/{reply_id}"): [],
+        ("GET", "/api/enterprises/{enterprise_id}/announcements"): [],
+        ("POST", "/api/enterprises/{enterprise_id}/announcements"): [],
+        ("PUT", "/api/enterprises/{enterprise_id}/announcements/{announcement_id}"): [],
+        ("DELETE", "/api/enterprises/{enterprise_id}/announcements/{announcement_id}"): [],
+        ("GET", "/api/enterprises/{enterprise_id}/knowledge/entries"): [],
+        ("GET", "/api/enterprises/{enterprise_id}/knowledge/search"): [],
+        ("POST", "/api/enterprises/{enterprise_id}/knowledge/entries"): [],
+        ("GET", "/api/enterprises/{enterprise_id}/knowledge/entries/{entry_id}"): [],
+        ("PUT", "/api/enterprises/{enterprise_id}/knowledge/entries/{entry_id}"): [],
+        ("DELETE", "/api/enterprises/{enterprise_id}/knowledge/entries/{entry_id}"): [],
+        ("GET", "/api/enterprises/{enterprise_id}/knowledge/attachments"): [],
+        ("GET", "/api/enterprises/{enterprise_id}/knowledge/attachments/search"): [],
+        ("POST", "/api/enterprises/{enterprise_id}/knowledge/attachments"): [],
+        ("GET", "/api/enterprises/{enterprise_id}/knowledge/attachments/{attachment_id}/download"): [],
+        ("DELETE", "/api/enterprises/{enterprise_id}/knowledge/attachments/{attachment_id}"): [],
+        ("GET", "/api/enterprises/{enterprise_id}/projects"): [],
+        ("POST", "/api/enterprises/{enterprise_id}/projects"): [],
+        ("PUT", "/api/enterprises/{enterprise_id}/projects/{project_id}/grants/{user_id}"): [],
+        ("DELETE", "/api/enterprises/{enterprise_id}/projects/{project_id}/grants/{user_id}"): [],
+        ("POST", "/api/enterprises/{enterprise_id}/remote-test-requests"): [],
+        ("GET", "/api/enterprises/{enterprise_id}/remote-test-requests"): [],
+        ("GET", "/api/enterprises/{enterprise_id}/remote-test-requests/{request_id}"): [],
+        ("POST", "/api/enterprises/{enterprise_id}/remote-test-requests/{request_id}/decision"): [],
+        ("POST", "/api/enterprises/{enterprise_id}/remote-test-requests/{request_id}/cancel"): [],
+        ("POST", "/api/enterprises/{enterprise_id}/remote-test-requests/{request_id}/start"): [],
+        ("GET", "/api/agents/usage"): ["agent:view"],
     }
     for route_key, expected_guards in expected_new_routes.items():
         matches = [row for row in ROUTES if (row["method"], row["path"]) == route_key]
         assert len(matches) == 1
         assert matches[0]["authenticated"] is True
         assert matches[0]["guards"] == expected_guards
+    for path in ("/api/billing/payments/alipay/notify", "/api/billing/payments/wechat/notify"):
+        matches = [row for row in ROUTES if (row["method"], row["path"]) == ("POST", path)]
+        assert len(matches) == 1
+        assert matches[0]["authenticated"] is False  # 渠道回调以签名、商户、金额及订单校验认证
+        assert matches[0]["guards"] == []
 
 
 def test_remote_target_authorization_requires_project_membership_and_persists_only_scoped_ticket(
@@ -617,3 +810,47 @@ def test_project_owner_cannot_manage_members_without_explicit_rbac(matrix_env, m
         db.query(ProjectMember).filter_by(project_id=project_id).delete()
         db.query(Project).filter_by(id=project_id).delete()
         db.commit()
+
+
+def test_enterprise_billing_context_real_jwt_scope_and_revocation(matrix_env):
+    """The preview never grants execution or reveals a third party's direct chat."""
+    from app.models.enterprise_chat import EnterpriseConversation
+    from app.models.enterprise_org import Enterprise, EnterpriseGroup, EnterpriseGroupMember, EnterpriseMember
+
+    db, users = matrix_env["db"], matrix_env["users"]
+    owner, member, outsider = users["owner_a"], users["member_a"], users["owner_b"]
+    db.add(Enterprise(id=501, name="预览测试企业", owner_id=owner.id, seat_limit=5,
+                      status="active", paid_order_id="preview-scope"))
+    db.add_all([
+        EnterpriseMember(enterprise_id=501, user_id=owner.id, role="owner", status="active"),
+        EnterpriseMember(enterprise_id=501, user_id=member.id, role="member", status="active", default_group_id=601),
+        EnterpriseMember(enterprise_id=501, user_id=outsider.id, role="member", status="active"),
+        EnterpriseGroup(id=601, enterprise_id=501, name="预览测试组", status="active"),
+        EnterpriseGroupMember(enterprise_id=501, group_id=601, user_id=member.id, role="member", status="active"),
+        EnterpriseConversation(id=701, enterprise_id=501, kind="direct", conversation_key="preview-private",
+                               participant_low_id=owner.id, participant_high_id=member.id, created_by=owner.id),
+    ])
+    db.commit()
+    path = "/api/enterprises/501/conversations/701/assistant-billing-context"
+    response = _request(matrix_env, "member_a", "GET", path)
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "status": "group", "group_id": 601, "group_name": "预览测试组", "enabled": False,
+    }
+    assert _request(matrix_env, "owner_b", "GET", path).status_code == 403
+    assert _request(matrix_env, "anonymous", "GET", path).status_code == 401
+    assert _request(matrix_env, "member_a", "GET", path.replace("501", "502")).status_code in {403, 404}
+    group_member = db.query(EnterpriseGroupMember).filter_by(
+        enterprise_id=501, group_id=601, user_id=member.id,
+    ).one()
+    group_member.status = "removed"
+    db.commit()
+    response = _request(matrix_env, "member_a", "GET", path)
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "default_group_required"
+    db.query(EnterpriseMember).filter_by(enterprise_id=501, user_id=member.id).one().status = "removed"
+    db.commit()
+    assert _request(matrix_env, "member_a", "GET", path).status_code == 403
+    member.token_version += 1
+    db.commit()
+    assert _request(matrix_env, "member_a", "GET", path).status_code == 401

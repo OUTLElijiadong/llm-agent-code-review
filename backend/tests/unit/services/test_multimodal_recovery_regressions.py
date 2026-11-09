@@ -373,6 +373,7 @@ async def test_admin_assignment_is_consumed_and_user_override_has_priority(db, m
 
 
 @pytest.mark.parametrize("source,expected", [("global", "assigned-worker"), ("user", "personal-worker")])
+@pytest.mark.usefixtures("allow_test_only_legacy_platform_transport")
 def test_base_agent_explicit_config_honors_subagent_assignment(monkeypatch, source, expected):
     from app.agents.base import BaseAgent
     from app.utils.public_http import PinnedPublicUrl

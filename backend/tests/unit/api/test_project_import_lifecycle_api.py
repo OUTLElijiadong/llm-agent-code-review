@@ -3,6 +3,8 @@
 from fastapi import Response
 
 from app.api.v1 import projects as projects_api
+from app.core.dependencies import authenticate_access_token
+from app.core.security import create_access_token
 from app.models.user import User
 from app.schemas.project import RemoteProjectImportCancelIn, RemoteProjectImportIn
 
@@ -15,7 +17,8 @@ def _user(db, username: str) -> User:
 
 
 def test_legacy_sync_import_sets_deprecation_headers_and_metric(db, monkeypatch) -> None:
-    user = _user(db, "legacy-import-owner")
+    original_user = _user(db, "legacy-import-owner")
+    user = authenticate_access_token(create_access_token(original_user.id, "user"), db)
     observed: list[tuple[str, dict]] = []
     monkeypatch.setattr(
         projects_api.project_source_service,

@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ArrowDown, SwitchButton, Search, Menu } from '@element-plus/icons-vue'
 
 import { useUserStore } from '@/stores/user'
+import { useWorkspaceStore } from '@/stores/workspace'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import type { UserRole } from '@/utils/roleHome'
 import { isNavigationPathAllowed } from '@/utils/agentNavigation'
@@ -13,6 +14,7 @@ import PrismMascot from '@/components/ai/PrismMascot.vue'
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const workspaceStore = useWorkspaceStore()
 const emit = defineEmits<{
   (e: 'toggle-sidebar'): void
 }>()
@@ -84,6 +86,8 @@ const searchItems = computed<SearchItem[]>(() => {
     if (item.admin && !isAdmin.value) return false
     if (item.action === 'agent' && !canUseAgent.value) return false
     if (item.path && !isNavigationPathAllowed(router, item.path, userStore)) return false
+    if (item.path && router.resolve({ path: item.path }).meta.workspace === 'personal'
+      && workspaceStore.activeSpace === 'enterprise') return false
     return true
   })
 })

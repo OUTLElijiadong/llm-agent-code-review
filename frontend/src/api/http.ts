@@ -31,6 +31,10 @@ declare module 'axios' {
     silentCodes?: number[]
     /** 后台轮询无 HTTP 响应时由宿主局部处理，避免每个请求各弹一次网络错误。 */
     silentTransportError?: boolean
+    /** 可由调用方局部处理的 HTTP 状态；401 仍由统一认证失效流程处理。 */
+    silentStatuses?: number[]
+    /** 可选的发起时认证快照；发生切换时在发送前取消。 */
+    authTokenSnapshot?: string | null
   }
 }
 
@@ -40,6 +44,10 @@ function isSilent(config: AxiosRequestConfig | undefined, data: Resp | undefined
   if (!codes?.length) return false
   const code = data?.code
   return typeof code === 'number' && codes.includes(code)
+}
+
+function isSilentStatus(config: AxiosRequestConfig | undefined, status: number | undefined): boolean {
+  return status !== undefined && Boolean(config?.silentStatuses?.includes(status))
 }
 
 /** 登录失败由表单唯一提示，错密 401 不代表已有会话过期。 */
@@ -112,6 +120,9 @@ const http = axios.create({
 
 http.interceptors.request.use((config) => {
   const token = getToken()
+  if (config.authTokenSnapshot !== undefined && config.authTokenSnapshot !== token) {
+    throw new axios.CanceledError('登录状态已变化，请重新发起操作')
+  }
   if (token) config.headers.Authorization = `Bearer ${token}`
   return config
 })
@@ -119,6 +130,7 @@ http.interceptors.request.use((config) => {
 http.interceptors.response.use(
   (resp: AxiosResponse<Resp | Blob>) => {
     if (resp.config.responseType === 'blob') return resp
+    if (resp.status === 204) return resp
     const { data } = resp
     if (!(data instanceof Blob) && data?.code === 0) {
       // 请求成功说明会话有效,重置 401 防抖标记(下次失效可再次提示)
@@ -166,7 +178,7 @@ http.interceptors.response.use(
       }
       return Promise.reject(data || err)
     }
-    if (!loginRequest && !isSilent(err.config, data)
+    if (!loginRequest && !isSilent(err.config, data) && !isSilentStatus(err.config, status)
       && !(err.config?.silentTransportError && !err.response)) {
       const message = data?.message || err.message || '网络错误'
       ElMessage.error(message)
@@ -194,30 +206,34 @@ function cleanParams(params?: object): object | undefined {
   return out
 }
 
-export async function get<T>(url: string, params?: object, silentCodes?: number[], silentTransportError = false): Promise<T> {
+export async function get<T>(url: string, params?: object, silentCodes?: number[], silentTransportError = false,
+                             requestOptions?: { authTokenSnapshot: string | null; timeout?: number; signal?: AbortSignal }): Promise<T> {
   const r = await http.get<Resp<T>>(url, {
     params: cleanParams(params), silentCodes,
     ...(silentTransportError ? { silentTransportError: true } : {}),
+    ...requestOptions,
   })
   return r.data.data as T
 }
 
 
-export async function post<T>(url: string, body?: object, params?: object, silentCodes?: number[], silentTransportError = false): Promise<T> {
+export async function post<T>(url: string, body?: object, params?: object, silentCodes?: number[], silentTransportError = false,
+                              requestOptions?: { authTokenSnapshot: string | null }): Promise<T> {
   const r = await http.post<Resp<T>>(url, body, {
     params: cleanParams(params), silentCodes,
     ...(silentTransportError ? { silentTransportError: true } : {}),
+    ...requestOptions,
   })
   return r.data.data as T
 }
 
-export async function put<T>(url: string, body?: object): Promise<T> {
-  const r = await http.put<Resp<T>>(url, body)
+export async function put<T>(url: string, body?: object, requestOptions?: { authTokenSnapshot: string | null }): Promise<T> {
+  const r = requestOptions ? await http.put<Resp<T>>(url, body, requestOptions) : await http.put<Resp<T>>(url, body)
   return r.data.data as T
 }
 
-export async function del<T>(url: string): Promise<T> {
-  const r = await http.delete<Resp<T>>(url)
+export async function del<T>(url: string, requestOptions?: { authTokenSnapshot: string | null }): Promise<T> {
+  const r = requestOptions ? await http.delete<Resp<T>>(url, requestOptions) : await http.delete<Resp<T>>(url)
   return r.data.data as T
 }
 

@@ -17,7 +17,7 @@ from app.models.user import User
 from app.schemas.agent_team import AgentTeamCreateIn
 from app.services import admin_capability_service, agent_supervisor_service, agent_team_service, rbac_service
 from app.services.admin_capability_registry import CAPABILITY_BY_CODE as ADMIN_CAPABILITIES
-from app.services.admin_capability_registry import operation_contract
+from app.services.admin_capability_registry import PENTEST_EVIDENCE_MAIN_SESSION_CAPABILITIES, operation_contract
 from app.services.user_capability_registry import CAPABILITY_BY_CODE as USER_CAPABILITIES
 
 # 凭据输入和一次性明文输出保留在主会话的安全交互，不写入团队任务/结果。
@@ -32,7 +32,7 @@ _MAIN_SESSION_ONLY = frozenset(
         "sandbox.workers.create",
         "sandbox.workers.update",
     }
-)
+) | PENTEST_EVIDENCE_MAIN_SESSION_CAPABILITIES
 _PENDING = frozenset({"queued", "pending", "running", "starting", "downloading", "scanning", "importing"})
 
 

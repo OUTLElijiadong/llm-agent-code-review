@@ -13,15 +13,16 @@ T06 增强(2026-06-25):
 """
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 from fastapi import UploadFile
 from loguru import logger
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.ai.language_detector import detect_language
 from app.core.config import settings
-from app.core.exceptions import ConflictError, NotFoundError, ValidationError
+from app.core.exceptions import AuthError, ConflictError, ForbiddenError, NotFoundError, ValidationError
 from app.models.agent_capability import SandboxEnvironment
 from app.models.code_file import CodeFile
 from app.models.code_version import CodeVersion
@@ -86,7 +87,9 @@ def list_files(db: Session, user: User, project_id: int = None, language: str = 
 
 
 def upload(db: Session, user: User, project_id: int, upload_file: UploadFile,
-           file_path: Optional[str] = None, language: Optional[str] = None) -> tuple:
+           file_path: Optional[str] = None, language: Optional[str] = None, *,
+           before_commit: Callable[[], None] | None = None,
+           after_rollback: Callable[[], None] | None = None) -> tuple:
     """上传代码文件(Multipart)
 
     v2 增强:
@@ -132,17 +135,21 @@ def upload(db: Session, user: User, project_id: int, upload_file: UploadFile,
 
         # v2: 压缩包自动解压
         if is_archive(filename):
-            return _upload_archive(db, user, project_id, raw, filename)
+            return _upload_archive(db, user, project_id, raw, filename, before_commit=before_commit)
 
         # 普通文件:校验扩展名
         safe_name = validate_filename(filename, settings.allowed_extensions)
         logical_path = normalize_source_path(file_path, safe_name)
-        return _upload_single_file(db, user, project_id, safe_name, raw, logical_path, language)
+        return _upload_single_file(db, user, project_id, safe_name, raw, logical_path, language,
+                                   before_commit=before_commit)
     except MaliciousUploadError as exc:
         # 命中恶意内容:若项目干净(无已入库文件),自动转投隔离归档而非拒绝,
         # 让后续审计/测试/沙箱内部署可以安全进行;沙箱外绝不裸跑。
         db.rollback()
-        quarantine = _try_auto_quarantine(db, user, project_id, raw, filename, exc.threat_name)
+        if after_rollback is not None:
+            after_rollback()
+        quarantine = _try_auto_quarantine(db, user, project_id, raw, filename, exc.threat_name,
+                                          before_commit=before_commit)
         if quarantine is not None:
             return quarantine
         raise
@@ -158,6 +165,8 @@ def _try_auto_quarantine(
     raw: bytes,
     filename: str,
     threat_name: str,
+    *,
+    before_commit: Callable[[], None] | None = None,
 ) -> Optional[tuple]:
     """把命中恶意的上传自动转投隔离归档链路。
 
@@ -204,6 +213,7 @@ def _try_auto_quarantine(
             project_id,
             raw=raw,
             filename=filename,
+            before_commit=before_commit,
         )
         logger.info(
             "[upload] 恶意上传已自动隔离 project=%s file=%s threat=%s status=%s",
@@ -213,6 +223,11 @@ def _try_auto_quarantine(
             archive_data.get("malware_status"),
         )
         return (0, "quarantined", 0)
+    except (AuthError, ForbiddenError, ConflictError):
+        # Authorization failures and retryable lock conflicts are not scanner
+        # outcomes; preserve their status after rolling back quarantine work.
+        db.rollback()
+        raise
     except Exception as exc:
         db.rollback()
         logger.warning("[upload] 自动隔离失败,保持拒绝 project=%s err=%s", project_id, str(exc))
@@ -348,6 +363,7 @@ def _scan_extracted_file(filename: str, content_bytes: bytes) -> None:
 def _upload_single_file(
     db: Session, user: User, project_id: int, safe_name: str, raw: bytes,
     file_path: Optional[str], language: Optional[str],
+    *, before_commit: Callable[[], None] | None = None,
 ) -> tuple:
     """上传单个文件(文本或二进制)
 
@@ -371,16 +387,18 @@ def _upload_single_file(
         content_b64 = to_utf8(raw)
         return _create_file(
             db, user, project_id, safe_name, file_path, lang, content_b64, "初始上传",
-            is_binary=1, original_blob=raw,
+            is_binary=1, original_blob=raw, before_commit=before_commit,
         )
 
     # 文本文件:UTF-8 文本
     text = to_utf8(raw)
-    return _create_file(db, user, project_id, safe_name, file_path, lang, text, "初始上传")
+    return _create_file(db, user, project_id, safe_name, file_path, lang, text, "初始上传",
+                        before_commit=before_commit)
 
 
 def _upload_archive(
     db: Session, user: User, project_id: int, raw: bytes, archive_name: str,
+    *, before_commit: Callable[[], None] | None = None,
 ) -> tuple:
     """处理压缩包上传:解压 + 批量创建文件
 
@@ -437,6 +455,8 @@ def _upload_archive(
                 )
             if first_id is None:
                 first_id, first_lang, first_version = file_id, lang, version
+        if before_commit is not None:
+            before_commit()
         db.commit()
     except Exception:
         db.rollback()
@@ -466,25 +486,35 @@ def _check_project_access(db: Session, user: User, project_id: int) -> Project:
     """
     # 与隔离整包上传使用同一 Project 行锁。锁保持到文件提交，跨 worker
     # 阻止两条写路径同时通过互斥检查后形成混合源码项目。
-    project = (
-        db.query(Project)
-        .filter(Project.id == project_id)
-        .with_for_update()
-        .populate_existing()
-        .first()
-    )
-    if project is None:
-        raise NotFoundError("项目不存在", code=40400)
-    require_project_access(db, project_id, user, need_write=True)
-    if db.query(ProjectSourceArchive.id).filter(
-        ProjectSourceArchive.project_id == project_id,
-        ProjectSourceArchive.storage_status == "active",
-    ).first():
-        raise ValidationError(
-            "隔离整包审计项目不能混入可编辑源码文件",
-            code=40901,
+    try:
+        project = (
+            db.query(Project)
+            .filter(Project.id == project_id)
+            .with_for_update(nowait=True)
+            .populate_existing()
+            .first()
         )
-    return project
+        if project is None:
+            raise NotFoundError("项目不存在", code=40400)
+        # All subsequent permission reads must also be current reads: a plain
+        # RR snapshot can overwrite the freshly locked owner in the identity map.
+        # NOWAIT prevents lock-order cycles with enterprise/member operations.
+        require_project_access(db, project_id, user, need_write=True, lock=True, nowait=True)
+        archive = db.query(ProjectSourceArchive.id).filter(
+            ProjectSourceArchive.project_id == project_id,
+            ProjectSourceArchive.storage_status == "active",
+        ).with_for_update(nowait=True).first()
+        if archive:
+            raise ValidationError(
+                "隔离整包审计项目不能混入可编辑源码文件",
+                code=40901,
+            )
+        return project
+    except OperationalError as exc:
+        code = getattr(exc.orig, "args", (None,))[0]
+        if db.get_bind().dialect.name == "mysql" and code in (1205, 1213, 3572):
+            raise ConflictError("项目权限正在变更，请刷新后重试", code=40901) from exc
+        raise
 
 
 def _is_binary_data(data: bytes) -> bool:
@@ -535,7 +565,7 @@ def create_file(db: Session, user: User, payload: CodeFileIn) -> tuple:
 def _create_file(db: Session, user: User, project_id: int, file_name: str,
                  file_path: Optional[str], language: str, content: str, change_desc: str,
                  is_binary: int = 0, original_blob: Optional[bytes] = None,
-                 commit: bool = True) -> tuple:
+                 commit: bool = True, before_commit: Callable[[], None] | None = None) -> tuple:
     """内部: 创建文件及其初始版本
 
     v2 增强:支持 is_binary/original_blob 参数,二进制文件单独存储原始字节。
@@ -588,6 +618,9 @@ def _create_file(db: Session, user: User, project_id: int, file_name: str,
         create_time=datetime.now(timezone.utc),
     ))
     if commit:
+        if before_commit is not None:
+            db.flush()
+            before_commit()
         db.commit()
         db.refresh(code_file)
     else:
@@ -601,24 +634,32 @@ def _get_accessible_file(db: Session, user: User, file_id: int, *, need_write: b
     if not code_file or code_file.status == "deleted":
         raise NotFoundError("文件不存在", code=40400)
     if need_write:
-        project_id = code_file.project_id
-        project = (
-            db.query(Project)
-            .filter(Project.id == project_id)
-            .with_for_update()
-            .populate_existing()
-            .first()
-        )
-        if project is None:
-            raise NotFoundError("项目不存在", code=40400)
-        # 项目行锁是所有文件写入的统一串行化点；随后以当前读刷新文件行，
-        # 防止等待锁期间 ORM identity map 仍持有旧 version_no/content。
-        db.refresh(code_file, with_for_update=True)
-        if code_file.status == "deleted":
-            raise NotFoundError("文件不存在", code=40400)
-        if code_file.project_id != project.id:
-            raise ConflictError("文件所属项目已变化，请刷新后重试", code=40904)
-    require_project_access(db, code_file.project_id, user, need_write=need_write)
+        try:
+            project_id = code_file.project_id
+            project = (
+                db.query(Project)
+                .filter(Project.id == project_id)
+                .with_for_update(nowait=True)
+                .populate_existing()
+                .first()
+            )
+            if project is None:
+                raise NotFoundError("项目不存在", code=40400)
+            # 写目标和全部授权关系都必须使用当前读。只刷新文件和项目，
+            # 随后用旧 RR 快照读取 owner/grant 仍会恢复已经撤销的权限。
+            db.refresh(code_file, with_for_update={"nowait": True})
+            if code_file.status == "deleted":
+                raise NotFoundError("文件不存在", code=40400)
+            if code_file.project_id != project.id:
+                raise ConflictError("文件所属项目已变化，请刷新后重试", code=40904)
+            require_project_access(db, project_id, user, need_write=True, lock=True, nowait=True)
+        except OperationalError as exc:
+            code = getattr(exc.orig, "args", (None,))[0]
+            if db.get_bind().dialect.name == "mysql" and code in (1205, 1213, 3572):
+                raise ConflictError("项目权限正在变更，请刷新后重试", code=40901) from exc
+            raise
+    else:
+        require_project_access(db, code_file.project_id, user, need_write=False)
     return code_file
 
 

@@ -26,6 +26,7 @@
     "markdown-it": "^14.3.3",
     "monaco-editor": "^0.45.0",
     "pinia": "^2.1.7",
+    "qrcode": "^1.5.4",
     "vue": "^3.4.0",
     "vue-router": "^4.3.0"
   },
@@ -33,6 +34,7 @@
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.63.0",
     "@types/node": "^20.11.0",
+    "@types/qrcode": "^1.5.6",
     "@vitejs/plugin-vue": "^6.0.7",
     "@vitest/coverage-v8": "4.1.12",
     "@vue/test-utils": "^2.4.6",

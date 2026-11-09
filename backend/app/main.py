@@ -23,7 +23,12 @@ from app.core.observability import (
     render_metrics,
 )
 from app.core.rate_limit import limiter
-from app.core.request_size_limit import MULTIPART_OVERHEAD_BYTES, UploadRequestSizeLimitMiddleware
+from app.core.request_size_limit import (
+    ENTERPRISE_KNOWLEDGE_ATTACHMENT_MAX_BYTES,
+    MULTIPART_OVERHEAD_BYTES,
+    STATEMENT_IMPORT_REQUEST_MAX_BYTES,
+    UploadRequestSizeLimitMiddleware,
+)
 from app.core.site_request_context import SiteRequestContextMiddleware
 
 
@@ -120,6 +125,9 @@ def _reconcile_orphan_reviews() -> list[tuple[int, int, str]]:
 async def lifespan(app: FastAPI):
     """应用生命周期: 启动时初始化日志、补齐表结构、Agent注册中心与治理调度器"""
     setup_logger()
+    from app.services.project_access_audit import start_project_denial_audit, stop_project_denial_audit
+
+    start_project_denial_audit()
     _ensure_schema()
     orphan_reviews = _reconcile_orphan_reviews()
     from app.agents.event_bus import AgentEventBus
@@ -132,6 +140,18 @@ async def lifespan(app: FastAPI):
     from app.services.agent_mesh_dispatcher import start_agent_mesh_dispatcher, stop_agent_mesh_dispatcher
     from app.services.agent_scheduler_runtime import start_agent_governance_scheduler, stop_agent_governance_scheduler
     from app.services.agent_team_dispatcher import start_agent_team_dispatcher, stop_agent_team_dispatcher
+    from app.services.billing_subscription_runtime import (
+        start_billing_subscription_scheduler,
+        stop_billing_subscription_scheduler,
+    )
+    from app.services.enterprise_agent_team_dispatcher import (
+        start_enterprise_agent_team_dispatcher,
+        stop_enterprise_agent_team_dispatcher,
+    )
+    from app.services.enterprise_assistant_dispatcher import (
+        start_enterprise_assistant_dispatcher,
+        stop_enterprise_assistant_dispatcher,
+    )
     from app.services.jarvis_patrol_service import start_jarvis_patrol, stop_jarvis_patrol
     from app.services.project_import_dispatcher import (
         start_project_import_dispatcher,
@@ -172,7 +192,7 @@ async def lifespan(app: FastAPI):
                 _jarvis_cleanup["messages"],
                 _jarvis_cleanup["runs"],
             )
-        # 渗透流水线是进程内线程: 重启后 running 委托必为孤儿, 须转 failed 可重跑
+        # 旧版按启动时状态恢复；多进程下不能据此证明其他进程的线程已退出。
         try:
             from app.services import pentest_service as _pentest_service
 
@@ -181,11 +201,6 @@ async def lifespan(app: FastAPI):
                 from loguru import logger as _logger
 
                 _logger.warning("[startup] 清扫 {} 个重启遗留的 running 渗透委托", _pentest_swept)
-            _terminal_reports = _pentest_service.sweep_missing_terminal_reports(_sweep_db)
-            if _terminal_reports:
-                from loguru import logger as _logger
-
-                _logger.warning("[startup] 补齐 {} 个终态渗透报告", _terminal_reports)
         except Exception:  # noqa: BLE001 - 清扫失败不阻断启动(下次重启再试)
             from loguru import logger as _logger
 
@@ -203,7 +218,23 @@ async def lifespan(app: FastAPI):
 
             _logger.exception("[startup] 远程评估孤儿任务清扫失败(不阻断启动)")
     finally:
+        import asyncio
+
         _sweep_db.close()
+
+    # Use an independent clean session after the preceding startup stages
+    # release their connection; recovery must never commit their pending work.
+    from loguru import logger
+
+    with _SessionLocal() as _report_db:
+        try:
+            from app.services import pentest_service as _pentest_service
+
+            _terminal_reports = _pentest_service.sweep_missing_terminal_reports(_report_db)
+            if _terminal_reports:
+                logger.warning("[startup] 补齐 {} 个终态渗透报告", _terminal_reports)
+        except Exception:  # noqa: BLE001 - recovery retries on the next sweep
+            logger.exception("[startup] 终态渗透报告补发失败(不阻断启动)")
 
     get_orchestrator()
     AgentEventBus.instance().start_relay()
@@ -214,6 +245,9 @@ async def lifespan(app: FastAPI):
 
     bind_main_loop(asyncio.get_running_loop())
     start_agent_team_dispatcher()
+    start_enterprise_assistant_dispatcher()
+    start_enterprise_agent_team_dispatcher()
+    start_billing_subscription_scheduler()
     start_agent_governance_scheduler()
     start_jarvis_patrol()
     start_project_import_dispatcher()
@@ -270,6 +304,9 @@ async def lifespan(app: FastAPI):
         AgentEventBus.instance().stop_relay()
         stop_agent_mesh_dispatcher()
         stop_agent_team_dispatcher()
+        stop_enterprise_assistant_dispatcher()
+        stop_enterprise_agent_team_dispatcher()
+        stop_billing_subscription_scheduler()
         stop_agent_governance_scheduler()
         stop_jarvis_patrol()
         stop_project_import_dispatcher()
@@ -277,6 +314,7 @@ async def lifespan(app: FastAPI):
         stop_report_retention_sweeper()
         stop_pentest_retention_sweeper()
         stop_terminal_receipt_recovery_scheduler()
+        await asyncio.to_thread(stop_project_denial_audit, timeout=2.0)
 
 
 app = FastAPI(
@@ -300,6 +338,10 @@ app.add_middleware(
     max_source_bytes=settings.max_upload_size + MULTIPART_OVERHEAD_BYTES,
     max_folder_bytes=512 * 1024 * 1024,
     max_avatar_bytes=1024 * 1024,
+    max_knowledge_attachment_bytes=min(
+        settings.max_upload_size, ENTERPRISE_KNOWLEDGE_ATTACHMENT_MAX_BYTES,
+    ) + MULTIPART_OVERHEAD_BYTES,
+    max_statement_bytes=STATEMENT_IMPORT_REQUEST_MAX_BYTES,
     max_json_bytes=4 * 1024 * 1024,
 )
 app.add_middleware(RequestContextMiddleware)

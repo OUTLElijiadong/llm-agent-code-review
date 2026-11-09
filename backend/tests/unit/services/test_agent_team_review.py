@@ -108,6 +108,27 @@ def test_team_creates_one_formal_review_freezes_input_and_reuses_on_retry(db, mo
     assert rows.thread.call_count == 1
 
 
+def test_team_review_result_hides_internal_billing_subject_snapshot(db, review_team):
+    review = ReviewTask(
+        user_id=review_team.user.id, project_id=review_team.project.id, status="success", review_type="full",
+        total_files=1, processed_files=1, coverage={
+            "stage": "complete",
+            "_billing_subject": {
+                "owner_type": "enterprise", "owner_id": 44, "enterprise_id": 44,
+                "group_id": 55, "binding_status": "active",
+            },
+        },
+    )
+    db.add(review)
+    db.commit()
+
+    result = agent_team_review._review_result(review, db=db, status="completed")
+
+    assert result["coverage"] == {"stage": "complete"}
+    assert result["evidence"][0]["data"]["coverage"] == {"stage": "complete"}
+    assert result["artifacts"][0]["coverage"] == {"stage": "complete"}
+
+
 @pytest.mark.parametrize("status,coverage_complete", [("failed", False), ("cancelled", False), ("success", False)])
 def test_partial_or_cancelled_review_cannot_complete_team_task(db, monkeypatch, review_team, status, coverage_complete):
     monkeypatch.setattr(agent_team_review.time, "sleep",

@@ -152,6 +152,8 @@ class Orchestrator(BaseAgent):
             self.chat_agent._base_url = api_config.base_url.rstrip("/")
             self.chat_agent._api_key = api_config.api_key
             self.chat_agent._model = api_config.model
+            self.chat_agent._billing_provider = api_config.provider
+            self.chat_agent._billing_credential_source = api_config.billing_credential_source
             timeout_seconds = getattr(api_config, "timeout_seconds", None)
             max_retries = getattr(api_config, "max_retries", None)
             temperature = getattr(api_config, "temperature", None)
@@ -170,6 +172,8 @@ class Orchestrator(BaseAgent):
             from app.core.config import settings as s
             self.chat_agent._base_url = s.deepseek_base_url.rstrip("/")
             self.chat_agent._api_key = s.deepseek_api_key
+            self.chat_agent._billing_provider = "deepseek"
+            self.chat_agent._billing_credential_source = "system"
             self.chat_agent._model = s.deepseek_orchestrator_model
 
     def get_api_config(self) -> Optional[ApiConfig]:
@@ -222,6 +226,8 @@ class Orchestrator(BaseAgent):
                 agent._assigned_model = selected_model
                 agent._base_url = cfg.base_url.rstrip("/")
                 agent._api_key = cfg.api_key
+                agent._billing_provider = cfg.provider
+                agent._billing_credential_source = cfg.billing_credential_source
                 if getattr(cfg, "timeout_seconds", None) is not None:
                     agent._timeout = cfg.timeout_seconds
                 if getattr(cfg, "max_retries", None) is not None:

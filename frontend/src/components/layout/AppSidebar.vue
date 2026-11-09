@@ -8,6 +8,7 @@ import {
   DocumentChecked,
   Warning,
   DataBoard,
+  CreditCard,
   Cpu,
   Avatar,
   User,
@@ -23,9 +24,11 @@ import {
   ArrowDown,
   Close,
   Connection,
+  Switch,
 } from '@element-plus/icons-vue'
 import { usePendingRemoteApprovals } from '@/composables/usePendingRemoteApprovals'
 import { useUserStore } from '@/stores/user'
+import { useWorkspaceStore } from '@/stores/workspace'
 import { APP_BUILD_TIME_DISPLAY, APP_DISPLAY_VERSION, APP_RELEASE_SHA } from '@/constants/buildInfo'
 import type { UserRole } from '@/utils/roleHome'
 import { isNavigationPathAllowed } from '@/utils/agentNavigation'
@@ -50,6 +53,7 @@ const REMOTE_PENTEST_PATH = '/remote-pentests'
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const workspaceStore = useWorkspaceStore()
 
 const props = withDefaults(defineProps<{
   mobileOpen?: boolean
@@ -72,10 +76,15 @@ const menuItems: MenuItem[] = [
   { path: '/reports',   title: '审查报告',   icon: DataBoard,        roles: ['user', 'reviewer'] },
   { path: '/audit',     title: '操作审计',   icon: Operation,        roles: ['reviewer'] },
   { path: '/agents',    title: 'Agent 工作台', icon: Cpu,            roles: ['admin', 'user', 'reviewer'] },
+  { path: '/my-agents', title: '我的 Agent', icon: Cpu,               roles: ['admin', 'user', 'reviewer'] },
   { path: '/sandboxes', title: '代码沙箱',   icon: Monitor,          roles: ['admin', 'user', 'reviewer'] },
   { path: '/security',  title: '安全与规则', icon: Aim,              roles: ['admin', 'user', 'reviewer'] },
   { path: '/forum',     title: '开发者论坛', icon: ChatLineSquare,   roles: ['admin', 'user', 'reviewer'] },
   { path: '/knowledge', title: '个人知识库', icon: Collection,       roles: ['user', 'reviewer'] },
+  { path: '/usage',     title: '我的 Token 用量', icon: DataBoard,     roles: ['admin', 'user', 'reviewer'] },
+  { path: '/billing',   title: '充值与订阅', icon: CreditCard, roles: ['admin', 'user', 'reviewer'] },
+  { path: '/enterprise', title: '企业空间', icon: ChatLineSquare,      roles: ['admin', 'user', 'reviewer'] },
+  { path: '/agent-assets', title: '共享 Agent 与 Skill', icon: Cpu, roles: ['admin', 'user', 'reviewer'] },
   { path: '/support',      title: '支持中心', icon: Tools,             roles: ['admin', 'user', 'reviewer'] },
   { path: '/profile',   title: '个人中心',   icon: Avatar,           roles: ['admin', 'user', 'reviewer'] },
 ]
@@ -84,8 +93,20 @@ const adminItems: MenuItem[] = [
   { path: '/admin/governance', title: 'Agent 治理', icon: Cpu, admin: true },
   { path: '/admin/operations', title: '运行与审计', icon: Operation, admin: true },
   { path: '/admin/security-center', title: '安全中心', icon: Lock, admin: true, superAdmin: true },
+  { path: '/admin/billing-refunds', title: '计费与退款', icon: CreditCard, admin: true, superAdmin: true },
+  { path: '/admin/billing-statements', title: '渠道账单对账', icon: CreditCard, admin: true, superAdmin: true },
+  { path: '/admin/billing-reservations', title: '模型账本对账', icon: CreditCard, admin: true, superAdmin: true },
+  { path: '/admin/billing-reviews', title: '账本待复核', icon: CreditCard, admin: true },
+  { path: '/admin/billing-rate-reviews', title: '费率待复核', icon: CreditCard, admin: true },
+  { path: '/admin/billing-refund-reviews', title: '退款待审核', icon: CreditCard, admin: true },
+  { path: '/admin/billing-pricing', title: '模型费率目录', icon: CreditCard, admin: true, superAdmin: true },
+  { path: '/admin/enterprise-asset-publications', title: '企业 Agent 全局审批', icon: Cpu, admin: true, superAdmin: true },
   { path: '/admin/access', title: '用户与权限', icon: User, admin: true },
   { path: '/admin/platform', title: '平台配置', icon: Tools, admin: true },
+  { path: '/usage', title: '我的 Token 用量', icon: DataBoard, admin: true },
+  { path: '/billing', title: '充值与订阅', icon: CreditCard, admin: true },
+  { path: '/enterprise', title: '企业空间', icon: ChatLineSquare, admin: true },
+  { path: '/my-agents', title: '我的 Agent', icon: Cpu, admin: true },
   // 远程目标授权的审批入口：管理员也要能申请并批准（申请人与批准人仍须是不同账号）。
   { path: REMOTE_PENTEST_PATH, title: '远程网站评估', icon: Connection, admin: true },
   { path: '/forum', title: '开发者论坛', icon: ChatLineSquare, admin: true },
@@ -93,18 +114,38 @@ const adminItems: MenuItem[] = [
 ]
 
 const isAdmin = computed(() => userStore.isAdmin())
+const workspaceLabel = computed(() => workspaceStore.activeSpace === 'enterprise' ? '企业空间' : '个人空间')
+const workspaceTargetLabel = computed(() => workspaceStore.activeSpace === 'enterprise' ? '切换到个人空间' : '切换到企业空间')
+
+watch(
+  () => [userStore.profile?.id ?? null, userStore.token] as const,
+  ([userId, token]) => {
+    workspaceStore.syncIdentity(userId, token)
+    if (route.meta?.workspace === 'enterprise' && workspaceStore.activeSpace !== 'enterprise') {
+      void router.replace('/dashboard')
+    }
+  },
+  { immediate: true },
+)
+
+function isVisibleInWorkspace(path: string): boolean {
+  const target = router.resolve({ path })
+  return target.meta.workspace !== 'personal' || workspaceStore.activeSpace === 'personal'
+}
 
 const visibleMenuItems = computed(() => {
   // 管理员使用专属管理菜单；论坛与支持中心仍是全角色共用的业务入口。
   if (isAdmin.value) return []
   // 可见性与路由守卫共用实时 RBAC 判定。不再叠加静态角色白名单,
   // 避免审查员被授予 project:view 后仍看不到项目入口。
-  return menuItems.filter((item) => isNavigationPathAllowed(router, item.path, userStore))
+  return menuItems.filter((item) => isVisibleInWorkspace(item.path)
+    && isNavigationPathAllowed(router, item.path, userStore))
 })
 
 const visibleAdminItems = computed(() => (
   adminItems.filter((item) => (
     (!item.superAdmin || userStore.isSuperAdmin())
+    && isVisibleInWorkspace(item.path)
     && isNavigationPathAllowed(router, item.path, userStore)
   ))
 ))
@@ -151,9 +192,9 @@ const userGroupDefinitions = [
     title: '智能审查与审计',
     paths: ['/reviews', '/pentests', REMOTE_PENTEST_PATH, '/issues', '/reports', '/audit'],
   },
-  { key: 'agents', title: 'Agent 与安全', paths: ['/agents', '/sandboxes', '/security'] },
-  { key: 'community', title: '社区与支持', paths: ['/forum', '/support'] },
-  { key: 'personal', title: '个人空间', paths: ['/knowledge', '/profile/personalization', '/profile'] },
+  { key: 'agents', title: 'Agent 与安全', paths: ['/agents', '/my-agents', '/agent-assets', '/sandboxes', '/security'] },
+  { key: 'community', title: '社区与支持', paths: ['/forum', '/enterprise', '/support'] },
+  { key: 'personal', title: '个人空间', paths: ['/knowledge', '/usage', '/profile/personalization', '/profile'] },
 ]
 
 const navigationGroups = computed<MenuGroup[]>(() => {
@@ -218,7 +259,19 @@ function isActive(path: string): boolean {
  * @returns void
  */
 function go(item: MenuItem): void {
-  router.push(item.path)
+  if (item.path === '/enterprise') workspaceStore.activateEnterprise(workspaceStore.activeEnterpriseId)
+  void router.push(item.path)
+  emit('close')
+}
+
+function toggleWorkspace(): void {
+  if (workspaceStore.activeSpace === 'enterprise') {
+    workspaceStore.activatePersonal()
+    if (route.meta?.workspace === 'enterprise') void router.push('/dashboard')
+  } else {
+    workspaceStore.activateEnterprise()
+    void router.push('/enterprise')
+  }
   emit('close')
 }
 </script>
@@ -252,6 +305,20 @@ function go(item: MenuItem): void {
         <el-icon><Close /></el-icon>
       </button>
     </div>
+
+    <button
+      class="workspace-switcher"
+      type="button"
+      :aria-label="`${workspaceTargetLabel}，当前为${workspaceLabel}`"
+      :title="workspaceTargetLabel"
+      @click="toggleWorkspace"
+    >
+      <el-icon><Switch /></el-icon>
+      <span v-show="!isCollapsed" class="workspace-switcher-label">
+        <strong>{{ workspaceLabel }}</strong>
+        <small>{{ workspaceTargetLabel }}</small>
+      </span>
+    </button>
 
     <nav class="sidebar-nav" aria-label="主导航">
       <section v-for="group in navigationGroups" :key="group.key" class="nav-group">
@@ -340,12 +407,56 @@ function go(item: MenuItem): void {
   flex-shrink: 0;
 }
 
+.workspace-switcher {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  min-height: 48px;
+  margin: 10px 12px 2px;
+  padding: 7px 12px;
+  color: var(--side-text, #d7e1f2);
+  background: rgba(255, 255, 255, 0.055);
+  border: 1px solid var(--side-border);
+  border-radius: 7px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.16s ease, border-color 0.16s ease;
+
+  &:hover,
+  &:focus-visible {
+    background: rgba(255, 255, 255, 0.11);
+    border-color: rgba(135, 170, 225, 0.55);
+    outline: none;
+  }
+
+  .el-icon { flex: 0 0 auto; font-size: 17px; }
+}
+
+.workspace-switcher-label {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+
+  strong { font-size: 12px; font-weight: 650; }
+  small { color: var(--side-muted, #93a3bb); font-size: 10px; }
+}
+
 .is-collapsed .sidebar-logo {
   grid-template-columns: 1fr;
   justify-items: center;
   gap: 8px;
   height: auto;
   padding: 14px 10px 10px;
+}
+
+.is-collapsed .workspace-switcher {
+  justify-content: center;
+  width: 44px;
+  height: 42px;
+  min-height: 42px;
+  margin: 8px auto 4px;
+  padding: 0;
 }
 
 .logo-meta {

@@ -4,10 +4,13 @@ import json
 from datetime import datetime, timezone
 
 import httpx
+import pytest
 
 from app.ai.deepseek_agent import DeepSeekAgent
 from app.models.agent_mesh import AgentMeshConversation
 from app.models.ai_call_log import AiCallLog
+
+pytestmark = pytest.mark.usefixtures("mark_fake_model_credentials_as_user")
 
 
 def test_logs_expose_foreign_keys_for_each_execution_layer():
@@ -28,7 +31,9 @@ def test_logs_expose_foreign_keys_for_each_execution_layer():
 
 def test_raw_missing_usage_stays_unknown(monkeypatch):
     agent = DeepSeekAgent(api_key="unit-only", model="unit-model", max_retries=0)
-    response = httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {"content": '{"status":"ok"}'}}]})
+    response = httpx.Response(200, json={
+        "choices": [{"finish_reason": "stop", "message": {"content": '{"status":"ok"}'}}],
+    })
     monkeypatch.setattr(agent, "_do_request", lambda *_args: (response, 3))
     _, meta = agent.call_raw(system_prompt="unit", user_prompt="unit")
     assert (meta["prompt_tokens"], meta["completion_tokens"], meta["total_tokens"]) == (None, None, None)

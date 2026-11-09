@@ -3,6 +3,7 @@ import type { RouteLocationNormalized, Router } from 'vue-router'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { useUserStore } from '@/stores/user'
+import { useWorkspaceStore } from '@/stores/workspace'
 import { setupGuards } from './guards'
 import router from './index'
 
@@ -22,6 +23,7 @@ function resolve(path: string): RouteLocationNormalized {
 
 beforeEach(() => {
   localStorage.clear()
+  sessionStorage.clear()
   setActivePinia(createPinia())
 })
 
@@ -88,5 +90,37 @@ describe('审查员与审计员合并后的操作审计权限', () => {
 
     user.permissions = new Set(['review:view'])
     expect(await installedGuard()(target, resolve('/dashboard'))).toEqual({ path: '/403' })
+  })
+})
+
+describe('个人与企业工作空间路由边界', () => {
+  it('企业空间下拒绝直达个人论坛、知识和用量，并回到企业入口', async () => {
+    const user = useUserStore()
+    user.token = 'enterprise-session'
+    user.profile = { id: 130, username: 'enterprise_member', role: 'user', status: 1 }
+    const workspace = useWorkspaceStore()
+    workspace.syncIdentity(130, user.token)
+    workspace.activateEnterprise(77)
+
+    for (const path of ['/forum', '/forum/new', '/forum/7', '/knowledge', '/usage']) {
+      expect(await installedGuard()(resolve(path), resolve('/dashboard')), path)
+        .toEqual({ path: '/enterprise', replace: true })
+    }
+  })
+
+  it('直接进入企业空间会切换全站上下文；切回个人后论坛路由恢复', async () => {
+    const user = useUserStore()
+    user.token = 'enterprise-session'
+    user.profile = { id: 131, username: 'dual_space_member', role: 'user', status: 1 }
+    const workspace = useWorkspaceStore()
+    workspace.syncIdentity(131, user.token)
+
+    expect(await installedGuard()(resolve('/enterprise'), resolve('/dashboard'))).toBe(true)
+    expect(workspace.activeSpace).toBe('enterprise')
+    expect(await installedGuard()(resolve('/forum'), resolve('/enterprise')))
+      .toEqual({ path: '/enterprise', replace: true })
+
+    workspace.activatePersonal()
+    expect(await installedGuard()(resolve('/forum'), resolve('/dashboard'))).toBe(true)
   })
 })

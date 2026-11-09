@@ -8,7 +8,7 @@ from typing import List, Optional
 from urllib.parse import parse_qs, quote, urljoin, urlparse
 
 import httpx
-from sqlalchemy import exists, literal, or_, select
+from sqlalchemy import Integer, and_, cast, exists, false, func, not_, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -16,6 +16,7 @@ from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
 from app.models.agent_governance import AgentKnowledgeChunk, AgentKnowledgeDoc, AgentKnowledgeSource
 from app.models.agent_response_run import AgentResponseRun
 from app.models.code_file import CodeFile
+from app.models.enterprise_project import EnterpriseProject
 from app.models.project import Project
 from app.services import approval_service, embedding_service, knowledge_service
 from app.utils.public_http import PinnedPublicUrl, pin_public_http_url
@@ -50,17 +51,304 @@ def chunk_text(content: str) -> List[str]:
     return chunks
 
 
-def _document_access_clause(user_id: Optional[int]):
-    """旧聊天笔记按运行归属限制；无法解析的私人引用默认不可见。"""
+def _document_access_clause(user_id: Optional[int], blocked_project_source_ids: set[int] | None = None):
+    """限制私人笔记，并从全局 Agent 检索中排除企业项目源码。"""
     source = AgentKnowledgeDoc.source_ref
     shared = or_(source.is_(None), ~source.startswith("response_run:", autoescape=True))
+    # 旧版项目来源使用 ``code_file:<id>``，通过文件归属动态识别已绑定项目。
+    # 新版引用同时固化 project_id，项目文件被删除后仍能按企业绑定过滤。
+    legacy_project_prefix = func.substr(source, 1, 10) == "code_file:"
+    project_prefix = func.substr(source, 1, 8) == "project:"
+    legacy_enterprise_project_source = exists(
+        select(CodeFile.id)
+        .join(EnterpriseProject, EnterpriseProject.project_id == CodeFile.project_id)
+        .where(
+            AgentKnowledgeDoc.source_type == "project",
+            legacy_project_prefix,
+            cast(func.substr(source, 11), Integer) == CodeFile.id,
+        )
+    )
+    bound_project_reference = exists(
+        select(EnterpriseProject.id).where(
+            AgentKnowledgeDoc.source_type == "project",
+            and_(
+                project_prefix,
+                cast(func.substr(source, 9), Integer) == EnterpriseProject.project_id,
+            ),
+        )
+    )
+    bound_project_source = (
+        AgentKnowledgeDoc.source_id.in_(blocked_project_source_ids)
+        if blocked_project_source_ids
+        else false()
+    )
+    shared = and_(shared, not_(or_(legacy_enterprise_project_source, bound_project_reference, bound_project_source)))
     if user_id is None:
         return shared
     owned = exists(select(AgentResponseRun.id).where(
         AgentResponseRun.user_id == int(user_id),
-        source == literal("response_run:") + AgentResponseRun.run_id,
+        source.startswith("response_run:", autoescape=True),
+        func.substr(source, 14) == AgentResponseRun.run_id,
     ))
     return or_(shared, owned)
+
+
+def _configured_project_id(source: AgentKnowledgeSource, config: dict | None = None) -> int | None:
+    """Resolve the project id used by a project source without trusting its type."""
+    config = config if isinstance(config, dict) else {}
+    try:
+        project_id = int(config.get("project_id") or source.source_uri)
+    except (TypeError, ValueError):
+        return None
+    return project_id if project_id > 0 else None
+
+
+def _project_id_from_source_ref(db: Session, source_ref: str) -> int | None:
+    """Resolve current and historical project-source references to their project."""
+    value = str(source_ref or "")
+    if value.startswith("project:"):
+        parts = value.split(":")
+        if len(parts) not in {2, 4} or (len(parts) == 4 and parts[2] != "code_file"):
+            return None
+        if re.fullmatch(r"[1-9][0-9]*", parts[1]) is None:
+            return None
+        try:
+            project_id = int(parts[1])
+        except (IndexError, TypeError, ValueError):
+            return None
+        if project_id <= 0:
+            return None
+        if len(parts) == 4:
+            if re.fullmatch(r"[1-9][0-9]*", parts[3]) is None:
+                return None
+            try:
+                file_id = int(parts[3])
+            except (TypeError, ValueError):
+                return None
+            actual_project_id = db.query(CodeFile.project_id).filter(CodeFile.id == file_id).scalar()
+            if actual_project_id is None or int(actual_project_id) != project_id:
+                return None
+        return project_id
+    if value.startswith("code_file:"):
+        raw_file_id = value.partition(":")[2]
+        if re.fullmatch(r"[1-9][0-9]*", raw_file_id) is None:
+            return None
+        try:
+            file_id = int(raw_file_id)
+        except (TypeError, ValueError):
+            return None
+        return db.query(CodeFile.project_id).filter(CodeFile.id == file_id).scalar()
+    return None
+
+
+def _is_enterprise_project(db: Session, project_id: int | None) -> bool:
+    if project_id is None:
+        return False
+    return db.query(EnterpriseProject.id).filter_by(project_id=int(project_id)).first() is not None
+
+
+def _bound_project_source_ids(db: Session) -> set[int]:
+    """Find global project-source rows whose configured project is enterprise-bound."""
+    bound_project_ids = {int(row[0]) for row in db.query(EnterpriseProject.project_id).all()}
+    if not bound_project_ids:
+        return set()
+    restricted_ids = set()
+    sources = db.query(AgentKnowledgeSource).filter_by(source_type="project").all()
+    for source in sources:
+        try:
+            config = json.loads(source.config_json or "{}")
+        except (TypeError, json.JSONDecodeError):
+            config = {}
+        project_id = _configured_project_id(source, config)
+        if project_id in bound_project_ids:
+            restricted_ids.add(int(source.id))
+    return restricted_ids
+
+
+def _deactivate_bound_project_documents(
+    db: Session,
+    project_id: int,
+    *,
+    source_id: int | None = None,
+) -> int:
+    """Compatibility wrapper that retires documents and commits the cleanup."""
+    return retire_bound_project_sources(db, project_id, source_id=source_id, commit=True)
+
+
+def retire_bound_project_sources(
+    db: Session,
+    project_id: int,
+    *,
+    source_id: int | None = None,
+    commit: bool = False,
+) -> int:
+    """Disable project crawlers and remove all global Agent copies for a bound project.
+
+    The caller may include this cleanup in the project-binding transaction. Project,
+    code-file, source, then document rows are locked in that order, matching source
+    ingestion so a binding cannot commit while an old source is still being copied.
+    """
+    project_id = int(project_id)
+    db.query(Project.id).filter(Project.id == project_id).populate_existing().with_for_update().first()
+
+    # Build legacy refs from numeric file IDs in Python. Concatenating a SQL literal
+    # with a cast string is not collation neutral on MySQL 8 (project schemas may use
+    # utf8mb4_unicode_ci while the server default is utf8mb4_0900_ai_ci).
+    code_file_ids = [
+        int(row[0])
+        for row in (
+            db.query(CodeFile.id)
+            .filter(CodeFile.project_id == project_id)
+            .order_by(CodeFile.id)
+            .populate_existing()
+            .with_for_update()
+            .all()
+        )
+    ]
+
+    sources = (
+        db.query(AgentKnowledgeSource)
+        .filter(AgentKnowledgeSource.source_type == "project")
+        .populate_existing()
+        .with_for_update()
+        .all()
+    )
+    matching_source_ids: set[int] = set()
+    for row in sources:
+        try:
+            config = json.loads(row.config_json or "{}")
+        except (TypeError, json.JSONDecodeError):
+            config = {}
+        if _configured_project_id(row, config) == project_id:
+            row.enabled = 0
+            row.whitelist = 0
+            matching_source_ids.add(int(row.id))
+    if source_id is not None:
+        matching_source_ids.add(int(source_id))
+
+    source = AgentKnowledgeDoc.source_ref
+    references = [source == f"project:{project_id}", source.like(f"project:{project_id}:%")]
+    references_type = AgentKnowledgeDoc.source_type == "project"
+    if matching_source_ids:
+        references.append(AgentKnowledgeDoc.source_id.in_(matching_source_ids))
+    document_ids = {
+        int(row[0])
+        for row in (
+            db.query(AgentKnowledgeDoc.id)
+            .filter(references_type, or_(*references))
+            .populate_existing()
+            .with_for_update()
+            .all()
+        )
+    }
+    # Historical project documents used the unqualified `code_file:<id>` form.
+    # Bounded IN queries avoid dialect-specific collation or parameter-limit issues.
+    for offset in range(0, len(code_file_ids), 500):
+        refs = [f"code_file:{file_id}" for file_id in code_file_ids[offset:offset + 500]]
+        document_ids.update(
+            int(row[0])
+            for row in (
+                db.query(AgentKnowledgeDoc.id)
+                .filter(AgentKnowledgeDoc.source_type == "project", AgentKnowledgeDoc.source_ref.in_(refs))
+                .populate_existing()
+                .with_for_update()
+                .all()
+            )
+        )
+    documents = (
+        db.query(AgentKnowledgeDoc)
+        .filter(AgentKnowledgeDoc.id.in_(document_ids))
+        .order_by(AgentKnowledgeDoc.id)
+        .populate_existing()
+        .with_for_update()
+        .all()
+        if document_ids else []
+    )
+    document_ids = [int(doc.id) for doc in documents]
+    if document_ids:
+        db.query(AgentKnowledgeChunk).filter(
+            AgentKnowledgeChunk.doc_id.in_(document_ids),
+        ).delete(synchronize_session=False)
+        for doc in documents:
+            doc.status = "deleted"
+    if commit:
+        db.commit()
+    return len(document_ids)
+
+
+def _lock_unbound_project_source(
+    db: Session,
+    source_ref: str,
+    project_id: int,
+    *,
+    source_id: int | None = None,
+) -> None:
+    """Serialize project knowledge ingestion with binding and fail closed on stale refs."""
+    project_id = int(project_id)
+    project = (
+        db.query(Project.id)
+        .filter(Project.id == project_id)
+        .populate_existing()
+        .with_for_update()
+        .one_or_none()
+    )
+    if project is None:
+        raise ForbiddenError("无法确认项目来源", code=40300)
+
+    value = str(source_ref or "")
+    file_id = None
+    if value.startswith("code_file:"):
+        try:
+            file_id = int(value.partition(":")[2])
+        except (TypeError, ValueError):
+            file_id = None
+    elif value.startswith("project:"):
+        tail = value.split(":", 2)
+        if len(tail) == 3 and tail[2].startswith("code_file:"):
+            try:
+                file_id = int(tail[2].partition(":")[2])
+            except (TypeError, ValueError):
+                file_id = None
+    if value and (value.startswith("code_file:") or ":code_file:" in value):
+        if file_id is None or file_id <= 0:
+            raise ForbiddenError("无法确认项目来源", code=40300)
+        current_project_id = (
+            db.query(CodeFile.project_id)
+            .filter(CodeFile.id == file_id)
+            .populate_existing()
+            .with_for_update()
+            .scalar()
+        )
+        if current_project_id is None or int(current_project_id) != project_id:
+            raise ForbiddenError("无法确认项目来源", code=40300)
+
+    if source_id is not None:
+        source_row = (
+            db.query(AgentKnowledgeSource)
+            .filter_by(id=int(source_id), source_type="project")
+            .populate_existing()
+            .with_for_update()
+            .one_or_none()
+        )
+        if source_row is None:
+            raise ForbiddenError("无法确认项目来源", code=40300)
+        try:
+            config = json.loads(source_row.config_json or "{}")
+        except (TypeError, json.JSONDecodeError):
+            config = {}
+        configured_project_id = _configured_project_id(source_row, config)
+        if configured_project_id != project_id:
+            raise ForbiddenError("无法确认项目来源", code=40300)
+
+    binding = (
+        db.query(EnterpriseProject.id)
+        .filter_by(project_id=project_id)
+        .populate_existing()
+        .with_for_update()
+        .first()
+    )
+    if binding is not None:
+        raise ForbiddenError("企业绑定项目不能写入全局 Agent 知识库", code=40300)
 
 
 def list_docs(
@@ -77,7 +365,8 @@ def list_docs(
         list[AgentKnowledgeDoc]: 知识文档列表。
     """
     q = db.query(AgentKnowledgeDoc).filter(
-        AgentKnowledgeDoc.status != "deleted", _document_access_clause(user_id),
+        AgentKnowledgeDoc.status != "deleted",
+        _document_access_clause(user_id, _bound_project_source_ids(db)),
     )
     if agent_code:
         q = q.filter(AgentKnowledgeDoc.agent_code == agent_code)
@@ -96,6 +385,7 @@ def add_document(
     confidence: float = 1.0,
     user_id: Optional[int] = None,
     require_api_embedding: bool = False,
+    source_id: int | None = None,
 ) -> AgentKnowledgeDoc:
     """新增 Agent 知识文档并生成切片向量。
 
@@ -119,10 +409,29 @@ def add_document(
         ).first() if user_id is not None else None
         if run is None:
             raise ForbiddenError("私人知识来源不属于当前账号", code=40300)
+    if source_type == "project":
+        project_id = _project_id_from_source_ref(db, source_ref)
+        if not source_ref and source_id is not None:
+            source_row = db.query(AgentKnowledgeSource).filter_by(
+                id=int(source_id), source_type="project",
+            ).first()
+            if source_row is not None:
+                try:
+                    source_config = json.loads(source_row.config_json or "{}")
+                except (TypeError, json.JSONDecodeError):
+                    source_config = {}
+                project_id = _configured_project_id(source_row, source_config)
+        if project_id is None:
+            raise ForbiddenError("无法确认项目来源", code=40300)
+        _lock_unbound_project_source(db, source_ref, project_id, source_id=source_id)
     pieces = chunk_text(content)
     if pieces or require_api_embedding:
         # 先完成嵌入和完整性校验，失败时不创建空文档；手册额外要求真实远端向量。
-        vectors, tag = embedding_service.embed_texts(db, pieces, user_id=user_id)
+        try:
+            vectors, tag = embedding_service.embed_texts(db, pieces, user_id=user_id)
+        except BaseException:
+            db.rollback()
+            raise
         if (
             not pieces or not isinstance(tag, str) or not tag
             or (require_api_embedding and not tag.startswith("api:"))
@@ -140,6 +449,7 @@ def add_document(
             raise RuntimeError("知识嵌入不可用或不完整，未创建文档，请恢复嵌入服务后重试")
     status = "active" if risk_level in ("low", "medium") and confidence >= 0.6 else "pending_approval"
     doc = AgentKnowledgeDoc(
+        source_id=source_id,
         agent_code=agent_code,
         source_type=source_type,
         source_ref=source_ref or None,
@@ -205,7 +515,7 @@ def activate_document(
     doc = db.query(AgentKnowledgeDoc).filter(
         AgentKnowledgeDoc.id == doc_id,
         AgentKnowledgeDoc.status != "deleted",
-        _document_access_clause(user_id),
+        _document_access_clause(user_id, _bound_project_source_ids(db)),
     ).first()
     if not doc:
         raise NotFoundError("Agent 知识文档不存在", code=40400)
@@ -246,8 +556,27 @@ def upsert_source(
     source_uri = (source_uri or "").strip()
     if source_type in _EXTERNAL_SOURCE_TYPES and not _validate_knowledge_url(source_uri):
         raise ValidationError("外部知识来源仅允许可解析的公网 HTTP(S) URL", code=40026)
+    normalized_config = config if isinstance(config, dict) else {}
+    if source_type == "project" and enabled == 1 and whitelist == 1:
+        candidate = AgentKnowledgeSource(source_uri=source_uri)
+        project_id = _configured_project_id(candidate, normalized_config)
+        if _is_enterprise_project(db, project_id):
+            raise ForbiddenError("企业绑定项目不能配置为全局 Agent 知识来源", code=40300)
 
     row = db.get(AgentKnowledgeSource, source_id) if source_id else None
+    if row is not None and row.source_type == "project":
+        try:
+            previous_config = json.loads(row.config_json or "{}")
+        except (TypeError, json.JSONDecodeError):
+            previous_config = {}
+        previous_project_id = _configured_project_id(row, previous_config)
+        if _is_enterprise_project(db, previous_project_id):
+            # Preserve provenance if a bound source is later repointed and its files disappear.
+            _deactivate_bound_project_documents(
+                db,
+                previous_project_id,
+                source_id=int(row.id),
+            )
     if not row:
         row = AgentKnowledgeSource(agent_code=agent_code, source_type=source_type, source_uri=source_uri)
         db.add(row)
@@ -256,7 +585,7 @@ def upsert_source(
     row.source_uri = source_uri
     row.whitelist = whitelist
     row.enabled = enabled
-    row.config_json = json.dumps(config or {}, ensure_ascii=False)
+    row.config_json = json.dumps(normalized_config, ensure_ascii=False)
     db.commit()
     db.refresh(row)
     return row
@@ -298,6 +627,22 @@ def crawl_enabled_sources(db: Session, agent_code: str = "", *, user_id: Optiona
     docs: list[dict] = []
     skipped: list[dict] = []
     for source in sources:
+        project_id: int | None = None
+        if source.source_type == "project":
+            try:
+                source_config = json.loads(source.config_json or "{}")
+            except (TypeError, json.JSONDecodeError):
+                source_config = {}
+            project_id = _configured_project_id(source, source_config)
+            if _is_enterprise_project(db, project_id):
+                _deactivate_bound_project_documents(db, project_id, source_id=int(source.id))
+                skipped.append(
+                    {
+                        "source_id": source.id,
+                        "reason": "企业绑定项目禁止进入全局 Agent 知识库",
+                    }
+                )
+                continue
         payload = _resolve_source_payload(db, source)
         if not payload:
             skipped.append({"source_id": source.id, "reason": "无可抓取内容"})
@@ -306,17 +651,28 @@ def crawl_enabled_sources(db: Session, agent_code: str = "", *, user_id: Optiona
             if not str(item.get("content") or "").strip():
                 skipped.append({"source_id": source.id, "reason": "抓取内容为空"})
                 continue
-            doc = add_document(
-                db,
-                agent_code=source.agent_code,
-                user_id=user_id,
-                title=item["title"],
-                content=item["content"],
-                source_type=source.source_type,
-                source_ref=item["source_ref"],
-                risk_level=item.get("risk_level", "low"),
-                confidence=item.get("confidence", 0.9),
-            )
+            try:
+                doc = add_document(
+                    db,
+                    agent_code=source.agent_code,
+                    user_id=user_id,
+                    title=item["title"],
+                    content=item["content"],
+                    source_type=source.source_type,
+                    source_ref=item["source_ref"],
+                    source_id=int(source.id),
+                    risk_level=item.get("risk_level", "low"),
+                    confidence=item.get("confidence", 0.9),
+                )
+            except ForbiddenError:
+                db.rollback()
+                if project_id is not None and _is_enterprise_project(db, project_id):
+                    _deactivate_bound_project_documents(db, project_id, source_id=int(source.id))
+                skipped.append({
+                    "source_id": source.id,
+                    "reason": "项目来源已绑定企业或无法验证，跳过全局知识入库",
+                })
+                break
             docs.append({"doc_id": doc.id, "source_id": source.id, "status": doc.status})
     return {"source_count": len(sources), "doc_count": len(docs), "docs": docs, "skipped": skipped}
 
@@ -369,10 +725,11 @@ def _project_source_payload(db: Session, source: AgentKnowledgeSource, config: d
     Returns:
         list[dict]: 项目代码知识 payload。
     """
-    try:
-        project_id = int(config.get("project_id") or source.source_uri)
-    except (TypeError, ValueError):
+    project_id = _configured_project_id(source, config)
+    if project_id is None:
         return []
+    if _is_enterprise_project(db, project_id):
+        raise ForbiddenError("企业绑定项目不能采集到全局 Agent 知识库", code=40300)
     project = db.get(Project, project_id)
     if not project:
         return []
@@ -386,13 +743,15 @@ def _project_source_payload(db: Session, source: AgentKnowledgeSource, config: d
     )
     payload: list[dict] = []
     for file in files:
-        payload.append({
-            "title": f"{project.project_name}/{file.file_path or file.file_name}",
-            "content": file.content,
-            "source_ref": f"code_file:{file.id}",
-            "risk_level": str(config.get("risk_level") or "low"),
-            "confidence": float(config.get("confidence") or 0.9),
-        })
+        payload.append(
+            {
+                "title": f"{project.project_name}/{file.file_path or file.file_name}",
+                "content": file.content,
+                "source_ref": f"code_file:{file.id}",
+                "risk_level": str(config.get("risk_level") or "low"),
+                "confidence": float(config.get("confidence") or 0.9),
+            }
+        )
     return payload
 
 
@@ -798,7 +1157,7 @@ def unified_retrieve(db: Session, *, user_id: int, agent_code: str, query: str, 
         .filter(
             AgentKnowledgeChunk.agent_code == agent_code,
             AgentKnowledgeDoc.status == "active",
-            _document_access_clause(user_id),
+            _document_access_clause(user_id, _bound_project_source_ids(db)),
         )
         .all()
     )

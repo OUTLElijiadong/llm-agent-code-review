@@ -13,6 +13,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
+from app.models import load_all_models
 from app.models.agent_capability import (  # noqa: F401,E402
     AgentCapabilityAlias,
     AgentMcpBinding,
@@ -77,12 +78,6 @@ from app.models.project import Project  # noqa: F401,E402
 from app.models.project_import_task import ProjectImportTask  # noqa: F401,E402
 from app.models.project_member import ProjectMember  # noqa: F401,E402  -- v2.4
 from app.models.project_source_archive import ProjectSourceArchive  # noqa: F401,E402
-from app.models.remote_pentest import (  # noqa: F401,E402
-    RemotePentestEngagement,
-    RemotePentestFinding,
-    RemotePentestPhaseRun,
-    RemotePentestReport,
-)
 
 # RBAC 权限体系模型(T02): 确保测试建表时包含 6 张 RBAC 表
 from app.models.rbac import (  # noqa: F401,E402
@@ -92,6 +87,12 @@ from app.models.rbac import (  # noqa: F401,E402
     Role,
     RolePermission,
     UserRole,
+)
+from app.models.remote_pentest import (  # noqa: F401,E402
+    RemotePentestEngagement,
+    RemotePentestFinding,
+    RemotePentestPhaseRun,
+    RemotePentestReport,
 )
 from app.models.review_experience import ReviewExperience  # noqa: F401,E402
 from app.models.review_issue import ReviewIssue  # noqa: F401,E402
@@ -105,6 +106,39 @@ from app.models.system_config import SystemConfig  # noqa: F401,E402
 from app.models.user import User  # noqa: F401,E402
 from app.models.user_avatar import UserAvatar  # noqa: F401,E402
 from app.models.user_profile import UserProfile  # noqa: F401,E402
+
+# Import service modules lazily during tests (for example, enterprise billing
+# checks) only after Base.metadata.create_all runs. Register the canonical model
+# set here so test success does not depend on unrelated collection order.
+load_all_models()
+
+
+@pytest.fixture
+def mark_fake_model_credentials_as_user(monkeypatch):
+    """Fake provider transport tests use test-owned keys, never an unmetered platform key."""
+    from types import SimpleNamespace
+
+    from app.agents.base import BaseAgent
+    from app.ai.deepseek_agent import DeepSeekAgent
+
+    for agent_class in (BaseAgent, DeepSeekAgent):
+        original_init = agent_class.__init__
+
+        def init_with_test_user_key(self, *args, _original=original_init, **kwargs):
+            _original(self, *args, **kwargs)
+            self._billing_credential_source = "user"
+            if agent_class is DeepSeekAgent and getattr(self, "api_config", None) is None:
+                self.api_config = SimpleNamespace(source="user")
+
+        monkeypatch.setattr(agent_class, "__init__", init_with_test_user_key)
+
+
+@pytest.fixture
+def allow_test_only_legacy_platform_transport(monkeypatch):
+    """A single fake global-key transport contract test predates billing scopes."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "billing_allow_unmetered_external_calls", True)
 
 
 @pytest.fixture(autouse=True)
@@ -179,6 +213,10 @@ def db():
     Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     session = Session()
     try:
+        from app.services.billing_rate_catalog_service import seed_test_baseline
+
+        seed_test_baseline(session)
+        session.commit()
         yield session
     finally:
         session.close()

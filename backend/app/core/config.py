@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     openapi_enabled: bool = True
     app_release: str = "dev"
-    app_version: str = "4.1.42"
+    app_version: str = "4.1.43"
     # 小菱每日模型 Token 提醒阈值；仅告警，不阻断交互会话。0 表示关闭。
     assistant_daily_token_alert_threshold: int = Field(default=5_000_000, ge=0, le=100_000_000)
     # 注册验证码开关:生产默认开(dev/test 可关以便自动化测试)
@@ -61,11 +61,31 @@ class Settings(BaseSettings):
     # 第一项用于新写入，后续项仅用于解密旧密文；生产必须配置独立于 JWT 的随机密钥。
     api_key_encryption_keys: List[str] = []
 
+    # 支付渠道默认关闭。私钥和平台公钥以只读挂载文件提供，不写入代码仓库。
+    billing_sales_enabled: bool = False
+    billing_commercial_metering_ready: bool = False
+    billing_entitlement_enforcement_ready: bool = False
+    # 未进入可信计费账本的平台模型/远端服务调用默认拒绝；仅兼容旧部署时显式接受未计量成本才开启。
+    billing_allow_unmetered_external_calls: bool = False
+    alipay_app_id: str = ""
+    alipay_seller_id: str = ""
+    alipay_private_key_path: str = ""
+    alipay_public_key_path: str = ""
+    alipay_notify_url: str = ""
+    wechat_pay_app_id: str = ""
+    wechat_pay_mchid: str = ""
+    wechat_pay_merchant_serial: str = ""
+    wechat_pay_merchant_private_key_path: str = ""
+    wechat_pay_api_v3_key: str = ""
+    wechat_pay_public_key_path: str = ""
+    wechat_pay_public_key_serial: str = ""
+    wechat_pay_notify_url: str = ""
+
     deepseek_api_key: str = "sk-xxxxx"
     deepseek_base_url: str = "https://api.deepseek.com"
     # 子 Agent 统一使用的默认模型;总调度者(Orchestrator)与小菱对话单独使用 pro。
     deepseek_model: str = "deepseek-v4-flash"
-    # 总调度者与小菱(user/admin 两个 surface)使用的高能力模型。
+    # 总调度者与小菱(user/admin 两个 surface)默认使用 V4 Pro；计费按供应商当前 Pro 公布价格。
     deepseek_orchestrator_model: str = "deepseek-v4-pro"
     # 小菱消息含图片时临时切换的视觉模型(仅该次运行;结束后同会话回默认)。
     deepseek_vision_model: str = "deepseek-flash"
@@ -147,6 +167,18 @@ class Settings(BaseSettings):
     agent_team_task_lease_seconds: int = Field(default=300, ge=1, le=3600)
     agent_team_dispatch_interval_seconds: int = Field(default=2, ge=1, le=60)
     agent_team_default_max_attempts: int = Field(default=3, ge=1, le=10)
+    # 企业小菱队列只自动领取尚未开始的任务；运行中租约过期的任务仍需用户显式恢复，
+    # 避免模型响应已计费但检查点未落库时被后台盲目重放。
+    enterprise_assistant_worker_enabled: bool = True
+    enterprise_assistant_worker_interval_seconds: int = Field(default=5, ge=1, le=60)
+    enterprise_assistant_worker_batch_size: int = Field(default=5, ge=1, le=50)
+    enterprise_assistant_worker_concurrency: int = Field(default=2, ge=1, le=8)
+    # 企业注册 Agent 团队首批只读成员只接收短文本片段；每个任务独立预占，
+    # 单团队总预算同时受此上限、企业积分余额及适用的月度额度剩余共同约束。
+    enterprise_agent_team_max_calls_per_task: int = Field(default=3, ge=1, le=20)
+    enterprise_agent_team_max_input_tokens_per_call: int = Field(default=16000, ge=256, le=100000)
+    enterprise_agent_team_max_output_tokens_per_call: int = Field(default=4096, ge=128, le=16000)
+    enterprise_agent_team_max_budget_milli: int = Field(default=5000, ge=1, le=1_000_000_000)
     # 授权渗透测试七阶段流水线;探测类动作全部走既有沙箱单槽,
     # 这里只约束 LLM 推演线的并发上限与阶段产物尺寸。
     pentest_enabled: bool = True

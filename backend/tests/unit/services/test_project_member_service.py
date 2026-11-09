@@ -270,6 +270,21 @@ class TestRequireProjectAccess:
 class TestRequireProjectAccessAudit:
     """require_project_access 审计日志记录测试(v2.6 B2)"""
 
+    @pytest.fixture
+    def audit_db(self, tmp_path):
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
+        from app.core.database import Base
+        from app.services import project_access_audit
+
+        engine = create_engine(f"sqlite:///{tmp_path / 'member-audit.db'}")
+        Base.metadata.create_all(engine)
+        with sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)() as session:
+            yield session
+        project_access_audit._queue._queue.join()
+        engine.dispose()
+
     def test_audit_log_recorded_on_write_success(self, db):
         """写权限校验通过时应记录 status=success 的审计日志"""
         from app.models.audit_log import AuditLog
@@ -292,9 +307,12 @@ class TestRequireProjectAccessAudit:
         assert log.actor_id == 1001
         assert "写权限校验通过" in log.detail
 
-    def test_audit_log_recorded_on_reviewer_write_denied(self, db):
+    def test_audit_log_recorded_on_reviewer_write_denied(self, audit_db):
         """审查员写权限被拒时应记录 status=failed 的审计日志(且能持久化)"""
         from app.models.audit_log import AuditLog
+        from app.services import project_access_audit
+
+        db = audit_db
 
         _make_user(db, 1002, "owner")
         reviewer = _make_user(db, 1003, "reviewer")
@@ -305,11 +323,13 @@ class TestRequireProjectAccessAudit:
         db.query(AuditLog).delete()
         db.commit()
 
-        # 触发 ForbiddenError,但失败审计应已立即持久化
+        # 触发 ForbiddenError，失败审计在调用方事务结束后独立持久化。
         with pytest.raises(ForbiddenError, match="需要项目拥有者权限"):
             require_project_access(db, 5102, reviewer, need_write=True)
 
-        # 失败审计应已持久化(不依赖外层 commit)
+        db.rollback()
+        project_access_audit._queue._queue.join()
+        # 失败审计不依赖调用方提交业务事务。
         logs = db.query(AuditLog).filter(AuditLog.action == "project_access").all()
         assert len(logs) == 1
         log = logs[0]
@@ -317,9 +337,12 @@ class TestRequireProjectAccessAudit:
         assert log.actor_id == 1003
         assert "审查员写权限被拒绝" in log.detail
 
-    def test_audit_log_recorded_on_non_member_write_denied(self, db):
+    def test_audit_log_recorded_on_non_member_write_denied(self, audit_db):
         """非成员写权限被拒时应记录 status=failed 的审计日志"""
         from app.models.audit_log import AuditLog
+        from app.services import project_access_audit
+
+        db = audit_db
 
         _make_user(db, 1004, "owner")
         stranger = _make_user(db, 1005, "stranger")
@@ -330,6 +353,8 @@ class TestRequireProjectAccessAudit:
         with pytest.raises(NotFoundError):
             require_project_access(db, 5103, stranger, need_write=True)
 
+        db.rollback()
+        project_access_audit._queue._queue.join()
         logs = db.query(AuditLog).filter(AuditLog.action == "project_access").all()
         assert len(logs) == 1
         assert logs[0].status == "failed"

@@ -1076,7 +1076,14 @@ def test_worker_execute_exception_still_creates_failure_report(db, monkeypatch) 
         "_call_worker",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(TimeoutError("synthetic worker timeout")),
     )
-    monkeypatch.setattr(sandbox_service, "_stop_registered_worker_requests", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        sandbox_service,
+        "_stop_registered_worker_requests",
+        lambda _worker, env: {
+            request_id: {"request_id": request_id, "status": "stopped", "result": {"cleanup_confirmed": True}}
+            for request_id in sandbox_service._registered_worker_request_ids(env)
+        },
+    )
     monkeypatch.setattr(
         sandbox_service.strategy_learning_service,
         "observe_sandbox_outcome",

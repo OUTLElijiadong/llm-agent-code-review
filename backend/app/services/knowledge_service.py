@@ -10,9 +10,11 @@
 隔离红线: 任何查询都强制带 user_id 过滤;即使管理员也不得读取他人切片内容。
 """
 import json
+import re
 from typing import List, Optional
 
 from loguru import logger
+from sqlalchemy import Integer, cast, exists, func, not_, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ForbiddenError, NotFoundError, PayloadTooLargeError
@@ -82,18 +84,30 @@ def add_document(
     if len(content) > _MAX_DOCUMENT_CHARS:
         raise PayloadTooLargeError(f"知识文档最多 {_MAX_DOCUMENT_CHARS} 字，请拆分后入库")
 
+    # Check before any external embedding request. On MySQL this lock remains
+    # held until the document commit, serializing the write against project bind.
+    if source_type in {"code", "issue"}:
+        if not source_ref:
+            raise ForbiddenError("项目知识来源缺少可验证的来源标识", code=40300)
+        _lock_and_check_personal_project_source(db, source_type, source_ref, user_id)
+
     # 先完成全部切片的嵌入，确认数量和模型一致后才替换旧来源。
     # 远端嵌入可能独立记录用量；此时不持有知识文档写事务。
     pieces = _chunk_text(content)
     embedded: list[tuple[str, list[float], str]] = []
     model_tag = ""
-    for offset in range(0, len(pieces), _EMBED_BATCH_SIZE):
-        batch = pieces[offset:offset + _EMBED_BATCH_SIZE]
-        vectors, tag = embedding_service.embed_texts(db, batch, user_id=user_id)
-        if len(vectors) != len(batch) or not tag or (model_tag and tag != model_tag):
-            raise RuntimeError("知识文档嵌入结果不完整或模型批次不一致，原文档保持不变")
-        model_tag = tag
-        embedded.extend((piece, vec, tag) for piece, vec in zip(batch, vectors))
+    try:
+        for offset in range(0, len(pieces), _EMBED_BATCH_SIZE):
+            batch = pieces[offset:offset + _EMBED_BATCH_SIZE]
+            vectors, tag = embedding_service.embed_texts(db, batch, user_id=user_id)
+            if len(vectors) != len(batch) or not tag or (model_tag and tag != model_tag):
+                raise RuntimeError("知识文档嵌入结果不完整或模型批次不一致，原文档保持不变")
+            model_tag = tag
+            embedded.extend((piece, vec, tag) for piece, vec in zip(batch, vectors))
+    except BaseException:
+        # The project row lock must not survive a failed upstream embedding.
+        db.rollback()
+        raise
 
     if source_ref and replace_existing:
         olds = db.query(KnowledgeDoc).filter(
@@ -158,6 +172,206 @@ def _lexical_overlap(query_terms: set[str], content: str) -> float:
     return len(query_terms & content_terms) / len(query_terms)
 
 
+def personal_source_access_clause():
+    """Hide old personal-KB copies whose source project now belongs to a company."""
+    from app.models.code_file import CodeFile
+    from app.models.enterprise_project import EnterpriseProject
+    from app.models.review_issue import ReviewIssue
+    from app.models.review_task import ReviewTask
+
+    source = KnowledgeDoc.source_ref
+    source_code_prefix = func.substr(source, 1, 5) == "file:"
+    source_issue_prefix = func.substr(source, 1, 6) == "issue:"
+    bound_code = exists(
+        select(CodeFile.id)
+        .join(EnterpriseProject, EnterpriseProject.project_id == CodeFile.project_id)
+        .where(
+            KnowledgeDoc.source_type == "code",
+            source_code_prefix,
+            cast(func.substr(source, 6), Integer) == CodeFile.id,
+        )
+    )
+    bound_issue = exists(
+        select(ReviewIssue.id)
+        .join(ReviewTask, ReviewTask.id == ReviewIssue.task_id)
+        .join(EnterpriseProject, EnterpriseProject.project_id == ReviewTask.project_id)
+        .where(
+            KnowledgeDoc.source_type == "issue",
+            source_issue_prefix,
+            cast(func.substr(source, 7), Integer) == ReviewIssue.id,
+        )
+    )
+    return not_(or_(bound_code, bound_issue))
+
+
+def _lock_and_check_personal_project_source(
+    db: Session, source_type: str, source_ref: str, user_id: int,
+) -> None:
+    """Lock project before source rows, matching enterprise binding lock order."""
+    from app.models.enterprise_project import EnterpriseProject
+    from app.models.project import Project
+
+    expected_prefix = {"code": "file", "issue": "issue"}.get(source_type)
+    prefix, separator, raw_source_id = str(source_ref or "").partition(":")
+    if (
+        not expected_prefix or prefix != expected_prefix or separator != ":"
+        or re.fullmatch(r"[1-9][0-9]*", raw_source_id) is None
+    ):
+        db.rollback()
+        raise ForbiddenError("项目知识来源无法验证", code=40300)
+    source_id = int(raw_source_id)
+    if source_id <= 0:
+        db.rollback()
+        raise ForbiddenError("项目知识来源无法验证", code=40300)
+
+    if source_type == "code":
+        from app.models.code_file import CodeFile
+
+        initial_project_id = db.query(CodeFile.project_id).filter(CodeFile.id == source_id).scalar()
+    elif source_type == "issue":
+        from app.models.review_issue import ReviewIssue
+        from app.models.review_task import ReviewTask
+
+        initial_task_id = db.query(ReviewIssue.task_id).filter(ReviewIssue.id == source_id).scalar()
+        initial_project_id = (
+            db.query(ReviewTask.project_id)
+            .filter(ReviewTask.id == initial_task_id, ReviewTask.user_id == int(user_id))
+            .scalar()
+            if initial_task_id is not None else None
+        )
+    else:
+        return
+
+    if initial_project_id is None:
+        db.rollback()
+        raise ForbiddenError("项目知识来源已失效", code=40300)
+    project_id = int(initial_project_id)
+    project = (
+        db.query(Project.id)
+        .filter(Project.id == project_id, Project.user_id == int(user_id))
+        .populate_existing()
+        .with_for_update()
+        .scalar()
+    )
+    if project is None:
+        db.rollback()
+        raise ForbiddenError("项目知识来源已失效", code=40300)
+
+    if source_type == "code":
+        current_source = (
+            db.query(CodeFile.project_id)
+            .filter(CodeFile.id == source_id)
+            .populate_existing()
+            .with_for_update()
+            .scalar()
+        )
+        valid_source = current_source is not None and int(current_source) == project_id
+    else:
+        current_task = (
+            db.query(ReviewTask)
+            .filter(ReviewTask.id == initial_task_id, ReviewTask.user_id == int(user_id))
+            .populate_existing()
+            .with_for_update()
+            .first()
+        )
+        current_issue = (
+            db.query(ReviewIssue.task_id)
+            .filter(ReviewIssue.id == source_id)
+            .populate_existing()
+            .with_for_update()
+            .scalar()
+        )
+        valid_source = bool(
+            current_task is not None
+            and int(current_task.project_id) == project_id
+            and current_issue is not None
+            and int(current_issue) == int(initial_task_id)
+        )
+    if not valid_source:
+        db.rollback()
+        raise ForbiddenError("项目知识来源已失效", code=40300)
+
+    bound = (
+        db.query(EnterpriseProject.id)
+        .filter_by(project_id=int(project_id))
+        .populate_existing()
+        .with_for_update()
+        .first()
+    )
+    if bound is not None:
+        # add_document owns its commit boundary; release the project lock before
+        # the source-sync wrapper catches this expected rejection.
+        db.rollback()
+        raise ForbiddenError("企业项目来源不能复制到个人知识库", code=40300)
+
+
+def retire_enterprise_project_sources(db: Session, project_id: int) -> tuple[int, int]:
+    """Remove old personal-RAG copies when a project is bound to a company.
+
+    The caller owns the transaction so the content is retired atomically with
+    the new enterprise binding.
+    """
+    from app.models.code_file import CodeFile
+    from app.models.review_issue import ReviewIssue
+    from app.models.review_task import ReviewTask
+
+    code_file_ids = [
+        int(row[0])
+        for row in db.query(CodeFile.id)
+        .filter(CodeFile.project_id == int(project_id))
+        .order_by(CodeFile.id)
+        .populate_existing()
+        .with_for_update()
+        .all()
+    ]
+    issue_ids = [
+        int(row[0])
+        for row in db.query(ReviewIssue.id)
+        .join(ReviewTask, ReviewTask.id == ReviewIssue.task_id)
+        .filter(ReviewTask.project_id == int(project_id))
+        .order_by(ReviewIssue.id)
+        .populate_existing()
+        .with_for_update()
+        .all()
+    ]
+    # The binder may have waited for a personal sync that held the Project row
+    # while it embedded and committed. Use a current locking read so this cleanup
+    # sees that just-committed document even under MySQL REPEATABLE READ.
+    doc_ids: set[int] = set()
+    for source_type, prefix, source_ids in (
+        ("code", "file:", code_file_ids),
+        ("issue", "issue:", issue_ids),
+    ):
+        for offset in range(0, len(source_ids), 500):
+            refs = [
+                f"{prefix}{source_id}"
+                for source_id in source_ids[offset:offset + 500]
+            ]
+            doc_ids.update(
+                int(row[0])
+                for row in db.query(KnowledgeDoc.id)
+                .filter(
+                    KnowledgeDoc.status == "active",
+                    KnowledgeDoc.source_type == source_type,
+                    KnowledgeDoc.source_ref.in_(refs),
+                )
+                .populate_existing()
+                .with_for_update()
+                .all()
+            )
+    doc_ids = sorted(doc_ids)
+    if not doc_ids:
+        return 0, 0
+    deleted_chunks = db.query(KnowledgeChunk).filter(
+        KnowledgeChunk.doc_id.in_(doc_ids),
+    ).delete(synchronize_session=False)
+    deleted_docs = db.query(KnowledgeDoc).filter(
+        KnowledgeDoc.id.in_(doc_ids),
+        KnowledgeDoc.status == "active",
+    ).update({KnowledgeDoc.status: "deleted"}, synchronize_session=False)
+    return int(deleted_docs or 0), int(deleted_chunks or 0)
+
+
 def retrieve(db: Session, user_id: int, query: str, top_k: int = 5) -> List[dict]:
     """在用户私有知识库内检索最相关切片
 
@@ -180,6 +394,7 @@ def retrieve(db: Session, user_id: int, query: str, top_k: int = 5) -> List[dict
             KnowledgeChunk.user_id == user_id,   # 切片与文档两侧均校验租户归属
             KnowledgeDoc.user_id == user_id,
             KnowledgeDoc.status == "active",
+            personal_source_access_clause(),
         )
         .all()
     )
@@ -222,6 +437,7 @@ def list_docs(db: Session, user_id: int, source_type: str = "",
     q = db.query(KnowledgeDoc).filter(
         KnowledgeDoc.user_id == user_id,
         KnowledgeDoc.status == "active",
+        personal_source_access_clause(),
     )
     if source_type:
         q = q.filter(KnowledgeDoc.source_type == source_type)
@@ -252,11 +468,21 @@ def delete_doc(db: Session, user_id: int, doc_id: int) -> None:
 def get_stats(db: Session, user_id: int) -> dict:
     docs = db.query(KnowledgeDoc).filter(
         KnowledgeDoc.user_id == user_id, KnowledgeDoc.status == "active",
+        personal_source_access_clause(),
     ).all()
     by_source: dict = {}
     for d in docs:
         by_source[d.source_type] = by_source.get(d.source_type, 0) + 1
-    chunk_total = db.query(KnowledgeChunk).filter(KnowledgeChunk.user_id == user_id).count()
+    chunk_total = (
+        db.query(KnowledgeChunk)
+        .join(KnowledgeDoc, KnowledgeDoc.id == KnowledgeChunk.doc_id)
+        .filter(
+            KnowledgeChunk.user_id == user_id,
+            KnowledgeDoc.user_id == user_id,
+            personal_source_access_clause(),
+        )
+        .count()
+    )
     return {
         "doc_total": len(docs),
         "chunk_total": chunk_total,
@@ -275,6 +501,7 @@ def sync_from_platform(db: Session, user_id: int) -> dict:
         dict: 各来源新增/更新条数
     """
     from app.models.code_file import CodeFile
+    from app.models.enterprise_project import EnterpriseProject
     from app.models.forum_post import ForumPost
     from app.models.maintenance_ticket import MaintenanceTicket
     from app.models.project import Project
@@ -298,7 +525,10 @@ def sync_from_platform(db: Session, user_id: int) -> dict:
             db.query(CodeFile)
             .join(Project, CodeFile.project_id == Project.id)
             .filter(Project.user_id == user_id, CodeFile.status == "active",
-                    Project.status != "deleted")
+                    Project.status != "deleted",
+                    ~exists(select(EnterpriseProject.id).where(
+                        EnterpriseProject.project_id == Project.id,
+                    )))
             .limit(200)
             .all()
         )
@@ -317,7 +547,10 @@ def sync_from_platform(db: Session, user_id: int) -> dict:
             db.query(ReviewIssue)
             .join(ReviewTask, ReviewIssue.task_id == ReviewTask.id)
             .filter(ReviewTask.user_id == user_id,
-                    ReviewIssue.status.in_(("fixed", "ignored")))
+                    ReviewIssue.status.in_(("fixed", "ignored")),
+                    ~exists(select(EnterpriseProject.id).where(
+                        EnterpriseProject.project_id == ReviewTask.project_id,
+                    )))
             .order_by(ReviewIssue.handled_at.desc())
             .limit(300)
             .all()

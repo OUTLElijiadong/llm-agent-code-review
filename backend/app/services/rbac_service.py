@@ -75,7 +75,7 @@ def _require_configurable_role(db: Session, role_id: int) -> Role:
     return role
 
 
-def resolve_effective_role_code(db: Session, user_id: int) -> str:
+def resolve_effective_role_code(db: Session, user_id: int, *, lock: bool = False, nowait: bool = False) -> str:
     """解析账号唯一有效角色；旧字段与 RBAC 冲突时失败关闭。
 
     迁移期仍允许“仅有旧字段、尚无任何 RBAC 绑定”的四个固定角色。一旦账号
@@ -92,7 +92,8 @@ def resolve_effective_role_code(db: Session, user_id: int) -> str:
     # 测试替身、已关闭会话或被污染的会话均必须稳定失败关闭。
     if not callable(getattr(db, "get", None)) or not callable(getattr(db, "query", None)):
         return ""
-    user = db.get(User, user_id)
+    user = (db.query(User).filter(User.id == user_id).populate_existing()
+            .with_for_update(nowait=nowait).first()) if lock else db.get(User, user_id)
     # 某些服务会使用代理 Session；若 ORM 身份映射被污染或返回了
     # 其他实体，必须失败关闭，而不是继续解析其同名属性。
     if not isinstance(user, User):
@@ -103,13 +104,13 @@ def resolve_effective_role_code(db: Session, user_id: int) -> str:
         return ""
     if not is_active:
         return ""
-    rows = (
+    role_query = (
         db.query(Role.code, Role.status)
         .select_from(UserRole)
         .join(Role, Role.id == UserRole.role_id)
         .filter(UserRole.user_id == user_id)
-        .all()
     )
+    rows = (role_query.with_for_update(read=True, nowait=nowait) if lock else role_query).all()
     active_role_codes = {str(code) for code, status in rows if str(status) == "active"}
     legacy_role = str(user.role or "")
     if not rows:
@@ -125,15 +126,30 @@ def resolve_effective_role_code(db: Session, user_id: int) -> str:
     return ""
 
 
+def _reviewer_access_allowed(db: Session, user_id: int) -> bool:
+    """When paid entitlements are enabled, reviewer privileges follow paid terms."""
+    from app.core.config import settings
+
+    if not settings.billing_entitlement_enforcement_ready:
+        return True
+    from app.services.billing_entitlement_service import has_reviewer_entitlement
+
+    return has_reviewer_entitlement(db, user_id)
+
+
 def has_effective_role(db: Session, user_id: int, *role_codes: str) -> bool:
     """集中角色判定入口，禁止业务服务自行读取 ``User.role`` 授权。"""
+    effective = resolve_effective_role_code(db, user_id)
+    if effective == "reviewer" and "reviewer" in role_codes and not _reviewer_access_allowed(db, user_id):
+        return False
+    return effective in set(role_codes)
 
-    return resolve_effective_role_code(db, user_id) in set(role_codes)
 
-
-def is_admin_user(db: Session, user_id: int) -> bool:
+def is_admin_user(db: Session, user_id: int, *, lock: bool = False, nowait: bool = False) -> bool:
     """集中判断用户是否为管理员；两套持久化表示冲突时拒绝授权。"""
 
+    if lock:
+        return resolve_effective_role_code(db, user_id, lock=True, nowait=nowait) in _ADMIN_ROLE_CODES
     return has_effective_role(db, user_id, *_ADMIN_ROLE_CODES)
 
 
@@ -182,9 +198,20 @@ def assign_roles_to_user(
         raise ForbiddenError("超级管理员只能是 admin", code=40322)
     if any(role.code not in ASSIGNABLE_ROLE_CODES for role in roles):
         raise BadRequestError("仅允许分配普通用户、审查员或管理员", code=40000)
+    if any(role.code == "reviewer" for role in roles) and not _reviewer_access_allowed(db, user_id):
+        raise ForbiddenError("需要有效审查员权益，才能使用审查员角色", code=40324)
     if actor is not None and not is_admin_user(db, actor.id):
         raise ForbiddenError("需要管理员权限", code=40300)
 
+    if target.role == "admin" and not any(role.code == "admin" for role in roles):
+        from app.services.billing_c4_reviewer_service import revoke_for_user
+        from app.services.billing_rate_reviewer_service import revoke_for_user as rate_revoke_for_user
+        from app.services.billing_refund_reviewer_service import revoke_for_user as refund_revoke_for_user
+
+        revoke_for_user(db, target, actor_id=actor.id if actor else None, reason="平台角色降级，撤销 C4 委任")
+        rate_revoke_for_user(db, target, actor_id=actor.id if actor else None, reason="平台角色降级，撤销费率复核委任")
+        refund_revoke_for_user(db, target, actor_id=actor.id if actor else None,
+                               reason="平台角色降级，撤销退款复核委任")
     db.query(UserRole).filter(UserRole.user_id == user_id).delete()
     for rid in role_ids:
         db.add(UserRole(user_id=user_id, role_id=rid))
@@ -248,6 +275,8 @@ def get_user_permissions(db: Session, user_id: int) -> Set[str]:
     effective_role = resolve_effective_role_code(db, user_id)
     if not effective_role:
         return set()
+    if effective_role == "reviewer" and not _reviewer_access_allowed(db, user_id):
+        return set()
     rows = (
         db.query(Permission.code)
         .join(RolePermission, RolePermission.permission_id == Permission.id)
@@ -307,6 +336,8 @@ def get_user_data_scope(db: Session, user_id: int) -> DataScope:
     """
     effective_role = resolve_effective_role_code(db, user_id)
     if not effective_role:
+        return DataScope(scope_type=_DEFAULT_SCOPE_TYPE, project_ids=None)
+    if effective_role == "reviewer" and not _reviewer_access_allowed(db, user_id):
         return DataScope(scope_type=_DEFAULT_SCOPE_TYPE, project_ids=None)
     scopes = (
         db.query(DataScope)
@@ -575,6 +606,128 @@ def check_permission(db: Session, user_id: int, permission_code: str) -> bool:
 
     perm_codes = get_user_permissions(db, user_id)
     return permission_code in perm_codes
+
+
+def check_permission_grant(db: Session, user_id: int, permission_code: str, *, nowait: bool = False) -> bool:
+    """Check the live RBAC grant without applying paid-role entitlement gates.
+
+    This is only for finalizing already-authorized, already-metered work after a
+    subscription expires. It must not be used to authorize new execution or a
+    new provider request. Current reads lock the account, role binding, and
+    role-permission grant so a MySQL REPEATABLE READ snapshot cannot preserve a
+    revoked grant through report finalization.
+    """
+    user = (
+        db.query(User)
+        .populate_existing()
+        .filter(User.id == int(user_id), User.status == 1)
+        .with_for_update(nowait=nowait)
+        .first()
+    )
+    if user is None:
+        return False
+
+    role_rows = (
+        db.query(Role.id, Role.code, Role.status)
+        .select_from(UserRole)
+        .join(Role, Role.id == UserRole.role_id)
+        .filter(UserRole.user_id == int(user_id))
+        # Multiple accounts can use the same fixed role concurrently. A
+        # current shared read still serializes role or binding revocation with
+        # this transaction, without taking an exclusive lock on the shared
+        # role row for every protected write.
+        .with_for_update(read=True, nowait=nowait)
+        .all()
+    )
+    active_rows = [(int(role_id), str(code)) for role_id, code, status in role_rows if str(status) == "active"]
+    active_role_codes = {code for _role_id, code in active_rows}
+    legacy_role = str(user.role or "")
+    if role_rows:
+        effective_role = (
+            legacy_role
+            if active_role_codes == {legacy_role} and legacy_role in _EFFECTIVE_ROLE_CODES
+            else ""
+        )
+    else:
+        effective_role = legacy_role if legacy_role in _EFFECTIVE_ROLE_CODES else ""
+    if not effective_role:
+        return False
+
+    if permission_code.startswith(SERVER_OPS_PERMISSION_PREFIX):
+        return (
+            effective_role == SUPER_ADMIN_ROLE
+            and user.username == SUPER_ADMIN_USERNAME
+            and any(code == SUPER_ADMIN_ROLE for _role_id, code in active_rows)
+        )
+    if effective_role in _ADMIN_ROLE_CODES:
+        return True
+    role_ids = [role_id for role_id, code in active_rows if code == effective_role]
+    if not role_ids:
+        return False
+    return (
+        db.query(Permission.id)
+        .join(RolePermission, RolePermission.permission_id == Permission.id)
+        .filter(
+            RolePermission.role_id.in_(role_ids),
+            Permission.code == permission_code,
+        )
+        .with_for_update(read=True, nowait=nowait)
+        .first()
+        is not None
+    )
+
+
+def check_paid_permission_fenced(db: Session, user_id: int, permission_code: str, *,
+                                 expected_token_version: int | None = None,
+                                 locked_reviewer_evidence: list | None = None,
+                                 nowait: bool = False) -> bool:
+    """Fence a short approval write against refund and reviewer-role changes.
+
+    The caller must retain this transaction through its write and must not
+    acquire payment/order/wallet locks after the user/RBAC lock: refund
+    transactions take those locks before synchronizing the user role. Current
+    entitlement evidence is locked first in the same transaction, so no second
+    database connection is needed while holding the user lock. A caller that
+    supplies ``locked_reviewer_evidence`` receives one item only on success:
+    the locked reviewer evidence, or None when it is not required. It remains
+    valid only while the same transaction holds all of those locks; callers
+    may re-evaluate its time window without re-acquiring locks in reverse order.
+    """
+    if not check_permission(db, user_id, permission_code):
+        return False
+    from app.core.config import settings
+
+    actor_before_lock = db.get(User, user_id)
+    entitlement_evidence = None
+    if (settings.billing_entitlement_enforcement_ready and actor_before_lock is not None
+            and actor_before_lock.role == "reviewer"):
+        from app.services.billing_entitlement_service import lock_reviewer_entitlement_evidence
+
+        entitlement_evidence = (lock_reviewer_entitlement_evidence(db, user_id, nowait=True)
+                                if nowait else lock_reviewer_entitlement_evidence(db, user_id))
+    if not (check_permission_grant(db, user_id, permission_code, nowait=True)
+            if nowait else check_permission_grant(db, user_id, permission_code)):
+        return False
+    actor = db.get(User, user_id)
+    if actor is None or actor.status != 1:
+        return False
+    if expected_token_version is not None and (
+        type(expected_token_version) is not int or int(actor.token_version or 0) != expected_token_version
+    ):
+        return False
+    if actor.role != "reviewer" or not settings.billing_entitlement_enforcement_ready:
+        if locked_reviewer_evidence is not None:
+            locked_reviewer_evidence.append(None)
+        return True
+    if entitlement_evidence is None:
+        # A role promoted after the request's original snapshot may retry.
+        return False
+    from app.services.billing_entitlement_service import reviewer_entitlement_evidence_is_valid
+
+    valid = reviewer_entitlement_evidence_is_valid(entitlement_evidence)
+    if valid and locked_reviewer_evidence is not None:
+        locked_reviewer_evidence.append(entitlement_evidence)
+    return valid
 
 
 def check_data_scope(db: Session, user_id: int, target_user_id: int) -> bool:

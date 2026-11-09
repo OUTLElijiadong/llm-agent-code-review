@@ -151,17 +151,110 @@ describe('useFloatingChatPosition', () => {
     expect(down.preventDefault).toHaveBeenCalledOnce()
     expect(wrapper.attributes('style')).toContain('height: 636px')
 
+    setViewport(520, 560)
+    window.dispatchEvent(new Event('resize'))
+    await nextTick()
+    expect(wrapper.attributes('style') ?? '').not.toContain('width:')
+    expect(wrapper.attributes('style') ?? '').not.toContain('left:')
+    expect(JSON.parse(localStorage.getItem('prism-floating-chat-position:keyboard')!).width).toBe(700)
     setViewport(521, 560)
     window.dispatchEvent(new Event('resize'))
     await nextTick()
     expect(wrapper.attributes('style')).toContain('width: 497px')
     expect(wrapper.attributes('style')).toContain('height: 536px')
-    setViewport(521, 480)
+    setViewport(761, 480)
     window.dispatchEvent(new Event('resize'))
     await nextTick()
     expect(wrapper.attributes('style') ?? '').not.toContain('left:')
     expect(wrapper.attributes('style') ?? '').not.toContain('top:')
     expect(wrapper.attributes('style') ?? '').not.toContain('width:')
+    wrapper.unmount()
+  })
+
+  it('默认 520px 断点下，600px 桌面视口仍允许拖动窗口', async () => {
+    setViewport(600, 800)
+    localStorage.setItem('prism-floating-chat-position:desktop-600', JSON.stringify({
+      left: 40, top: 40, width: 400, height: 620,
+    }))
+    const Component = defineComponent({
+      setup() { return useFloatingChatPosition('desktop-600') },
+      template: '<div ref="panelRef" :style="style" />',
+    })
+    const wrapper = mount(Component)
+    Object.defineProperty(wrapper.element, 'offsetWidth', { configurable: true, value: 400 })
+    Object.defineProperty(wrapper.element, 'offsetHeight', { configurable: true, value: 620 })
+    wrapper.vm.restoreOrAnchor()
+    await nextTick()
+
+    wrapper.vm.beginDrag({
+      button: 0, clientX: 100, clientY: 100, pointerId: 1,
+      currentTarget: document.createElement('button'), preventDefault: vi.fn(),
+    } as unknown as PointerEvent)
+    expect(wrapper.vm.dragging).toBe(true)
+    wrapper.vm.moveDrag({ clientX: 120, clientY: 130, pointerId: 1 } as PointerEvent)
+    await nextTick()
+    expect(wrapper.attributes('style')).toContain('left: 60px')
+    expect(wrapper.attributes('style')).toContain('top: 70px')
+    wrapper.unmount()
+  })
+
+  it('键盘方向键可移动窗口，Shift 加速并持久化到视口边界', async () => {
+    localStorage.setItem('prism-floating-chat-position:move-keyboard', JSON.stringify({
+      left: 40, top: 40, width: 400, height: 620,
+    }))
+    const Component = defineComponent({
+      setup() { return useFloatingChatPosition('move-keyboard') },
+      template: '<div ref="panelRef" :style="style" />',
+    })
+    const wrapper = mount(Component)
+    Object.defineProperty(wrapper.element, 'offsetWidth', { configurable: true, value: 400 })
+    Object.defineProperty(wrapper.element, 'offsetHeight', { configurable: true, value: 620 })
+    wrapper.vm.restoreOrAnchor()
+    await nextTick()
+
+    const move = { key: 'ArrowRight', shiftKey: true, preventDefault: vi.fn() } as unknown as KeyboardEvent
+    wrapper.vm.moveByKeyboard(move)
+    await nextTick()
+    expect(move.preventDefault).toHaveBeenCalledOnce()
+    expect(wrapper.attributes('style')).toContain('left: 104px')
+    expect(JSON.parse(localStorage.getItem('prism-floating-chat-position:move-keyboard')!).left).toBe(104)
+
+    setViewport(520, 700)
+    window.dispatchEvent(new Event('resize'))
+    await nextTick()
+    const ignored = { key: 'ArrowLeft', preventDefault: vi.fn() } as unknown as KeyboardEvent
+    wrapper.vm.moveByKeyboard(ignored)
+    expect(ignored.preventDefault).not.toHaveBeenCalled()
+    expect(wrapper.attributes('style') ?? '').not.toContain('left:')
+    wrapper.unmount()
+  })
+
+  it('企业群聊在 760px 及以下切换全屏，恢复到 761px 后还原桌面尺寸', async () => {
+    localStorage.setItem('prism-floating-chat-position:enterprise-breakpoint', JSON.stringify({
+      left: 400, top: 40, width: 600, height: 620,
+    }))
+    const Component = defineComponent({
+      setup() { return useFloatingChatPosition('enterprise-breakpoint', 760) },
+      template: '<div ref="panelRef" :style="style" />',
+    })
+    const wrapper = mount(Component)
+    Object.defineProperty(wrapper.element, 'offsetWidth', { configurable: true, value: 400 })
+    Object.defineProperty(wrapper.element, 'offsetHeight', { configurable: true, value: 620 })
+    wrapper.vm.restoreOrAnchor()
+    await nextTick()
+    expect(wrapper.attributes('style')).toContain('width: 600px')
+
+    setViewport(760, 800)
+    window.dispatchEvent(new Event('resize'))
+    await nextTick()
+    expect(wrapper.attributes('style') ?? '').not.toContain('width:')
+    expect(JSON.parse(localStorage.getItem('prism-floating-chat-position:enterprise-breakpoint')!).width).toBe(600)
+
+    setViewport(761, 800)
+    window.dispatchEvent(new Event('resize'))
+    await nextTick()
+    expect(wrapper.attributes('style')).toContain('width: 600px')
+    expect(wrapper.attributes('style')).toContain('left: 149px')
     wrapper.unmount()
   })
 

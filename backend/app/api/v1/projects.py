@@ -9,11 +9,13 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Header, Query, Request, UploadFile, status
 from fastapi.responses import Response
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from app.core.exceptions import ConflictError
 from app.core.observability import observe_event
 from app.core.permission_codes import PermissionCode
 from app.core.rbac_dependency import require_permission
@@ -100,10 +102,31 @@ def import_remote_project(
         "project_remote_import_legacy_sync_called",
         labels={"role": str(user.role or "unknown"), "surface": "api"},
     )
+    # Download does not hold database locks. Once it has completed, fence the
+    # original authenticated actor and import grant until the atomic write.
+    from app.api.v1.code_files import _authorize_folder_actor, _FolderCommitGuard, _snapshot_folder_actor
+
+    actor = _snapshot_folder_actor(user)
+
+    def authorize_write():
+        try:
+            authorization = _authorize_folder_actor(
+                db, actor, permission_code=PermissionCode.PROJECT_IMPORT, nowait=True,
+            )
+        except OperationalError as exc:
+            args = getattr(exc.orig, "args", ())
+            if db.get_bind().dialect.name == "mysql" and args and args[0] in (1205, 1213, 3572):
+                raise ConflictError(
+                    "导入权限正在变化，请稍后重试", code=40901, retryable=True,
+                ) from exc
+            raise
+        return _FolderCommitGuard(db, actor, authorization).before_commit
+
     data = project_source_service.import_remote_project(
         db, user, url=payload.url, project_name=payload.project_name,
         description=payload.description or "", language=payload.language,
         audit_mode=payload.audit_mode,
+        authorize_before_write=authorize_write,
     )
     return Resp(data=data)
 
@@ -268,9 +291,16 @@ def upload_audit_source_archive(
     user: User = Depends(get_current_user),
 ):
     """上传待审计源码归档；命中恶意规则时保留隔离证据。"""
+    # Reuse the same transaction-bound upload fence as directory uploads:
+    # scanning an archive can outlive the original JWT or reviewer entitlement.
+    from app.api.v1.code_files import _authorize_folder_actor, _FolderCommitGuard, _snapshot_folder_actor
+
+    actor = _snapshot_folder_actor(user)
+    authorization = _authorize_folder_actor(db, actor)
+    guard = _FolderCommitGuard(db, actor, authorization)
     data = project_source_service.ingest_source_archive_bytes(
         db,
-        user,
+        authorization.user,
         project_id,
         raw=read_limited(
             file.file,
@@ -278,6 +308,7 @@ def upload_audit_source_archive(
             filename=file.filename or "",
         ),
         filename=file.filename or "",
+        before_commit=guard.before_commit,
     )
     return Resp(data=data)
 

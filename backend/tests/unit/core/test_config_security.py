@@ -27,6 +27,13 @@ def test_unattended_skill_triggers_are_disabled_by_default():
     assert configured.skill_event_trigger_enabled is False
 
 
+def test_unmetered_external_provider_calls_are_disabled_by_default():
+    """未知或第三方成本在进入账本前不得因旧兼容模式默认发生。"""
+    configured = Settings(_env_file=None)
+
+    assert configured.billing_allow_unmetered_external_calls is False
+
+
 @pytest.mark.parametrize(
     "overrides",
     [

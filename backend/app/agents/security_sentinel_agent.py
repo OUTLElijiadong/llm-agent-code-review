@@ -17,7 +17,7 @@ import json as json_lib
 import re
 import time
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Iterator, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Iterator, List, Optional, Tuple
 
 from loguru import logger
 from sqlalchemy.orm import Session, sessionmaker
@@ -128,6 +128,24 @@ class _SemanticAuditBudget:
             return False
         self.request_count += 1
         return True
+
+
+def _semantic_request_limit(ctx: Optional[AgentContext]) -> int:
+    """Cap project scan requests by both the scanner limit and trusted team plan."""
+    configured = max(0, int(settings.security_semantic_max_requests))
+    extra = (ctx.extra or {}) if ctx is not None else {}
+    team = extra.get("enterprise_agent_team")
+    if not isinstance(team, dict):
+        return configured
+    team_limit = team.get("max_calls_per_task")
+    if type(team_limit) is not int or team_limit < 0:
+        return 0
+    return min(configured, team_limit)
+
+
+def _enterprise_archive_persistence_enabled(ctx: Optional[AgentContext]) -> bool:
+    extra = (ctx.extra or {}) if ctx is not None else {}
+    return not isinstance(extra.get("enterprise_agent_team"), dict)
 
 
 @dataclass
@@ -793,11 +811,24 @@ class SecuritySentinelAgent(BaseAgent):
             )
 
         t0 = time.time()
-        audit_run_id = project_source_service.begin_source_archive_audit(
-            self._db,
-            project_id,
+        archive_persistence_enabled = _enterprise_archive_persistence_enabled(ctx)
+        audit_run_id = (
+            project_source_service.begin_source_archive_audit(self._db, project_id)
+            if archive_persistence_enabled
+            else ""
         )
         archive_audit_active = bool(audit_run_id)
+
+        def finish_archive_audit(status: str, result_data: dict[str, Any]) -> bool:
+            if not archive_audit_active:
+                return True
+            return project_source_service.finish_source_archive_audit(
+                self._db,
+                project_id,
+                status,
+                result_data,
+                audit_run_id=audit_run_id,
+            )
         if audit_run_id and audit_state is not None:
             audit_state["audit_run_id"] = audit_run_id
         files = project_source_service.load_project_source_files(
@@ -836,14 +867,7 @@ class SecuritySentinelAgent(BaseAgent):
                 AgentEventType.FAILED, ctx, message=error,
                 payload={"phase": "input_validation", **result_data},
             )
-            if archive_audit_active:
-                project_source_service.finish_source_archive_audit(
-                    self._db,
-                    project_id,
-                    "failed",
-                    result_data,
-                    audit_run_id=audit_run_id,
-                )
+            finish_archive_audit("failed", result_data)
             return AgentResult(
                 success=False, error=error, data=result_data, model=self._model,
                 duration_ms=duration_ms, failure_kind="empty_scan_input",
@@ -979,7 +1003,7 @@ class SecuritySentinelAgent(BaseAgent):
         semantic_invalid_item_count = 0
         semantic_invalid_item_kinds: dict[str, int] = {}
         semantic_budget = _SemanticAuditBudget(
-            max_requests=settings.security_semantic_max_requests,
+            max_requests=_semantic_request_limit(ctx),
             deadline=time.monotonic() + settings.security_semantic_timeout_seconds,
         )
         audit_batches = self._project_audit_batches(
@@ -1210,7 +1234,15 @@ class SecuritySentinelAgent(BaseAgent):
         }
         if self._verify_enabled:
             try:
-                verification = self._adversarial_verify(all_findings, ctx=ctx)
+                verification_request_limit = max(
+                    0,
+                    _semantic_request_limit(ctx) - semantic_budget.request_count,
+                )
+                verification = self._adversarial_verify(
+                    all_findings,
+                    ctx=ctx,
+                    max_requests=verification_request_limit,
+                )
                 verification["enabled"] = True
                 self._emit(
                     AgentEventType.PROGRESS, ctx,
@@ -1313,9 +1345,10 @@ class SecuritySentinelAgent(BaseAgent):
             "semantic_accounting_complete": semantic_accounting_complete,
             "semantic_request_accounting_complete": semantic_request_accounting_complete,
             "audit_request_count": audit_request_count,
+            "provider_request_count": semantic_budget.request_count + int(verification.get("model_calls") or 0),
             "semantic_request_headroom": max(
                 0,
-                settings.security_semantic_max_requests - semantic_budget.request_count,
+                semantic_budget.max_requests - semantic_budget.request_count,
             ),
             "dataflow_request_count": dataflow_request_count,
             "dataflow_scope": (
@@ -1324,7 +1357,7 @@ class SecuritySentinelAgent(BaseAgent):
                 else "bounded_semantic_results_and_static_endpoints"
             ),
             "audit_request_accounting_complete": audit_request_accounting_complete,
-            "semantic_request_budget": settings.security_semantic_max_requests,
+            "semantic_request_budget": semantic_budget.max_requests,
             "semantic_timeout_seconds": settings.security_semantic_timeout_seconds,
             "semantic_bounded_total_chars": (
                 None
@@ -1449,9 +1482,7 @@ class SecuritySentinelAgent(BaseAgent):
                 payload={"phase": "capacity", "failure_kind": "audit_capacity_exceeded",
                          "gaps": capacity_gaps},
             )
-            project_source_service.finish_source_archive_audit(
-                self._db, project_id, "failed", result_data, audit_run_id=audit_run_id,
-            )
+            finish_archive_audit("failed", result_data)
             return AgentResult(
                 success=False, data=result_data, error=error,
                 model=self._model, duration_ms=duration_ms,
@@ -1499,13 +1530,7 @@ class SecuritySentinelAgent(BaseAgent):
                 semantic_output_limited_leaf_count,
                 semantic_budget_exhausted_leaf_count,
             ))
-            project_source_service.finish_source_archive_audit(
-                self._db,
-                project_id,
-                "blocked" if blocked else "failed",
-                result_data,
-                audit_run_id=audit_run_id,
-            )
+            finish_archive_audit("blocked" if blocked else "failed", result_data)
             return AgentResult(
                 success=False,
                 data=result_data,
@@ -1529,12 +1554,9 @@ class SecuritySentinelAgent(BaseAgent):
                     "failure_kind": dataflow_failure_kind or "dataflow_analysis_failed",
                 },
             )
-            project_source_service.finish_source_archive_audit(
-                self._db,
-                project_id,
+            finish_archive_audit(
                 "blocked" if dataflow_failure_kind == "semantic_budget_exhausted" else "failed",
                 result_data,
-                audit_run_id=audit_run_id,
             )
             return AgentResult(
                 success=False,
@@ -1555,9 +1577,7 @@ class SecuritySentinelAgent(BaseAgent):
                 AgentEventType.FAILED, ctx, message=error,
                 payload={"phase": "adversarial_verify", **verification},
             )
-            project_source_service.finish_source_archive_audit(
-                self._db, project_id, "failed", result_data, audit_run_id=audit_run_id,
-            )
+            finish_archive_audit("failed", result_data)
             return AgentResult(
                 success=False, data=result_data, error=error,
                 model=self._model, duration_ms=duration_ms,
@@ -1576,13 +1596,7 @@ class SecuritySentinelAgent(BaseAgent):
                     "budget_request_count": semantic_budget.request_count,
                 },
             )
-            project_source_service.finish_source_archive_audit(
-                self._db,
-                project_id,
-                "blocked",
-                result_data,
-                audit_run_id=audit_run_id,
-            )
+            finish_archive_audit("blocked", result_data)
             return AgentResult(
                 success=False,
                 data=result_data,
@@ -1592,13 +1606,7 @@ class SecuritySentinelAgent(BaseAgent):
                 failure_kind="semantic_budget_accounting_failed",
             )
 
-        if archive_audit_active and not project_source_service.finish_source_archive_audit(
-            self._db,
-            project_id,
-            "succeeded",
-            result_data,
-            audit_run_id=audit_run_id,
-        ):
+        if not finish_archive_audit("succeeded", result_data):
             error = "当前源码审计已被新一代运行接管,结果未持久化"
             self._emit(
                 AgentEventType.FAILED,
@@ -3664,7 +3672,8 @@ class SecuritySentinelAgent(BaseAgent):
 
     def _adversarial_verify(self, findings: List[dict],
                             ctx: Optional[AgentContext],
-                            max_review: int = 12) -> dict:
+                            max_review: int = 12,
+                            max_requests: Optional[int] = None) -> dict:
         """分批复核全部高危；原始证据不裁剪，未复核项不能算完整。"""
         high = [f for f in findings
                 if isinstance(f, dict) and f.get("severity") in {"严重", "高"}]
@@ -3683,6 +3692,11 @@ class SecuritySentinelAgent(BaseAgent):
             progress["note"] = "无高危 finding 需复检"
             return progress
 
+        request_limit = (
+            max(0, int(settings.security_semantic_max_requests))
+            if max_requests is None
+            else max(0, int(max_requests))
+        )
         pending = [high[start:start + max(1, max_review)]
                    for start in range(0, len(high), max(1, max_review))]
         deadline = time.monotonic() + settings.security_semantic_timeout_seconds
@@ -3709,7 +3723,7 @@ class SecuritySentinelAgent(BaseAgent):
             if exceeds:
                 failure_kind = "input_exceeds_context"
                 result = None
-            elif (progress["model_calls"] >= settings.security_semantic_max_requests
+            elif (progress["model_calls"] >= request_limit
                   or time.monotonic() >= deadline):
                 progress["failure_kind"] = "semantic_budget_exhausted"
                 return progress

@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.agents.contracts import CONTRACTS, PROTECTED_AGENT_CODES
 from app.agents.tool_contracts import FixedToolArgumentError, is_fixed_tool, validate_fixed_tool_arguments
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationError
+from app.core.permission_codes import PermissionCode
 from app.models.agent_governance import AgentProfile, ApprovalItem
 from app.models.custom_agent import (
     CustomAgent,
@@ -24,7 +25,7 @@ from app.models.custom_agent import (
     ReviewTaskAgentRelease,
 )
 from app.models.user import User
-from app.services import audit_service
+from app.services import audit_service, rbac_service
 from app.services.rbac_service import has_effective_role, is_admin_user
 
 SKILL_TYPES = {"llm_transform", "readonly_tool", "agent_delegate", "sequence_workflow"}
@@ -96,6 +97,20 @@ def _assert_reviewer(db: Session, user: User) -> None:
     if _is_admin(db, user) or has_effective_role(db, user.id, "reviewer"):
         return
     raise ForbiddenError("仅审查员或管理员可使用 Agent 工坊", code=40300)
+
+
+def _fence_studio_write(db: Session, actor: User, permission: str) -> None:
+    """Hold current actor/RBAC authority until the Studio mutation commits.
+
+    This must run before asset/version locks. Refunds lock billing rows before
+    synchronizing the actor, so this transaction must not take billing locks.
+    """
+    if not rbac_service.check_paid_permission_fenced(
+        db, int(actor.id), permission,
+        expected_token_version=getattr(actor, "_authenticated_token_version", None),
+    ):
+        raise ForbiddenError("工坊权限或审查员权益已变化，请刷新后重试", code=40300)
+    _assert_reviewer(db, actor)
 
 
 def _assert_owner(db: Session, owner_id: int, user: User) -> None:
@@ -195,7 +210,7 @@ def create_agent(
     review_focus: str,
     model_config: dict,
 ) -> tuple[CustomAgent, CustomAgentVersion]:
-    _assert_reviewer(db, actor)
+    _fence_studio_write(db, actor, PermissionCode.AGENT_ASSET_CREATE)
     model_config = _normalize_model_config(model_config)
     _ensure_code_available(code)
     if db.query(CustomAgent).filter(CustomAgent.code == code).first():
@@ -234,6 +249,7 @@ def revise_agent(
     model_config: dict,
     note: str = "",
 ) -> CustomAgentVersion:
+    _fence_studio_write(db, actor, PermissionCode.AGENT_ASSET_UPDATE_OWN)
     asset = db.get(CustomAgent, agent_id)
     if not asset:
         raise NotFoundError("Agent 不存在", code=40400)
@@ -288,7 +304,7 @@ def create_skill(
     definition: dict,
     requested_capabilities: list[str],
 ) -> tuple[CustomSkill, CustomSkillVersion]:
-    _assert_reviewer(db, actor)
+    _fence_studio_write(db, actor, PermissionCode.SKILL_ASSET_CREATE)
     if db.query(CustomSkill).filter(CustomSkill.code == code).first():
         raise ConflictError("Skill 编码已存在", code=40901)
     _validate_skill_definition(db, skill_type, definition, requested_capabilities)
@@ -324,6 +340,7 @@ def revise_skill(
     requested_capabilities: list[str],
     note: str = "",
 ) -> CustomSkillVersion:
+    _fence_studio_write(db, actor, PermissionCode.SKILL_ASSET_UPDATE_OWN)
     asset = db.get(CustomSkill, skill_id)
     if not asset:
         raise NotFoundError("Skill 不存在", code=40400)
@@ -403,6 +420,7 @@ def bind_skill(
     position: int,
     config: dict,
 ) -> CustomAgentSkillBinding:
+    _fence_studio_write(db, actor, PermissionCode.AGENT_ASSET_UPDATE_OWN)
     version = db.get(CustomAgentVersion, agent_version_id)
     skill_version = db.get(CustomSkillVersion, skill_version_id)
     if not version or not skill_version:
@@ -440,6 +458,7 @@ def bind_skill(
 
 
 def unbind_skill(db: Session, actor: User, binding_id: int) -> None:
+    _fence_studio_write(db, actor, PermissionCode.AGENT_ASSET_UPDATE_OWN)
     row = db.get(CustomAgentSkillBinding, binding_id)
     if not row:
         raise NotFoundError("Skill 绑定不存在", code=40400)
@@ -529,6 +548,7 @@ def test_agent_version(
     agent_version_id: int,
     sample_output: Optional[dict] = None,
 ) -> CustomAgentVersion:
+    _fence_studio_write(db, actor, PermissionCode.AGENT_ASSET_TEST)
     version = db.get(CustomAgentVersion, agent_version_id)
     if not version:
         raise NotFoundError("Agent 版本不存在", code=40400)
@@ -567,6 +587,7 @@ def test_agent_version(
 
 
 def submit_agent_version(db: Session, actor: User, agent_version_id: int, note: str = "") -> ApprovalItem:
+    _fence_studio_write(db, actor, PermissionCode.AGENT_ASSET_SUBMIT)
     version = db.query(CustomAgentVersion).filter(CustomAgentVersion.id == agent_version_id).with_for_update().first()
     if not version:
         raise NotFoundError("Agent 版本不存在", code=40400)
@@ -631,6 +652,7 @@ def submit_agent_version(db: Session, actor: User, agent_version_id: int, note: 
 
 
 def withdraw_agent_version(db: Session, actor: User, agent_version_id: int, note: str = "") -> CustomAgentVersion:
+    _fence_studio_write(db, actor, PermissionCode.AGENT_ASSET_SUBMIT)
     version = db.query(CustomAgentVersion).filter(CustomAgentVersion.id == agent_version_id).with_for_update().first()
     if not version:
         raise NotFoundError("Agent 版本不存在", code=40400)

@@ -22,6 +22,8 @@ from app.models.code_file import CodeFile
 from app.models.review_task import ReviewTask
 from app.services.ai_usage_context import UsageAccountingError, current_attribution, model_attribution, usage_context
 
+pytestmark = pytest.mark.usefixtures("mark_fake_model_credentials_as_user")
+
 
 @pytest.fixture
 def ledger_db(tmp_path):
@@ -421,7 +423,9 @@ def test_real_request_orchestrator_binds_plain_language_and_folder_models(ledger
     monkeypatch.setattr(
         module,
         "resolve_api_config",
-        lambda *_a: ApiConfig(api_key="unit", base_url="https://unit.example/v1", model="unit", max_retries=0),
+        lambda *_a: ApiConfig(
+            api_key="unit", base_url="https://unit.example/v1", model="unit", max_retries=0, source="user",
+        ),
     )
     orch = module.get_request_orchestrator(db, user=user)
     assert current_attribution(7) == {}

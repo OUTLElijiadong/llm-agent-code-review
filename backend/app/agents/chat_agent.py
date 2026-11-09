@@ -2062,6 +2062,8 @@ class ChatAssistantAgent(BaseAgent):
         import httpx
 
         from app.services.ai_usage_context import record_usage_attempt, usage_tokens
+        from app.services.billing_ledger_service import BillingError
+        from app.services.billing_runtime_gate import metered_response_request
 
         last_error = None
         last_failure_kind = "upstream_error"
@@ -2080,24 +2082,34 @@ class ChatAssistantAgent(BaseAgent):
             retry_planned = attempt < self._max_retries
             try:
                 target = pin_public_http_url(f"{self._base_url}/chat/completions")
-                with httpx.Client(timeout=self._timeout, trust_env=False) as client:
-                    request_sent = True
-                    http_attempts += 1
-                    resp = client.post(
-                        target.request_url,
-                        headers={
-                            "Authorization": f"Bearer {self._api_key}",
-                            "Content-Type": "application/json",
-                            "Host": target.host_header,
-                        },
-                        json={
-                            "model": self._model,
-                            "messages": messages_for_api,
-                            "temperature": self._temperature,
-                            "max_tokens": response_budget,
-                        },
-                        extensions=target.request_extensions,
-                    )
+                payload = {"model": self._model, "messages": messages_for_api,
+                           "temperature": self._temperature, "max_tokens": response_budget}
+
+                def send_request():
+                    nonlocal request_sent, http_attempts
+                    with httpx.Client(timeout=self._timeout, trust_env=False) as client:
+                        request_sent = True
+                        http_attempts += 1
+                        response = client.post(
+                            target.request_url,
+                            headers={
+                                "Authorization": f"Bearer {self._api_key}",
+                                "Content-Type": "application/json",
+                                "Host": target.host_header,
+                            },
+                            json=payload,
+                            extensions=target.request_extensions,
+                        )
+                    return response, int((time.time() - t0) * 1000)
+
+                resp, _ = metered_response_request(
+                    model_name=self._model,
+                    payload=payload,
+                    send=send_request,
+                    provider_name=getattr(self, "_billing_provider", "deepseek"),
+                    base_url=self._base_url,
+                    credential_source=getattr(self, "_billing_credential_source", "system"),
+                )
                 duration_ms = int((time.time() - t0) * 1000)
                 try:
                     raw_body = resp.json()
@@ -2162,6 +2174,10 @@ class ChatAssistantAgent(BaseAgent):
                     last_error = f"调用失败({resp.status_code})"
                     last_failure_kind = "http_error"
                     retry_planned = False
+            except BillingError as e:
+                last_error = str(e)
+                last_failure_kind = "billing_error"
+                retry_planned = False
             except Exception as e:
                 last_error = str(e)
                 last_failure_kind = "transport_error"

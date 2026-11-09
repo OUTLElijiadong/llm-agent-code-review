@@ -13,15 +13,18 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
 from app.core.pagination import Pagination
+from app.core.permission_codes import PermissionCode
 from app.models.project import Project
 from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
 from app.models.user import User
+from app.services.operation_write_fence import require_live_operation_permission, retryable_project_write
 from app.services.project_member_service import (
     get_visible_project_ids,
     project_resource_capabilities,
     require_project_access,
 )
+from app.services.review_write_authority import lock_issue_for_write
 
 
 def get_issue(db: Session, user: User, issue_id: int) -> ReviewIssue:
@@ -53,7 +56,9 @@ def get_issue(db: Session, user: User, issue_id: int) -> ReviewIssue:
     return issue
 
 
-def update_status(db: Session, user: User, issue_id: int, status: str) -> None:
+@retryable_project_write
+def update_status(db: Session, user: User, issue_id: int, status: str, *,
+                  permission_code: str = PermissionCode.ISSUE_HANDLE) -> None:
     """更新单个问题的处理状态(需 owner/admin 权限)
 
     Args:
@@ -66,14 +71,8 @@ def update_status(db: Session, user: User, issue_id: int, status: str) -> None:
         NotFoundError: 问题不存在或无访问权限
         ForbiddenError: 仅 owner/admin 可修改
     """
-    issue = db.get(ReviewIssue, issue_id)
-    if not issue:
-        raise NotFoundError("问题不存在", code=40400)
-    task = db.get(ReviewTask, issue.task_id)
-    if not task or task.status == "deleted":
-        raise NotFoundError("问题不存在", code=40400)
-    # v2.4: 修改问题状态视为写操作,仅 owner/admin 可执行
-    require_project_access(db, task.project_id, user, need_write=True)
+    require_live_operation_permission(db, user, permission_code)
+    issue = lock_issue_for_write(db, user, issue_id)
     issue.status = status
     issue.handled_by = user.id
     issue.handled_at = datetime.now(timezone.utc)
@@ -224,9 +223,10 @@ def batch_update_status(db: Session, user: User, ids: list[int], status: str) ->
         status: 新状态
     """
     for issue_id in ids:
-        update_status(db, user, issue_id, status)
+        update_status(db, user, issue_id, status, permission_code=PermissionCode.ISSUE_BATCH)
 
 
+@retryable_project_write
 def review_decision(
     db: Session,
     user: User,
@@ -235,13 +235,8 @@ def review_decision(
     note: str = "",
 ) -> ReviewIssue:
     """记录人工对聚合争议的裁决，保留机器原始声明。"""
-    issue = db.get(ReviewIssue, issue_id)
-    if not issue:
-        raise NotFoundError("问题不存在", code=40400)
-    task = db.get(ReviewTask, issue.task_id)
-    if not task or task.status == "deleted":
-        raise NotFoundError("问题不存在", code=40400)
-    require_project_access(db, task.project_id, user, need_write=True)
+    require_live_operation_permission(db, user, PermissionCode.ISSUE_HANDLE)
+    issue = lock_issue_for_write(db, user, issue_id)
 
     now = datetime.now(timezone.utc)
     aggregation: dict[str, Any] = dict(issue.aggregation_json or {})

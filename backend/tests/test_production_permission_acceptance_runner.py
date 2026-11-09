@@ -54,8 +54,14 @@ def test_runner_rejects_unsafe_base_url_before_output_or_network(tmp_path, url):
 def test_plan_matches_actual_routes_and_rejects_changed_source(tmp_path):
     plan = runner_module.build_plan()
     runner_module.validate_plan(plan, PATH.parents[1])
-    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 349
-    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 284
+    # 118 adds three authenticated clarification routes whose room authority is checked in service tests.
+    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 522
+    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 322
+    recover = [row for row in plan["routes"] if row["method"] == "POST" and
+               row["path"] == "/api/billing/admin/reservations/{reservation_id}/reconciliation/recover-stale"]
+    assert len(recover) == 1
+    assert recover[0]["guard"] == "app.core.dependencies.require_super_admin"
+    assert recover[0]["anonymous"] == recover[0]["no_permission"] == "ready"
     stop_route = next(
         row for row in plan["routes"]
         if row["method"] == "POST" and row["path"] == "/api/discuss/sessions/{session_id}/stop"

@@ -8,6 +8,7 @@ import hmac
 import json
 import re
 import uuid
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, List, Literal, Mapping, Optional, Sequence
 
@@ -48,6 +49,51 @@ from app.utils.input_validation import normalize_plain_text
 
 router = APIRouter()
 _BACKGROUND_RESPONSE_TASKS: set[asyncio.Task[Any]] = set()
+_BILLABLE_AGENT_ACTIONS = frozenset({"start", "approve", "reject", "answer", "retry"})
+
+
+@contextmanager
+def _trusted_response_billing_scope(session_factory, user: User, surface: str):
+    """Attribute paid Responses model attempts to the authenticated personal wallet.
+
+    Enterprise and platform surfaces intentionally fail closed here: this route has
+    no trusted enterprise/group conversation context or platform cost center.
+    """
+    if not settings.billing_commercial_metering_ready:
+        yield
+        return
+
+    from app.models.billing_ledger import BillingWallet
+    from app.services.billing_ledger_service import BillingError
+    from app.services.billing_runtime_gate import billing_scope
+
+    if surface != "user":
+        raise BillingError("当前 Agent 入口尚未配置个人钱包以外的可信计费归属")
+    if not callable(session_factory) or type(getattr(user, "id", None)) is not int or user.id <= 0:
+        raise BillingError("当前 Agent 请求缺少可验证的账号或数据库会话")
+
+    with session_factory() as billing_db:
+        wallet = billing_db.query(BillingWallet).filter_by(owner_type="user", owner_id=user.id).first()
+        wallet_id = int(wallet.id) if wallet is not None else None
+    if wallet_id is None:
+        raise BillingError("个人积分账户尚未开通，请先购买积分或会员")
+
+    with billing_scope(
+        session_factory=session_factory,
+        user_id=int(user.id),
+        personal_wallet_id=wallet_id,
+        max_input_tokens=int(settings.deepseek_context_window_tokens),
+        max_output_tokens=int(settings.deepseek_max_output_tokens),
+        allow_personal=False,
+        usage_kind="member",
+    ):
+        yield
+
+
+def _response_action_billing_scope(session_factory, user: User, surface: str, action: str):
+    if action not in _BILLABLE_AGENT_ACTIONS:
+        return nullcontext()
+    return _trusted_response_billing_scope(session_factory, user, surface)
 
 
 @router.get(
@@ -1516,6 +1562,10 @@ async def stream_agent_response(
         except agent_mesh_service.AgentMeshError as exc:
             raise ConflictError(str(exc), code=40921) from exc
     run_id = payload.run_id or f"run_{uuid.uuid4().hex}"
+    # The detached runtime gets a fresh ORM instance; preserve the version
+    # validated from this request rather than upgrading it to a newer token.
+    authenticated_version = getattr(user, "_authenticated_token_version", None)
+    authenticated_expiry = getattr(user, "_authenticated_token_expires_at", None)
 
     async def event_source() -> AsyncIterator[str]:
         queue: asyncio.Queue[Mapping[str, Any]] = asyncio.Queue(maxsize=128)
@@ -1598,6 +1648,10 @@ async def stream_agent_response(
                 )
                 run_db = run_session_factory()
                 run_user = run_db.get(User, int(user.id))
+                if run_user is not None and type(authenticated_version) is int:
+                    setattr(run_user, "_authenticated_token_version", authenticated_version)
+                if run_user is not None and type(authenticated_expiry) is int:
+                    setattr(run_user, "_authenticated_token_expires_at", authenticated_expiry)
             else:
                 # 轻量协议测试可能传入无 SQLAlchemy 能力的替身；生产路径始终
                 # 进入上面的独立 Session，避免请求断开时关闭后台任务的数据库。
@@ -1711,25 +1765,36 @@ async def stream_agent_response(
                             )
                         except Exception:  # noqa: BLE001
                             pass
-                    if payload.action == "start":
-                        with usage_context(int(run_user.id), source_attribution):
-                            start_kwargs: dict[str, Any] = {"run_id": run_id, "event_sink": sink, "on_created": publish_created}
-                            if server_history_transcript is not None:
-                                start_kwargs["server_history_transcript"] = server_history_transcript
-                            if isinstance(trusted_terminal_team_snapshot, dict):
-                                start_kwargs["trusted_terminal_team_snapshot"] = trusted_terminal_team_snapshot
-                            result = await service.start(messages, **start_kwargs)
-                    elif payload.action == "cancel":
-                        result = await service.cancel(run_id=run_id, reason=payload.cancel_reason)
-                    else:
-                        result = await service.resume(
-                            run_id=run_id,
-                            action=payload.action,
-                            call_id=payload.call_id,
-                            answer=payload.answer,
-                            confirmation=payload.confirmation,
-                            event_sink=sink,
-                        )
+                    billing_context = _response_action_billing_scope(
+                        run_session_factory if owns_run_db else None,
+                        run_user,
+                        payload.surface,
+                        payload.action,
+                    )
+                    with billing_context:
+                        if payload.action == "start":
+                            with usage_context(int(run_user.id), source_attribution):
+                                start_kwargs: dict[str, Any] = {
+                                    "run_id": run_id,
+                                    "event_sink": sink,
+                                    "on_created": publish_created,
+                                }
+                                if server_history_transcript is not None:
+                                    start_kwargs["server_history_transcript"] = server_history_transcript
+                                if isinstance(trusted_terminal_team_snapshot, dict):
+                                    start_kwargs["trusted_terminal_team_snapshot"] = trusted_terminal_team_snapshot
+                                result = await service.start(messages, **start_kwargs)
+                        elif payload.action == "cancel":
+                            result = await service.cancel(run_id=run_id, reason=payload.cancel_reason)
+                        else:
+                            result = await service.resume(
+                                run_id=run_id,
+                                action=payload.action,
+                                call_id=payload.call_id,
+                                answer=payload.answer,
+                                confirmation=payload.confirmation,
+                                event_sink=sink,
+                            )
                     if payload.action in {"start", "resume", "approve"}:
                         try:
                             from app.agents.event_bus import emit_event

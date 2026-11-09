@@ -11,6 +11,7 @@ import type { RouteMeta, Router, RouteRecordRaw } from 'vue-router'
 import type { AgentNavigateDirective } from '@/types/agentGuide'
 import { normalizeAgentText, transformOutsideCodeFences } from '@/utils/agentText'
 import { renderMarkdown } from '@/utils/markdown'
+import { getActiveWorkspaceMode } from '@/stores/workspace'
 
 const NAVIGATE_DIRECTIVE_RE = /<!--\s*PRISM_NAVIGATE\s*([\s\S]*?)\s*-->/g
 const MAX_DIRECTIVE_JSON_LENGTH = 2048
@@ -243,6 +244,7 @@ export function isRouteAllowed(resolved: {
   const meta = resolved.meta ?? {}
   if (meta.public) return true
   if (!guardSource.token) return false
+  if (meta.workspace === 'personal' && getActiveWorkspaceMode() === 'enterprise') return false
   if (meta.superAdmin && !guardSource.isSuperAdmin()) return false
   const isAdmin = guardSource.isAdmin()
   if (meta.role && !isAdmin && !guardSource.hasRole(meta.role)) return false
@@ -318,8 +320,10 @@ export function isNavigationPathAllowed(
     if (!guardSource.isSuperAdmin()) {
       if (resolved.meta?.superAdmin || redirectTarget?.meta?.superAdmin) return false
       if (pathname === '/admin/platform' && SUPER_ADMIN_PLATFORM_SECTIONS.has(query.section || '')) return false
+      if (pathname === '/admin/operations' && query.section === 'pentest-evidence') return false
       if (redirectTarget?.path === '/admin/platform'
         && SUPER_ADMIN_PLATFORM_SECTIONS.has(String(redirectTarget.query?.section || ''))) return false
+      if (redirectTarget?.path === '/admin/operations' && redirectTarget.query?.section === 'pentest-evidence') return false
     }
     if (redirectTarget) return isRouteAllowed(redirectTarget, guardSource)
     return isRouteAllowed(resolved, guardSource)

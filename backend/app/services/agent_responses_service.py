@@ -36,7 +36,6 @@ from app.agents.tool_contracts import (
     get_fixed_tool_names,
     get_fixed_tool_schema,
     is_fixed_tool,
-    validate_fixed_tool_arguments,
     validate_fixed_tool_arguments_tolerant,
 )
 from app.core.config import settings
@@ -71,6 +70,7 @@ from app.services import (
 )
 from app.services.admin_capability_registry import (
     CAPABILITY_BY_CODE,
+    PENTEST_EVIDENCE_MAIN_SESSION_CAPABILITIES,
     describe_capabilities,
     discovery_tool_schema,
     execution_tool_schema,
@@ -408,7 +408,7 @@ _SUPER_ADMIN_ONLY_CAPABILITIES = frozenset({
     "security_center.events",
     "security_center.policy.get",
     "security_center.policy.update",
-})
+}) | PENTEST_EVIDENCE_MAIN_SESSION_CAPABILITIES
 
 _USER_CAPABILITY_NAMES = {
     "update_project",
@@ -1157,6 +1157,35 @@ class NativeResponsesTransport:
         return self._stream(payload)
 
     async def _stream(self, payload: Mapping[str, Any]) -> AsyncIterator[Mapping[str, Any]]:
+        from app.services.billing_ledger_service import BillingError
+        from app.services.billing_runtime_gate import before_stream_send, begin_attempt, finish_attempt, unknown_attempt
+
+        ticket = begin_attempt(
+            model_name=payload.get("model", self._config.model), payload=dict(payload),
+            provider_name=self._config.provider, base_url=self._config.base_url,
+            credential_source=getattr(
+                self._config, "billing_credential_source", getattr(self._config, "source", "system"),
+            ),
+        )
+        try:
+            before_stream_send(ticket)
+            async for event in self._stream_without_billing(payload):
+                if ticket is not None and not ticket.get("done") and event.get("type") in {
+                    "response.completed", "response.failed", "response.incomplete", "response.cancelled",
+                }:
+                    result = event.get("response")
+                    finish_attempt(ticket, result.get("usage") if isinstance(result, Mapping) else None)
+                yield event
+            if ticket is not None and not ticket.get("done"):
+                finish_attempt(ticket, None)
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            if ticket is not None:
+                raise BillingError("模型调用结果未知，预占待对账，禁止自动重试") from exc
+            raise
+        finally:
+            unknown_attempt(ticket)
+
+    async def _stream_without_billing(self, payload: Mapping[str, Any]) -> AsyncIterator[Mapping[str, Any]]:
         url = _responses_url(self._config.base_url)
         headers = {
             "Authorization": f"Bearer {self._config.api_key}",
@@ -1531,7 +1560,8 @@ class PrismToolExecutor:
             ):
                 return await self._failed_attempt(
                     call,
-                    "小菱本人只能跳转、滚动或观察当前页面；点击、填写、勾选请创建含 agent:site_operator 成员的团队执行。",
+                    "小菱本人只能跳转、滚动或观察当前页面；"
+                    "点击、填写、勾选请创建含 agent:site_operator 成员的团队执行。",
                 )
             if not allowed:
                 return await self._failed_attempt(
@@ -3109,8 +3139,23 @@ class PrismToolExecutor:
         operation: Callable[[], Any],
         *,
         current_rejection: Optional[ToolExecutionResult] = None,
+        cached_authorizer: Optional[Callable[[], Any]] = None,
     ) -> ToolExecutionResult:
         """持久化占位后至多执行一次；不确定结果绝不自动重复副作用。"""
+        async def read_recorded(existing: AgentToolExecution) -> ToolExecutionResult:
+            if current_rejection is not None:
+                return current_rejection
+            if cached_authorizer is not None:
+                try:
+                    rejection = cached_authorizer()
+                    if inspect.isawaitable(rejection):
+                        rejection = await rejection
+                except Exception:  # noqa: BLE001 - cached protected data must fail closed
+                    return ToolExecutionResult.failure("当前会话无法重新核验该核查结果")
+                if rejection is not None:
+                    return rejection
+            return self._recorded_execution(existing)
+
         await self._emit_tool_event("response.tool.started", call)
         request_id = _request_id(self._run_id, call.call_id)
         row = self._db.query(AgentToolExecution).filter(AgentToolExecution.request_id == request_id).first()
@@ -3128,7 +3173,7 @@ class PrismToolExecutor:
                 await self._emit_tool_result(call, recorded, cached=True)
                 return recorded
             # 当前权限/参数拒绝优先于历史成功缓存，且不能覆写原执行事实。
-            recorded = current_rejection or self._recorded_execution(row)
+            recorded = await read_recorded(row)
             await self._emit_tool_result(call, recorded, cached=current_rejection is None)
             return recorded
 
@@ -3161,7 +3206,7 @@ class PrismToolExecutor:
                 )
                 await self._emit_tool_result(call, recorded, cached=True)
                 return recorded
-            recorded = current_rejection or self._recorded_execution(existing)
+            recorded = await read_recorded(existing)
             await self._emit_tool_result(call, recorded, cached=current_rejection is None)
             return recorded
 
@@ -3617,6 +3662,20 @@ class PrismToolExecutor:
             )
             return ToolExecutionResult.success(protected_output)
 
+        async def authorize_cached_evidence() -> Optional[ToolExecutionResult]:
+            # A replay must use the original authenticated JWT again and create
+            # the same mandatory audit record as a fresh evidence read.  The
+            # idempotency cache alone is not an authorization decision.
+            try:
+                await admin_capability_service.execute_api(
+                    self._user, spec, params, request_id=_request_id(self._run_id, call.call_id),
+                )
+            except admin_capability_service.AdminCapabilityError as exc:
+                return ToolExecutionResult.failure(str(exc))
+            return None
+
+        if capability in PENTEST_EVIDENCE_MAIN_SESSION_CAPABILITIES:
+            return await self._execute_once(call, execute_capability, cached_authorizer=authorize_cached_evidence)
         return await self._execute_once(call, execute_capability)
 
     async def _submit_site_capability(
@@ -5274,7 +5333,10 @@ def _bind_terminal_team_status(
 
 def _team_terminal_assertions(text: str) -> list[tuple[Optional[int], str, bool]]:
     """逐分句识别团队状态及否定；局部报告/成员/测试结果不代表团队状态。"""
-    return [(team_id, claimed, denied) for team_id, claimed, denied, _clause in _team_terminal_assertions_detailed(text)]
+    return [
+        (team_id, claimed, denied)
+        for team_id, claimed, denied, _clause in _team_terminal_assertions_detailed(text)
+    ]
 
 
 def _team_terminal_assertions_detailed(text: str) -> list[tuple[Optional[int], str, bool, str]]:

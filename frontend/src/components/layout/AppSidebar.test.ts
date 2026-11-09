@@ -9,6 +9,9 @@ const harness = vi.hoisted(() => ({
   superAdmin: false,
   authorizePermission: false,
   pending: vi.fn(),
+  activeSpace: 'personal',
+  activatePersonal: vi.fn(() => { harness.activeSpace = 'personal' }),
+  activateEnterprise: vi.fn(() => { harness.activeSpace = 'enterprise' }),
 }))
 
 vi.mock('@/api/remotePentest', () => ({ getPendingRemoteApprovalSnapshot: harness.pending }))
@@ -27,6 +30,7 @@ vi.mock('vue-router', () => ({
           ? { permissions: ['test:permission'] }
           : path.startsWith('/remote-pentests')
             ? { permissions: ['pentest:view'] }
+          : ['/forum', '/knowledge', '/usage', '/my-agents'].includes(path) ? { workspace: 'personal' }
             : {},
     }),
   }),
@@ -47,6 +51,17 @@ vi.mock('@/stores/user', () => ({
   }),
 }))
 
+vi.mock('@/stores/workspace', () => ({
+  getActiveWorkspaceMode: () => harness.activeSpace,
+  useWorkspaceStore: () => ({
+    get activeSpace() { return harness.activeSpace },
+    get activeEnterpriseId() { return null },
+    syncIdentity: vi.fn(),
+    activatePersonal: harness.activatePersonal,
+    activateEnterprise: harness.activateEnterprise,
+  }),
+}))
+
 import AppSidebar from './AppSidebar.vue'
 import { APP_BUILD_TIME_DISPLAY, APP_DISPLAY_VERSION, APP_RELEASE_SHA, APP_VERSION } from '@/constants/buildInfo'
 
@@ -59,6 +74,9 @@ describe('AppSidebar ordinary member navigation', () => {
     harness.role = 'user'
     harness.superAdmin = false
     harness.authorizePermission = false
+    harness.activeSpace = 'personal'
+    harness.activatePersonal.mockClear()
+    harness.activateEnterprise.mockClear()
     harness.pending.mockReset()
     harness.pending.mockResolvedValue({ total: 0, items: [] })
   })
@@ -105,6 +123,13 @@ describe('AppSidebar ordinary member navigation', () => {
     expect(wrapper.find('[data-route="/agents"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('Agent 工作台')
     expect(wrapper.find('[data-route="/agent-studio"]').exists()).toBe(false)
+    expect(wrapper.find('[data-route="/my-agents"]').exists()).toBe(true)
+  })
+
+  it('企业空间不显示个人 Agent 入口', () => {
+    harness.activeSpace = 'enterprise'
+    const wrapper = mountSidebar()
+    expect(wrapper.find('[data-route="/my-agents"]').exists()).toBe(false)
   })
 
   it('hides Agent Studio when the reviewer lacks its route permission', () => {
@@ -157,6 +182,25 @@ describe('AppSidebar ordinary member navigation', () => {
     await wrapper.get('[data-route="/remote-pentests"]').trigger('click')
     expect(harness.push).toHaveBeenCalledWith('/remote-pentests')
     expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('企业空间隐藏个人论坛、知识和用量入口，并提供可访问的空间切换按钮', () => {
+    harness.activeSpace = 'enterprise'
+    const wrapper = mountSidebar()
+
+    expect(wrapper.find('[data-route="/forum"]').exists()).toBe(false)
+    expect(wrapper.find('[data-route="/knowledge"]').exists()).toBe(false)
+    expect(wrapper.find('[data-route="/usage"]').exists()).toBe(false)
+    expect(wrapper.find('[data-route="/enterprise"]').exists()).toBe(true)
+    expect(wrapper.get('.workspace-switcher').attributes('aria-label')).toContain('切换到个人空间')
+  })
+
+  it('从个人空间切换到企业空间时先更新上下文，再打开企业沟通页', async () => {
+    const wrapper = mountSidebar()
+    await wrapper.get('.workspace-switcher').trigger('click')
+
+    expect(harness.activateEnterprise).toHaveBeenCalledOnce()
+    expect(harness.push).toHaveBeenCalledWith('/enterprise')
   })
 
   it('拥有 pentest:authorize 的账号看到别人提交的待审批数量角标', async () => {
@@ -225,12 +269,19 @@ describe('AppSidebar ordinary member navigation', () => {
     expect(wrapper.find('[data-route="/admin/governance"]').exists()).toBe(true)
     expect(wrapper.findAll('.nav-group-toggle').some((button) => button.text().includes('社区与支持'))).toBe(true)
     expect(wrapper.find('[data-route="/admin/security-center"]').exists()).toBe(false)
+    expect(wrapper.find('[data-route="/admin/billing-statements"]').exists()).toBe(false)
+    expect(wrapper.find('[data-route="/admin/billing-reservations"]').exists()).toBe(false)
+    expect(wrapper.find('[data-route="/admin/billing-pricing"]').exists()).toBe(false)
+    expect(wrapper.find('[data-route="/admin/billing-rate-reviews"]').exists()).toBe(true)
     wrapper.unmount()
 
     harness.role = 'super_admin'
     harness.superAdmin = true
     wrapper = mountSidebar()
     expect(wrapper.find('[data-route="/admin/security-center"]').exists()).toBe(true)
+    expect(wrapper.find('[data-route="/admin/billing-statements"]').exists()).toBe(true)
+    expect(wrapper.find('[data-route="/admin/billing-reservations"]').exists()).toBe(true)
+    expect(wrapper.find('[data-route="/admin/billing-pricing"]').exists()).toBe(true)
     wrapper.unmount()
   })
 

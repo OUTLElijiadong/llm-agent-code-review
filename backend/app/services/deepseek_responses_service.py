@@ -456,7 +456,8 @@ class DeepSeekResponsesService:
         storage: Optional[TranscriptStore] = None,
         client_factory: Optional[Callable[[], httpx.AsyncClient]] = None,
     ) -> None:
-        self._responses_url = self._resolve_responses_url(base_url or settings.deepseek_base_url)
+        self._base_url = base_url or settings.deepseek_base_url
+        self._responses_url = self._resolve_responses_url(self._base_url)
         self._timeout_seconds = float(timeout_seconds or settings.deepseek_timeout)
         self._storage = storage or build_transcript_store(settings.redis_url)
         self._pin_upstream = client_factory is None
@@ -467,7 +468,12 @@ class DeepSeekResponsesService:
         return self._responses_url
 
     async def create(self, payload: Dict[str, Any], authorization: Optional[str]) -> GatewayResponse:
+        from app.services.billing_runtime_gate import verify_priced_tools
+
         bearer, fingerprint = self._bearer_identity(authorization)
+        # The public /v1/responses relay forwards this caller-owned key upstream;
+        # its provider-side Search/Fetch usage is billed to that key's owner.
+        verify_priced_tools(payload, allow_unmetered_server_tools=True)
         upstream_payload, input_items = await self._prepare_upstream_payload(payload, fingerprint, bearer)
         should_store = payload.get("store") is not False
         headers = self._upstream_headers(bearer, stream=payload.get("stream") is True)
@@ -818,6 +824,9 @@ class DeepSeekResponsesService:
         calls: List[int],
         source_roles: Optional[Mapping[str, str]] = None,
     ) -> str:
+        from app.services.billing_ledger_service import BillingError
+        from app.services.billing_runtime_gate import begin_attempt, finish_attempt, unknown_attempt
+
         compaction_payload = {
             "model": model,
             "instructions": _COMPACTION_INSTRUCTION,
@@ -845,6 +854,11 @@ class DeepSeekResponsesService:
                     raise ContextBudgetError("压缩模型请求超过 32 次上限")
                 calls[0] += 1
                 attempts += 1
+                billing_ticket = begin_attempt(
+                    model_name=model, payload=compaction_payload,
+                    provider_name="deepseek", base_url=self._base_url,
+                    credential_source="user",
+                )
                 client = self._client_factory()
                 try:
                     request_url = self._responses_url
@@ -860,19 +874,35 @@ class DeepSeekResponsesService:
                     )
                     raw = await response.aread()
                 except httpx.TimeoutException as exc:
+                    unknown_attempt(billing_ticket)
                     outcome = "timeout"
+                    if billing_ticket is not None:
+                        raise BillingError("压缩调用结果未知，预占待对账，禁止自动重试") from exc
                     raise ResponsesGatewayError(
                         "The upstream context compaction request timed out.",
                         status_code=504, code="upstream_timeout", error_type="server_error",
                     ) from exc
                 except httpx.HTTPError as exc:
+                    unknown_attempt(billing_ticket)
                     outcome = "network_error"
+                    if billing_ticket is not None:
+                        raise BillingError("压缩调用结果未知，预占待对账，禁止自动重试") from exc
                     raise ResponsesGatewayError(
                         "The upstream context compaction API is unavailable.",
                         status_code=502, code="upstream_unavailable", error_type="server_error",
                     ) from exc
+                except BaseException:
+                    unknown_attempt(billing_ticket)
+                    raise
                 finally:
                     await client.aclose()
+                if billing_ticket is not None:
+                    try:
+                        billing_body = json.loads(raw)
+                    except (ValueError, TypeError, UnicodeError):
+                        billing_body = {}
+                    usage = billing_body.get("usage") if isinstance(billing_body, dict) else None
+                    finish_attempt(billing_ticket, usage)
                 if not 200 <= response.status_code < 300:
                     outcome = f"http_{response.status_code}"
                     if response.status_code == 401:
@@ -998,6 +1028,14 @@ class DeepSeekResponsesService:
         input_items: List[Any],
         should_store: bool,
     ) -> BufferedGatewayResponse:
+        from app.services.billing_ledger_service import BillingError
+        from app.services.billing_runtime_gate import begin_attempt, finish_attempt, unknown_attempt
+
+        billing_ticket = begin_attempt(
+            model_name=payload.get("model"), payload=payload,
+            provider_name="deepseek", base_url=self._base_url, credential_source="user",
+            allow_unmetered_server_tools=True,
+        )
         client = self._client_factory()
         try:
             request_url = self._responses_url
@@ -1016,6 +1054,9 @@ class DeepSeekResponsesService:
             )
             content = await response.aread()
         except httpx.TimeoutException as exc:
+            unknown_attempt(billing_ticket)
+            if billing_ticket is not None:
+                raise BillingError("模型调用结果未知，预占待对账，禁止自动重试") from exc
             raise ResponsesGatewayError(
                 "The upstream Responses API timed out.",
                 status_code=504,
@@ -1023,14 +1064,27 @@ class DeepSeekResponsesService:
                 error_type="server_error",
             ) from exc
         except httpx.HTTPError as exc:
+            unknown_attempt(billing_ticket)
+            if billing_ticket is not None:
+                raise BillingError("模型调用结果未知，预占待对账，禁止自动重试") from exc
             raise ResponsesGatewayError(
                 "The upstream Responses API is unavailable.",
                 status_code=502,
                 code="upstream_unavailable",
                 error_type="server_error",
             ) from exc
+        except BaseException:
+            unknown_attempt(billing_ticket)
+            raise
         finally:
             await client.aclose()
+
+        if billing_ticket is not None:
+            try:
+                billing_body = json.loads(content)
+            except (ValueError, TypeError, UnicodeError):
+                billing_body = {}
+            finish_attempt(billing_ticket, billing_body.get("usage") if isinstance(billing_body, dict) else None)
 
         if 200 <= response.status_code < 300 and should_store:
             try:
@@ -1054,6 +1108,14 @@ class DeepSeekResponsesService:
         input_items: List[Any],
         should_store: bool,
     ) -> StreamingGatewayResponse:
+        from app.services.billing_ledger_service import BillingError
+        from app.services.billing_runtime_gate import begin_attempt, finish_attempt, unknown_attempt
+
+        billing_ticket = begin_attempt(
+            model_name=payload.get("model"), payload=payload,
+            provider_name="deepseek", base_url=self._base_url, credential_source="user",
+            allow_unmetered_server_tools=True,
+        )
         client = self._client_factory()
         try:
             request_url = self._responses_url
@@ -1073,7 +1135,10 @@ class DeepSeekResponsesService:
             )
             response = await client.send(request, stream=True)
         except httpx.TimeoutException as exc:
+            unknown_attempt(billing_ticket)
             await client.aclose()
+            if billing_ticket is not None:
+                raise BillingError("模型调用结果未知，预占待对账，禁止自动重试") from exc
             raise ResponsesGatewayError(
                 "The upstream Responses API timed out.",
                 status_code=504,
@@ -1081,13 +1146,21 @@ class DeepSeekResponsesService:
                 error_type="server_error",
             ) from exc
         except httpx.HTTPError as exc:
+            unknown_attempt(billing_ticket)
             await client.aclose()
+            if billing_ticket is not None:
+                raise BillingError("模型调用结果未知，预占待对账，禁止自动重试") from exc
             raise ResponsesGatewayError(
                 "The upstream Responses API is unavailable.",
                 status_code=502,
                 code="upstream_unavailable",
                 error_type="server_error",
             ) from exc
+
+        except BaseException:
+            unknown_attempt(billing_ticket)
+            await client.aclose()
+            raise
 
         capture = _SSEFinalResponseCapture()
 
@@ -1096,9 +1169,13 @@ class DeepSeekResponsesService:
             try:
                 async for chunk in response.aiter_raw():
                     capture.feed(chunk)
+                    if billing_ticket is not None and capture.response is not None and not billing_ticket.get("done"):
+                        finish_attempt(billing_ticket, capture.response.get("usage"))
                     yield chunk
                 stream_finished = True
                 capture.finish()
+                if billing_ticket is not None and not billing_ticket.get("done"):
+                    finish_attempt(billing_ticket, capture.response.get("usage") if capture.response else None)
                 if (
                     stream_finished
                     and 200 <= response.status_code < 300
@@ -1110,7 +1187,20 @@ class DeepSeekResponsesService:
                         capture.response,
                         input_items,
                     )
+            except BillingError:
+                # 此时 HTTP 响应头可能已经发送，以 SSE 错误结束而非转发虚假的完成事件。
+                error = {"type": "error", "error": {"type": "server_error", "code": "billing_error",
+                         "message": "计费用量异常，预占待对账"}}
+                yield ("event: error\ndata: " + json.dumps(error, ensure_ascii=False) + "\n\n").encode("utf-8")
+            except httpx.HTTPError:
+                if billing_ticket is None:
+                    raise
+                unknown_attempt(billing_ticket)
+                error = {"type": "error", "error": {"type": "server_error", "code": "billing_error",
+                         "message": "模型调用结果未知，预占待对账，禁止自动重试"}}
+                yield ("event: error\ndata: " + json.dumps(error, ensure_ascii=False) + "\n\n").encode("utf-8")
             finally:
+                unknown_attempt(billing_ticket)
                 await response.aclose()
                 await client.aclose()
 

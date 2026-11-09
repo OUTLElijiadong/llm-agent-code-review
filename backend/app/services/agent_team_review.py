@@ -21,6 +21,7 @@ from app.models.user import User
 from app.schemas.review import ReviewStartIn
 from app.services import agent_team_service, review_service
 from app.services.ai_usage_context import current_attribution, model_attribution, usage_context
+from app.services.review_coverage import public_review_coverage
 
 
 def cancel_team_reviews(db: Session, *, team_id: int, reason: str, task_id: int | None = None) -> int:
@@ -66,7 +67,7 @@ def _require_actor(db: Session, user_id: int, project_id: int) -> User:
 def _review_result(
     review: ReviewTask, *, db: Session, status: str | None = None, summary: str = "",
 ) -> dict[str, Any]:
-    coverage = review.coverage if isinstance(review.coverage, dict) else {}
+    coverage = public_review_coverage(review.coverage) or {}
     complete = (
         review.status == "success" and int(review.total_files or 0) > 0
         and review.processed_files == review.total_files and coverage.get("stage") == "complete"

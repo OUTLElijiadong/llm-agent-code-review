@@ -13,6 +13,7 @@ from typing import Dict, List, Optional
 from fastapi import APIRouter, Header, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
+from app.services.billing_ledger_service import BillingError
 from app.services.deepseek_responses_service import (
     BufferedGatewayResponse,
     DeepSeekResponsesService,
@@ -105,6 +106,10 @@ async def create_response(
         upstream = await get_responses_service().create(payload, authorization)
     except ResponsesGatewayError as error:
         return _error_response(error)
+    except BillingError as error:
+        return _error_response(ResponsesGatewayError(
+            str(error), status_code=409, code="billing_error", error_type="invalid_request_error"
+        ))
 
     headers = _relay_headers(dict(upstream.headers))
     if isinstance(upstream, StreamingGatewayResponse):

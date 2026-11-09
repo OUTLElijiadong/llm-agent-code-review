@@ -7,11 +7,13 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import httpx
 import pytest
 
 from app.agents.base import AgentResult
 from app.models.agent_mesh import AgentMeshMessage
 from app.models.agent_team import AgentTeam, AgentTeamEvent, AgentTeamMember, AgentTeamTask
+from app.models.billing_ledger import BillingReservation
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.rbac import Permission, Role, RolePermission, UserRole
@@ -22,8 +24,99 @@ from app.services import (
     agent_mesh_service,
     agent_team_dispatcher,
     agent_team_service,
+    enterprise_agent_team_dispatcher,
     published_agent_tools,
 )
+from app.services.billing_ledger_service import BillingError, get_or_create_wallet, grant
+from app.services.billing_runtime_gate import metered_response_request
+
+
+def _billable_personal_team_task(db, user):
+    team = AgentTeam(
+        user_id=int(user.id), surface="user", session_key="billable-session", title="账单团队任务",
+        objective="验证个人团队计量", status="running", max_active_children=1, max_attempts=3,
+        priority=0, trace_id="billable-team-trace",
+    )
+    db.add(team)
+    db.flush()
+    member = AgentTeamMember(
+        team_id=int(team.id), member_key="worker", display_name="worker", address="temporary:worker",
+        kind="temporary", role="worker", capabilities_json="{}", status="running",
+    )
+    db.add(member)
+    db.flush()
+    task = AgentTeamTask(
+        team_id=int(team.id), member_id=int(member.id), task_key="analyze", title="分析",
+        instructions="基于给定输入分析", input_json="{}", status="running", attempt_count=1,
+        max_attempts=3, lease_token="billable-lease",
+        lease_expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=10),
+    )
+    db.add(task)
+    wallet = get_or_create_wallet(db, "user", int(user.id))
+    grant(db, wallet_id=int(wallet.id), grant_key=f"team-test:{team.id}", kind="purchase", amount_milli=1000)
+    db.commit()
+    claimed = {
+        "team_id": int(team.id), "task_id": int(task.id), "member_id": int(member.id),
+        "address": member.address, "lease_token": task.lease_token, "attempt_count": 1,
+    }
+    return team, task, member, wallet, claimed
+
+
+def test_personal_team_model_attempt_settles_to_owner_wallet(db, monkeypatch):
+    from app.services import agent_team_dispatcher
+
+    user = User(username="team-billing-owner", password="x", email="team-billing@example.test",
+                role="user", status=1)
+    db.add(user)
+    db.commit()
+    team, task, member, wallet, claimed = _billable_personal_team_task(db, user)
+    monkeypatch.setattr(agent_team_dispatcher.settings, "billing_commercial_metering_ready", True)
+    monkeypatch.setattr(agent_team_dispatcher, "_owner_access_error", lambda *_args, **_kwargs: "")
+    payload = {"model": "deepseek-flash", "messages": [{"role": "user", "content": "analyze"}],
+               "max_tokens": 32}
+
+    with agent_team_dispatcher._task_billing_scope(db, team, task, member, claimed):
+        metered_response_request(
+            model_name="deepseek-flash", payload=payload,
+            provider_name="deepseek", base_url="https://api.deepseek.com/v1", credential_source="system",
+            send=lambda: (httpx.Response(200, json={
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            }), 1),
+        )
+
+    reservation = db.query(BillingReservation).one()
+    assert reservation.status == "settled"
+    assert reservation.user_id == user.id and reservation.personal_wallet_id == wallet.id
+    assert reservation.enterprise_id is None and reservation.group_id is None
+    assert reservation.request_key == f"agent-team:{team.id}:task:{task.id}:attempt-1:1"
+
+
+def test_personal_team_unknown_attempt_blocks_later_retries(db, monkeypatch):
+    from app.services import agent_team_dispatcher
+
+    user = User(username="team-unknown-owner", password="x", email="team-unknown@example.test",
+                role="user", status=1)
+    db.add(user)
+    db.commit()
+    team, task, member, _wallet, claimed = _billable_personal_team_task(db, user)
+    monkeypatch.setattr(agent_team_dispatcher.settings, "billing_commercial_metering_ready", True)
+    monkeypatch.setattr(agent_team_dispatcher, "_owner_access_error", lambda *_args, **_kwargs: "")
+    payload = {"model": "deepseek-flash", "messages": [{"role": "user", "content": "analyze"}],
+               "max_tokens": 32}
+    with agent_team_dispatcher._task_billing_scope(db, team, task, member, claimed):
+        with pytest.raises(BillingError, match="结果未知"):
+            metered_response_request(
+                model_name="deepseek-flash", payload=payload,
+                provider_name="deepseek", base_url="https://api.deepseek.com/v1", credential_source="system",
+                send=lambda: (_ for _ in ()).throw(httpx.TimeoutException("upstream timeout")),
+            )
+
+    db.expire_all()
+    reservation = db.query(BillingReservation).one()
+    assert reservation.status == "unknown"
+    claimed["attempt_count"] = 2
+    with pytest.raises(BillingError, match="禁止自动重试"):
+        agent_team_dispatcher._task_billing_scope(db, team, task, member, claimed)
 
 
 def test_temporary_agent_usage_accounting_failure_marks_worker_failed_for_verification(monkeypatch, db):
@@ -340,6 +433,94 @@ def test_team_context_does_not_turn_internal_id_into_review_task(monkeypatch):
     assert calls == []
     assert result["status"] == "needs_clarification"
     assert result["next_action"]["provide_fields"] == ["file_id|task_id|project_id"]
+
+
+def test_enterprise_security_sentinel_context_uses_bound_project_and_call_cap():
+    team = SimpleNamespace(
+        id=31,
+        initiator_user_id=7,
+        trace_id="enterprise-trace",
+        conversation_id=88,
+        enterprise_id=22,
+        group_id=9,
+        project_id=9001,
+        plan_snapshot_json='{"max_calls_per_task": 6}',
+    )
+    claim = {
+        "task_id": 41,
+        "team_id": 31,
+        "attempt": 1,
+        "member_address": "agent:security_sentinel",
+        "input": {"scan_mode": "static_full"},
+        "instructions": "只读检查绑定项目",
+        "title": "项目安全扫描",
+        "lease_token": "lease-41",
+        "lease_generation": 3,
+    }
+
+    message = enterprise_agent_team_dispatcher._message_for_claim(team, claim)
+
+    assert message["context"]["project_id"] == 9001
+    assert message["context"]["max_calls_per_task"] == 6
+    assert "project_id" not in message["payload"]
+
+
+def test_security_sentinel_artifact_builder_preserves_scope_and_coverage():
+    report = {
+        "project_id": 9001,
+        "source_archive_sha256": "a" * 64,
+        "summary": "项目安全扫描完成",
+        "findings": [],
+        "compliance": {
+            "scan_mode": "static_full",
+            "audit_inputs_complete": True,
+            "semantic_execution_complete": True,
+            "audit_request_accounting_complete": True,
+            "static_complete": True,
+            "provider_request_count": 0,
+            "coverage_ratio": 1.0,
+            "verification": {"enabled": True, "complete": True, "model_calls": 0},
+        },
+    }
+    artifact = enterprise_agent_team_dispatcher._security_artifact_from_result(
+        {
+            "status": "completed",
+            "evidence": [{"source": "request_scoped_agent", "data": report}],
+        },
+        project_id=9001,
+    )
+    assert artifact is not None
+    assert artifact["coverage_status"] == "complete"
+    assert artifact["report"] == report
+    assert artifact["summary"]["provider_request_count"] == 0
+
+    partial = {**report, "compliance": {**report["compliance"], "audit_inputs_complete": False}}
+    incomplete = enterprise_agent_team_dispatcher._security_artifact_from_result(
+        {
+            "status": "failed",
+            "errors": [{"code": "coverage_incomplete"}],
+            "evidence": [{"source": "request_scoped_agent", "data": partial}],
+        },
+        project_id=9001,
+    )
+    assert incomplete is not None
+    assert incomplete["coverage_status"] == "incomplete"
+    assert incomplete["termination_reason"] == "coverage_incomplete"
+    missing_verification = {**report, "compliance": {key: value for key, value in report["compliance"].items()
+                                                        if key != "verification"}}
+    unverified = enterprise_agent_team_dispatcher._security_artifact_from_result(
+        {
+            "status": "completed",
+            "evidence": [{"source": "request_scoped_agent", "data": missing_verification}],
+        },
+        project_id=9001,
+    )
+    assert unverified is not None
+    assert unverified["coverage_status"] == "incomplete"
+    assert enterprise_agent_team_dispatcher._security_artifact_from_result(
+        {"status": "completed", "evidence": [{"source": "request_scoped_agent", "data": report}]},
+        project_id=9002,
+    ) is None
 
 
 def test_operations_team_executes_readonly_action_with_audited_request_id(monkeypatch):

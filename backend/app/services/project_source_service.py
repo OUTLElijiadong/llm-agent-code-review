@@ -26,6 +26,7 @@ from typing import Callable, Iterator
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, undefer
 
 from app.ai.language_detector import detect_language
@@ -564,6 +565,7 @@ def ingest_source_archive_bytes(
     *,
     raw: bytes,
     filename: str,
+    before_commit: Callable[[], None] | None = None,
 ) -> dict:
     """串行执行隔离归档解包与恶意扫描，并在异常时释放数据库行锁。"""
     try:
@@ -574,7 +576,14 @@ def ingest_source_archive_bytes(
                 project_id,
                 raw=raw,
                 filename=filename,
+                before_commit=before_commit,
             )
+    except OperationalError as exc:
+        db.rollback()
+        code = getattr(exc.orig, "args", (None,))[0]
+        if db.get_bind().dialect.name == "mysql" and code in (1205, 1213, 3572):
+            raise ConflictError("项目权限正在变更，请刷新后重试", code=40901) from exc
+        raise
     except Exception:
         db.rollback()
         raise
@@ -587,17 +596,22 @@ def _ingest_source_archive_bytes_locked(
     *,
     raw: bytes,
     filename: str,
+    before_commit: Callable[[], None] | None = None,
 ) -> dict:
     """将可能含恶意代码的源码归档作为不可编辑整包证据存入隔离表。"""
-    require_project_access(db, project_id, user, need_write=True)
+    # Acquire the same current project/authorization locks used by ordinary
+    # source writes. A prior consistent read can otherwise restore a revoked
+    # owner or grant from an older MySQL REPEATABLE READ snapshot.
     project = (
         db.query(Project)
         .filter(Project.id == project_id)
-        .with_for_update()
+        .populate_existing()
+        .with_for_update(nowait=True)
         .first()
     )
     if project is None or project.status == "deleted":
         raise NotFoundError("项目不存在", code=40400)
+    require_project_access(db, project_id, user, need_write=True, lock=True, nowait=True)
     if not raw:
         raise ValidationError("隔离源码包内容为空", code=40001)
     safe_filename = PurePosixPath((filename or "").replace("\\", "/")).name
@@ -606,16 +620,20 @@ def _ingest_source_archive_bytes_locked(
     existing_files = db.query(CodeFile.id).filter(
         CodeFile.project_id == project_id,
         CodeFile.status == "active",
-    ).count()
+    ).with_for_update(nowait=True).first()
     if existing_files:
         raise ConflictError("已有可编辑源码文件的项目不能混入隔离归档", code=40901)
-    if _active_source_archive(db, project_id) is not None:
+    active_archive = db.query(ProjectSourceArchive.id).filter(
+        ProjectSourceArchive.project_id == project_id,
+        ProjectSourceArchive.storage_status == "active",
+    ).with_for_update(nowait=True).first()
+    if active_archive is not None:
         raise ConflictError("项目已有活动的隔离源码归档", code=40901)
     active_deployment = db.query(SandboxEnvironment.id).filter(
         SandboxEnvironment.project_id == project_id,
         SandboxEnvironment.purpose == "deploy",
         SandboxEnvironment.status.in_(("queued", "dispatching", "running", "ready", "stopping")),
-    ).first()
+    ).with_for_update(nowait=True).first()
     if active_deployment is not None:
         raise ConflictError("项目存在活动的持续部署，请先关闭沙箱再上传隔离审计包", code=40901)
 
@@ -675,6 +693,9 @@ def _ingest_source_archive_bytes_locked(
             ),
             commit=False,
         )
+        if before_commit is not None:
+            db.flush()
+            before_commit()
         db.commit()
     except Exception:
         db.rollback()
@@ -992,6 +1013,7 @@ def import_remote_project(
     description: str = "",
     language: str | None = None,
     audit_mode: bool = False,
+    authorize_before_write: Callable[[], Callable[[], None]] | None = None,
 ) -> dict:
     """下载公开源码归档，按用户选择进入普通或隔离审计链路。
 
@@ -1014,12 +1036,17 @@ def import_remote_project(
             raise last_error
     else:
         raw, archive_name = download_remote_archive(url)
-    project = project_service.create_project(
-        db,
-        user,
-        ProjectIn(project_name=project_name, description=description or None, language=language or None),
+    project_payload = ProjectIn(
+        project_name=project_name, description=description or None, language=language or None,
     )
+    guard = None
+    project = None
     try:
+        guard = authorize_before_write() if authorize_before_write is not None else None
+        if authorize_before_write is not None and not callable(guard):
+            raise RuntimeError("同步导入授权校验不可用")
+        project = (project_service.create_project(db, user, project_payload, commit=False) if guard is not None
+                   else project_service.create_project(db, user, project_payload))
         if audit_mode:
             archive_data = ingest_source_archive_bytes(
                 db,
@@ -1027,6 +1054,7 @@ def import_remote_project(
                 project.id,
                 raw=raw,
                 filename=archive_name,
+                **({"before_commit": guard} if guard is not None else {}),
             )
         else:
             first_id, _, _ = code_file_service._upload_archive(
@@ -1035,10 +1063,14 @@ def import_remote_project(
                 project.id,
                 raw,
                 archive_name,
+                **({"before_commit": guard} if guard is not None else {}),
             )
     except Exception:
-        project.status = "deleted"
-        db.commit()
+        if authorize_before_write is not None:
+            db.rollback()
+        elif project is not None:
+            project.status = "deleted"
+            db.commit()
         raise
     if audit_mode:
         return {

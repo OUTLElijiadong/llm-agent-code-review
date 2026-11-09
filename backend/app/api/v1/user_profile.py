@@ -2,7 +2,7 @@
 用户画像 API 路由(本人维护;显式 + 隐式学习)
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -13,6 +13,18 @@ from app.schemas.profile import PreferencePromptIn, ProfileOut, ProfileUpdateIn
 from app.services import profile_service
 
 router = APIRouter()
+
+
+@router.get("/token-usage")
+def personal_token_usage(
+    days: int = Query(30, ge=1, le=90),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Read the authenticated account's usage; no caller-selected account is accepted."""
+    from app.api.v1.admin_overview import _daily_token_usage
+
+    return Resp(data=_daily_token_usage(db, days=days, user_id=user.id))
 
 
 @router.get("/profile", response_model=Resp[ProfileOut])

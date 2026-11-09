@@ -17,6 +17,7 @@ from app.core.pagination import Pagination
 from app.core.permission_codes import PermissionCode
 from app.core.server_time import iso_utc
 from app.models.code_file import CodeFile
+from app.models.enterprise_project import EnterpriseProject
 from app.models.pentest import PentestEngagement, PentestFinding
 from app.models.project import Project
 from app.models.review_issue import ReviewIssue
@@ -35,6 +36,7 @@ from app.services.project_member_service import (
 )
 from app.services.report_exporter import build_report_score_facts
 from app.services.report_text import clean_report_markdown, clean_report_payload, clean_report_text
+from app.services.review_coverage import public_review_coverage
 
 _REPORT_BODY_WHITESPACE = (
     " ", "\t", "\n", "\r", "\f", "\v", "\x1c", "\x1d", "\x1e", "\x1f",
@@ -176,7 +178,7 @@ def _sandbox_coverage_for_display(coverage: dict) -> dict:
 
 
 def _task_coverage(task: ReviewTask, requested_mode: str | None = None) -> dict:
-    coverage = task.coverage if isinstance(task.coverage, dict) else {}
+    coverage = public_review_coverage(task.coverage) or {}
     if coverage:
         # Verification completion does not prove that the full assessment
         # scope was covered. Keep the coverage status explicit for old or
@@ -206,7 +208,7 @@ def _sandbox_domain_data_for_display(task: ReviewTask, content: dict) -> dict:
     """Preserve sandbox evidence while removing legacy pass-rate score claims."""
     result = dict(content)
     requested_mode = _sandbox_requested_mode(task, content)
-    raw_coverage = content.get("coverage")
+    raw_coverage = public_review_coverage(content.get("coverage"))
     coverage = (
         _sandbox_coverage_for_display(raw_coverage)
         if isinstance(raw_coverage, dict)
@@ -491,11 +493,15 @@ def task_metrics_access_filter(db: Session, user: User | None) -> ColumnElement[
 
 
 def get_readable_report_task(db: Session, user: User, task_id: int) -> ReviewTask:
-    """保留发起人/管理员范围，并要求父项目的当前访问权，撤销后不能继续读取。"""
+    """个人报告限发起人；企业报告按当前企业项目查看权共享。"""
     task = db.get(ReviewTask, task_id)
     if not is_report_available(task):
         raise NotFoundError("报告不存在", code=40400)
-    if task.user_id != user.id and not rbac_service.is_admin_user(db, int(user.id)):
+    administrator = rbac_service.is_admin_user(db, int(user.id))
+    enterprise_project = db.query(EnterpriseProject.id).filter_by(
+        project_id=task.project_id, status="active",
+    ).first()
+    if task.user_id != user.id and not administrator and enterprise_project is None:
         raise NotFoundError("报告不存在", code=40400)
     if not has_source_report_permission(db, user, task.review_type):
         raise NotFoundError("报告不存在", code=40400)
@@ -552,9 +558,22 @@ def list_reports(db: Session, user: User, project_id: int = None,
         q = q.filter(false())
     visible_ids, _ = get_visible_project_ids(db, user)
     visible_project_ids = {int(project_id) for project_id in visible_ids}
+    enterprise_visible_project_ids = {
+        int(row[0])
+        for row in db.query(EnterpriseProject.project_id).filter(
+            EnterpriseProject.project_id.in_(visible_project_ids),
+            EnterpriseProject.status == "active",
+        ).all()
+    }
     q = q.filter(ReviewTask.project_id.in_(visible_ids))
     if not administrator:
-        q = q.filter(ReviewTask.user_id == user.id)
+        # Personal project reports remain author-only; a member who currently
+        # has project access may see reports produced within that enterprise
+        # project, matching the project's explicit/group authorization.
+        q = q.filter(or_(
+            ReviewTask.user_id == user.id,
+            ReviewTask.project_id.in_(enterprise_visible_project_ids),
+        ))
     if project_id:
         q = q.filter(ReviewTask.project_id == project_id)
     if start_date:
@@ -647,14 +666,18 @@ def list_reports(db: Session, user: User, project_id: int = None,
         row.id: (
             report_permission
             and (issue_permission or row.review_type in _REPORT_BACKED_REVIEW_TYPES)
-            and (administrator or int(row.user_id) == int(user.id))
+            and (
+                administrator
+                or int(row.user_id) == int(user.id)
+                or int(row.project_id) in enterprise_visible_project_ids
+            )
             and row.project_id in visible_project_ids
             and source_permissions.get(row.review_type, True)
         )
         for row in rows
     }
-    # 查询已在 count 和分页前按 REPORT_VIEW、项目可见范围、发起人/管理员
-    # 范围及 SECURITY_VIEW/PENTEST_VIEW 过滤。这里再按同一授权范围 fail-closed
+    # 查询已在 count 和分页前按 REPORT_VIEW、项目可见范围、个人报告发起人/企业项目查看权
+    # 及 SECURITY_VIEW/PENTEST_VIEW 过滤。这里再按同一授权范围 fail-closed
     # 剔除行，确保无权报告不会成为列表卡片。
     rows = [row for row in rows if report_access[row.id]]
     items = []
@@ -680,7 +703,11 @@ def list_reports(db: Session, user: User, project_id: int = None,
         items.append({
             "id": row.id, "task_id": row.id, "task_name": row.task_name,
             "project_name": project.project_name if project else "",
-            "can_delete": can_delete and capabilities.get(row.project_id, {}).get("can_execute", False),
+            "can_delete": (
+                can_delete
+                and (administrator or int(row.user_id) == int(user.id))
+                and capabilities.get(row.project_id, {}).get("can_execute", False)
+            ),
             "can_view_report": can_view_report,
             "total_issues": issue_count, "score": score, "status": row.status,
             "score_scope": score_scope_payload(row) if can_view_report else None,

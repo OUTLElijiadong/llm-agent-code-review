@@ -7,11 +7,14 @@ v2.4(2026-06-25): 数据隔离改为基于 project_member 关系
     - create_project: 创建后自动写入 project_member(owner) 记录
 """
 from sqlalchemy import func
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ConflictError
 from app.core.pagination import Pagination
+from app.core.permission_codes import PermissionCode
 from app.models.code_file import CodeFile
+from app.models.enterprise_project import EnterpriseProject
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.project_source_archive import ProjectSourceArchive
@@ -19,12 +22,16 @@ from app.models.review_task import ReviewTask
 from app.models.user import User
 from app.schemas.project import ProjectIn, ProjectUpdateIn
 from app.services import project_source_revision_service, rbac_service
+from app.services.operation_write_fence import require_live_operation_permission, retryable_project_write
 from app.services.project_member_service import (
     HIDDEN_PROJECT_STATUSES,
     ensure_owner_member,
     get_visible_project_ids,
+    is_project_member,
+    project_resource_capabilities,
     require_project_access,
 )
+from app.services.review_coverage import public_review_coverage
 from app.utils.sanitize import sanitize_text
 
 
@@ -133,6 +140,10 @@ def list_projects(db: Session, user: User, keyword: str = "", language: str = ""
         db, int(user.id), PermissionCode.REPORT_VIEW,
     )
     items = []
+    capabilities = project_resource_capabilities(db, user, proj_ids, projects=rows)
+    enterprise_ids = {item[0] for item in db.query(EnterpriseProject.project_id).filter(
+        EnterpriseProject.project_id.in_(proj_ids)
+    ).all()}
     for row in rows:
         last_task = last_tasks.get(row.id)
         source_archive = source_archives.get(row.id)
@@ -141,6 +152,13 @@ def list_projects(db: Session, user: User, keyword: str = "", language: str = ""
             or row.user_id == user.id
             or member_roles.get(row.id) == "owner"
         )
+        can_delete = can_write
+        can_execute = can_write or member_roles.get(row.id) == "reviewer"
+        if row.id in enterprise_ids:
+            _, enterprise_role = is_project_member(db, row.id, user)
+            can_write = capabilities.get(row.id, {}).get("can_write", False)
+            can_execute = capabilities.get(row.id, {}).get("can_execute", False)
+            can_delete = enterprise_role in {"enterprise_admin", "enterprise_leader"}
         # v2.0 B2: 用最近一次成功审查的真实评分,前端不再 hash 派生
         run_stats = agent_runs.get(row.id)
         metrics_visible = bool(
@@ -165,14 +183,14 @@ def list_projects(db: Session, user: User, keyword: str = "", language: str = ""
             "source_mode": "audit_archive" if source_archive else "files",
             "source_malware_status": source_archive.malware_status if source_archive else None,
             "can_update": can_write,
-            "can_delete": can_write,
-            "can_execute": can_write or member_roles.get(row.id) == "reviewer",
+            "can_delete": can_delete,
+            "can_execute": can_execute,
             "last_review_at": last_task.create_time if last_task else None,
             "score": (
                 display_report_score(last_task, last_task.score)
                 if metrics_visible else None
             ),
-            "coverage": last_task.coverage if metrics_visible else None,
+            "coverage": public_review_coverage(last_task.coverage) if metrics_visible else None,
             "create_time": row.create_time,
         })
     return pagination.to_dict(items)
@@ -254,6 +272,7 @@ def get_project(db: Session, user: User, project_id: int) -> dict:
     """
     project_role = require_project_access(db, project_id, user, need_write=False)
     project = db.get(Project, project_id)
+    project_capabilities = project_resource_capabilities(db, user, [project_id], projects=[project]).get(project_id, {})
     agent_runs = _agent_run_stats(db, [project_id]).get(project_id)
 
     file_count = db.query(CodeFile.id).filter(
@@ -323,9 +342,9 @@ def get_project(db: Session, user: User, project_id: int) -> dict:
             }
             if source_archive else None
         ),
-        "can_update": project_role in {"admin", "owner"},
-        "can_delete": project_role in {"admin", "owner"},
-        "can_execute": project_role in {"admin", "owner", "reviewer"},
+        "can_update": project_capabilities.get("can_write", False),
+        "can_delete": project_role in {"admin", "owner", "enterprise_admin", "enterprise_leader"},
+        "can_execute": project_capabilities.get("can_execute", False),
         "agent_run_count": agent_runs[0] if agent_runs else 0,
         "last_agent_run_at": agent_runs[1] if agent_runs else None,
         "create_time": project.create_time,
@@ -338,7 +357,7 @@ def get_project(db: Session, user: User, project_id: int) -> dict:
                     display_report_score(t, t.score)
                     if task_metrics_visible[t.id] else None
                 ),
-                "coverage": t.coverage if task_metrics_visible[t.id] else None,
+                "coverage": public_review_coverage(t.coverage) if task_metrics_visible[t.id] else None,
                 "total_issues": (
                     domain_issue_stats[t.id]["total_issues"]
                     if task_metrics_visible[t.id] and t.id in domain_issue_stats
@@ -353,6 +372,36 @@ def get_project(db: Session, user: User, project_id: int) -> dict:
     }
 
 
+def _require_project_mutation(db: Session, user: User, project_id: int, *, manage: bool) -> Project:
+    """Lock the current project and authorization through the caller's commit."""
+    try:
+        role = require_project_access(db, project_id, user, need_write=True, lock=True, nowait=True)
+        if manage and role.startswith("enterprise_"):
+            # A project lifecycle change also needs the enterprise manage role.
+            # Use current reads throughout: the original RR snapshot may predate
+            # a role or binding revocation that has already committed.
+            binding = (db.query(EnterpriseProject).filter_by(project_id=project_id, status="active")
+                       .populate_existing().with_for_update(nowait=True).first())
+            if binding is None:
+                raise ConflictError("项目归属已变化，请刷新后重试")
+            from app.services.enterprise_project_policy import require_enterprise_project_access
+
+            require_enterprise_project_access(
+                db, binding.enterprise_id, project_id, user.id, "manage", lock=True, nowait=True,
+            )
+        project = db.get(Project, project_id)
+        if project is None:
+            raise ConflictError("项目状态已变化，请刷新后重试")
+        return project
+    except OperationalError as exc:
+        code = getattr(exc.orig, "args", (None,))[0]
+        if db.get_bind().dialect.name == "mysql" and code in (1205, 1213, 3572):
+            db.rollback()
+            raise ConflictError("项目权限或状态正在变更，请稍后重试", code=40901) from exc
+        raise
+
+
+@retryable_project_write
 def update_project(db: Session, user: User, project_id: int, payload: ProjectUpdateIn) -> Project:
     """更新项目信息(需 owner/admin 权限)
 
@@ -369,8 +418,8 @@ def update_project(db: Session, user: User, project_id: int, payload: ProjectUpd
         NotFoundError: 项目不存在或无访问权限
         ForbiddenError: 仅 owner/admin 可写
     """
-    require_project_access(db, project_id, user, need_write=True)
-    project = db.get(Project, project_id)
+    require_live_operation_permission(db, user, PermissionCode.PROJECT_UPDATE)
+    project = _require_project_mutation(db, user, project_id, manage=payload.status is not None)
     if payload.project_name is not None:
         project.project_name = sanitize_text(payload.project_name)
     if payload.description is not None:
@@ -384,6 +433,7 @@ def update_project(db: Session, user: User, project_id: int, payload: ProjectUpd
     return project
 
 
+@retryable_project_write
 def delete_project(db: Session, user: User, project_id: int) -> None:
     """软删除项目(需 owner/admin 权限)
 
@@ -396,14 +446,8 @@ def delete_project(db: Session, user: User, project_id: int) -> None:
         NotFoundError: 项目不存在或无访问权限
         ForbiddenError: 仅 owner/admin 可删除
     """
-    require_project_access(db, project_id, user, need_write=True)
-    project = (
-        db.query(Project)
-        .populate_existing()
-        .filter(Project.id == project_id)
-        .with_for_update()
-        .one_or_none()
-    )
+    require_live_operation_permission(db, user, PermissionCode.PROJECT_DELETE)
+    project = _require_project_mutation(db, user, project_id, manage=True)
     if project is None or project.status in HIDDEN_PROJECT_STATUSES:
         raise ConflictError("项目状态已变化，请刷新后重试")
     active_tasks = (
@@ -412,7 +456,7 @@ def delete_project(db: Session, user: User, project_id: int) -> None:
             ReviewTask.project_id == project_id,
             ReviewTask.status.in_(("pending", "running")),
         )
-        .with_for_update()
+        .with_for_update(nowait=True)
         .all()
     )
     if active_tasks:

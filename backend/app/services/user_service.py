@@ -8,6 +8,7 @@ import secrets
 
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
 from app.core.pagination import Pagination
 from app.core.security import hash_password
@@ -96,6 +97,14 @@ def toggle_status(db: Session, user_id: int, status: int, actor: User | None = N
     if not user:
         raise NotFoundError("用户不存在", code=40400)
     _assert_mutable_user(user)
+    if status != 1:
+        from app.services.billing_c4_reviewer_service import revoke_for_user
+        from app.services.billing_rate_reviewer_service import revoke_for_user as rate_revoke_for_user
+        from app.services.billing_refund_reviewer_service import revoke_for_user as refund_revoke_for_user
+
+        revoke_for_user(db, user, actor_id=actor.id if actor else None, reason="账号停用，撤销 C4 委任")
+        rate_revoke_for_user(db, user, actor_id=actor.id if actor else None, reason="账号停用，撤销费率复核委任")
+        refund_revoke_for_user(db, user, actor_id=actor.id if actor else None, reason="账号停用，撤销退款复核委任")
     user.status = status
     # 禁用用户时立即吊销其所有 JWT,避免被禁用后旧令牌仍可用
     if status == 0:
@@ -125,12 +134,25 @@ def set_role(
     _assert_mutable_user(user)
     if role not in ("admin", "user", "reviewer"):
         raise ValidationError("角色不合法", code=40001)
+    if role == "reviewer" and settings.billing_entitlement_enforcement_ready:
+        from app.services.billing_entitlement_service import has_reviewer_entitlement
+
+        if not has_reviewer_entitlement(db, user_id):
+            raise ForbiddenError("需要有效审查员权益，才能升级为审查员", code=40324)
     if user.role in ("admin", "super_admin") and role not in ("admin", "super_admin"):
         remaining = (
             db.query(User).filter(User.role.in_(["admin", "super_admin"]), User.status == 1, User.id != user_id).count()
         )
         if remaining == 0:
             raise ForbiddenError("不能降级最后一个可用管理员账号", code=40320)
+    if user.role == "admin" and role != "admin":
+        from app.services.billing_c4_reviewer_service import revoke_for_user
+        from app.services.billing_rate_reviewer_service import revoke_for_user as rate_revoke_for_user
+        from app.services.billing_refund_reviewer_service import revoke_for_user as refund_revoke_for_user
+
+        revoke_for_user(db, user, actor_id=admin_id or None, reason="平台角色降级，撤销 C4 委任")
+        rate_revoke_for_user(db, user, actor_id=admin_id or None, reason="平台角色降级，撤销费率复核委任")
+        refund_revoke_for_user(db, user, actor_id=admin_id or None, reason="平台角色降级，撤销退款复核委任")
     user.role = role
     user.token_version = (user.token_version or 0) + 1
     # 同步新版 RBAC 关联。角色模型固定为单一基础角色，降级必须撤销全部旧关联。
@@ -184,6 +206,13 @@ def delete_user(
         )
         if remaining == 0:
             raise ForbiddenError("不能删除最后一个可用管理员账号", code=40320)
+    from app.services.billing_c4_reviewer_service import revoke_for_user
+    from app.services.billing_rate_reviewer_service import revoke_for_user as rate_revoke_for_user
+    from app.services.billing_refund_reviewer_service import revoke_for_user as refund_revoke_for_user
+
+    revoke_for_user(db, user, actor_id=admin_id or None, reason="账号删除，撤销 C4 委任")
+    rate_revoke_for_user(db, user, actor_id=admin_id or None, reason="账号删除，撤销费率复核委任")
+    refund_revoke_for_user(db, user, actor_id=admin_id or None, reason="账号删除，撤销退款复核委任")
     user.status = -1
     # 吊销该用户全部 JWT,删除后立即无法再访问
     user.token_version = (user.token_version or 0) + 1

@@ -700,6 +700,7 @@ def _persist_worker_execution_snapshot(
         db.query(SandboxEnvironment)
         .filter(
             SandboxEnvironment.id == environment.id,
+            SandboxEnvironment.status.notin_(("stopping", *TERMINAL_STATES)),
             *([SandboxEnvironment.execution_token == execution_token] if execution_token is not None else []),
         )
         .update(
@@ -7638,6 +7639,68 @@ def _stop_registered_worker_requests(
     return _stop_worker_requests(worker, _registered_worker_request_ids(environment))
 
 
+def _has_current_worker_stop_evidence(db: Session, environment: SandboxEnvironment) -> bool:
+    """Verify persisted receipts for this exact worker, token and request set.
+
+    Caller must hold the environment row lock. This proves only the registered
+    Worker resources were reclaimed, not that the parent task has exited.
+    """
+    if environment.status != "stopped" or not environment.worker_id or not environment.execution_token:
+        return False
+    token_digest = hashlib.sha256(environment.execution_token.encode("utf-8")).hexdigest()
+    expected = set(_registered_worker_request_ids(environment))
+    events = (db.query(SandboxEvent).filter_by(environment_id=environment.id, stage="worker_stop_receipts")
+              .order_by(SandboxEvent.id.desc()).with_for_update().all())
+    for event in events:
+        payload = _loads(event.payload_json, {})
+        if (not isinstance(payload, dict) or payload.get("version") != "worker-cleanup-v1"
+                or payload.get("worker_id") != environment.worker_id
+                or payload.get("execution_token_sha256") != token_digest):
+            continue
+        receipts = payload.get("receipts")
+        if not isinstance(receipts, list) or not all(isinstance(item, dict) for item in receipts):
+            continue
+        ids = [item.get("request_id") for item in receipts]
+        if (len(ids) == len(expected) and all(isinstance(item, str) for item in ids) and set(ids) == expected
+                and all(item.get("status") in TERMINAL_STATES and item.get("cleanup_confirmed") is True
+                        for item in receipts)):
+            return True
+    return False
+
+
+def _record_worker_stop_receipts(db: Session, environment: SandboxEnvironment, worker: SandboxWorker,
+                                 receipts: dict[str, dict[str, Any]], *, request_ids: list[str],
+                                 execution_token: str) -> SandboxEnvironment:
+    """Store exact Worker cleanup receipts in the same transaction as stop."""
+    if not isinstance(receipts, dict) or set(receipts) != set(request_ids):
+        raise RuntimeError("Sandbox worker 停止回执未覆盖全部登记请求")
+    normalized = []
+    for request_id in request_ids:
+        state = receipts[request_id]
+        result = state.get("result") if isinstance(state, dict) else None
+        if (not isinstance(state, dict) or state.get("request_id") != request_id
+                or state.get("status") not in TERMINAL_STATES or not isinstance(result, dict)
+                or result.get("cleanup_confirmed") is not True or result.get("cleanup_error")):
+            raise RuntimeError("Sandbox worker 停止回执无效")
+        normalized.append({"request_id": request_id, "status": state["status"], "cleanup_confirmed": True})
+    current = (db.query(SandboxEnvironment).filter_by(id=environment.id)
+               .populate_existing().with_for_update().one())
+    if (current.worker_id != worker.id or str(current.execution_token or "") != execution_token
+            or set(_registered_worker_request_ids(current)) != set(request_ids)):
+        raise RuntimeError("沙箱执行范围已变化，停止回执不能复用")
+    if current.status == "stopped" and _has_current_worker_stop_evidence(db, current):
+        return current
+    if current.status not in {"stopping", "stopped"}:
+        raise RuntimeError("沙箱状态已变化，停止回执不能复用")
+    _append_event(db, current, "complete", "worker_stop_receipts", "已记录 Worker 资源回收回执", {
+        "version": "worker-cleanup-v1", "worker_id": int(worker.id),
+        "execution_token_sha256": hashlib.sha256(execution_token.encode("utf-8")).hexdigest()
+        if execution_token else None,
+        "receipts": normalized,
+    })
+    return current
+
+
 def _proxy_worker_preview(
     worker: SandboxWorker,
     public_id: str,
@@ -8416,6 +8479,7 @@ def create_environment(
     payload: dict[str, Any],
     *,
     require_remote_target_approval: bool = False,
+    on_created=None,
 ) -> SandboxEnvironment:
     """创建沙箱环境，并在所有失败路径释放项目行锁。"""
     try:
@@ -8424,6 +8488,7 @@ def create_environment(
             actor,
             payload,
             require_remote_target_approval=require_remote_target_approval,
+            on_created=on_created,
         )
     except Exception:
         db.rollback()
@@ -8447,6 +8512,7 @@ def _create_environment_locked(
     payload: dict[str, Any],
     *,
     require_remote_target_approval: bool = False,
+    on_created=None,
 ) -> SandboxEnvironment:
     project_id = int(payload["project_id"])
     purpose = payload["purpose"]
@@ -8660,6 +8726,8 @@ def _create_environment_locked(
     )
     db.add(environment)
     db.flush()
+    if on_created is not None:
+        on_created(db, environment)
     if agent_team_context:
         from app.services import agent_team_service
 
@@ -9457,19 +9525,29 @@ def _execute_environment(
                 ):
                     return
                 _commit_execution(db, environment_id, execution_token)
-                environment = db.get(SandboxEnvironment, environment_id)
+                environment = (db.query(SandboxEnvironment).filter_by(id=environment_id)
+                               .populate_existing().first())
                 if environment is None:
                     return
                 if environment.status in {"stopping", "stopped", "expired"}:
-                    try:
-                        _stop_registered_worker_requests(worker, environment)
-                        if environment.status == "stopping":
-                            environment.status = "stopped"
-                            environment.stopped_at = _utcnow()
-                    except Exception as exc:  # noqa: BLE001 - keep cleanup visible and retryable
-                        environment.status = "stopping"
-                        environment.error = f"停止 worker 失败：{str(exc)[:1000]}"
-                    _commit_execution(db, environment_id, execution_token)
+                    if environment.status == "stopping":
+                        try:
+                            request_ids = _registered_worker_request_ids(environment)
+                            token = str(environment.execution_token or "")
+                            receipts = _stop_registered_worker_requests(worker, environment)
+                            environment = _record_worker_stop_receipts(
+                                db, environment, worker, receipts, request_ids=request_ids, execution_token=token)
+                            if environment.status == "stopping":
+                                environment.status = "stopped"
+                                environment.stopped_at = _utcnow()
+                        except Exception as exc:  # noqa: BLE001 - keep cleanup visible and retryable
+                            db.rollback()
+                            environment = (db.query(SandboxEnvironment).filter_by(id=environment_id)
+                                           .populate_existing().with_for_update().one())
+                            if environment.status in TERMINAL_STATES:
+                                return
+                            environment.error = f"停止 worker 失败：{str(exc)[:1000]}"
+                        _commit_execution(db, environment_id, execution_token)
                     return
                 execute_payload = _worker_execute_payload(saved_request, effective_source)
                 _require_execution_lease(db, environment_id, execution_token)
@@ -9525,15 +9603,26 @@ def _execute_environment(
                     )
                     persist_worker_events(result)
                     _commit_execution(db, environment_id, execution_token)
-                environment = db.get(SandboxEnvironment, environment_id)
+                environment = (db.query(SandboxEnvironment).filter_by(id=environment_id)
+                               .populate_existing().first())
                 _require_execution_lease(db, environment_id, execution_token)
                 if environment.status in {"stopping", "stopped", "expired"}:
                     if environment.status == "stopping":
                         try:
-                            _stop_registered_worker_requests(worker, environment)
-                            environment.status = "stopped"
-                            environment.stopped_at = _utcnow()
+                            request_ids = _registered_worker_request_ids(environment)
+                            token = str(environment.execution_token or "")
+                            receipts = _stop_registered_worker_requests(worker, environment)
+                            environment = _record_worker_stop_receipts(
+                                db, environment, worker, receipts, request_ids=request_ids, execution_token=token)
+                            if environment.status == "stopping":
+                                environment.status = "stopped"
+                                environment.stopped_at = _utcnow()
                         except Exception as exc:  # noqa: BLE001 - keep cleanup visible and retryable
+                            db.rollback()
+                            environment = (db.query(SandboxEnvironment).filter_by(id=environment_id)
+                                           .populate_existing().with_for_update().one())
+                            if environment.status in TERMINAL_STATES:
+                                return
                             environment.error = f"停止 worker 失败：{str(exc)[:1000]}"
                         _commit_execution(db, environment_id, execution_token)
                     return
@@ -9989,9 +10078,21 @@ def _execute_environment(
                 _append_event(db, environment, "progress", "cleanup", "执行异常，正在回收已提交的 Worker 请求")
                 _commit_execution(db, environment_id, execution_token)
                 try:
-                    _stop_registered_worker_requests(worker, environment)
+                    request_ids = _registered_worker_request_ids(environment)
+                    token = str(environment.execution_token or "")
+                    receipts = _stop_registered_worker_requests(worker, environment)
+                    environment = _record_worker_stop_receipts(
+                        db, environment, worker, receipts, request_ids=request_ids, execution_token=token)
+                    if environment.status in TERMINAL_STATES:
+                        db.commit()
+                        return
                     cleanup_confirmed = True
                 except Exception as cleanup_exc:  # noqa: BLE001 - remain nonterminal until retry succeeds
+                    db.rollback()
+                    environment = (db.query(SandboxEnvironment).filter_by(id=environment_id)
+                                   .populate_existing().with_for_update().one())
+                    if environment.status in TERMINAL_STATES:
+                        return
                     cleanup_error = str(cleanup_exc)[:1000]
             elif environment.worker_id is not None:
                 cleanup_error = f"Sandbox Worker 配置不存在：worker_id={environment.worker_id}"
@@ -10422,6 +10523,11 @@ def _sandbox_composite_score_lines(breakdown: dict[str, Any]) -> list[str]:
 
 def stop_environment(db: Session, actor: User, public_id: str) -> dict[str, Any]:
     row = _get_visible(db, actor, public_id)
+    # MySQL RR may have loaded this object before another stop committed.
+    # A locking current read prevents a stale running snapshot from reviving
+    # a terminal environment or issuing a second stop after completion.
+    row = (db.query(SandboxEnvironment).filter_by(id=row.id)
+           .populate_existing().with_for_update().one())
     if not _can_manage(db, actor, row):
         raise ForbiddenError("只有创建者或超级管理员可关闭沙箱", code=40300)
     if row.status in TERMINAL_STATES:
@@ -10445,6 +10551,9 @@ def stop_environment(db: Session, actor: User, public_id: str) -> dict[str, Any]
     row.status = "stopping"
     _append_event(db, row, "dispatch", "stop", f"{row.agent_code} 已调用关闭工具")
     db.commit()
+    # A request registered before the stopping update may not be in this
+    # Session's prior snapshot. Read its committed ledger before stopping it.
+    db.refresh(row)
     if row.worker_id is not None and worker is None:
         error = f"Sandbox Worker 配置不存在：worker_id={row.worker_id}"
         row.error = error
@@ -10452,17 +10561,31 @@ def stop_environment(db: Session, actor: User, public_id: str) -> dict[str, Any]
         db.commit()
         raise RuntimeError(error)
     if worker:
+        environment_id = int(row.id)
         try:
-            _stop_registered_worker_requests(worker, row)
-        except httpx.HTTPStatusError as exc:
-            # 404 也不能视为成功：新协议必须返回已持久化的停止墓碑。
-            row.error = f"关闭 worker 失败：{str(exc)[:1000]}"
-            _append_event(db, row, "failed", "stop", "关闭 worker 未返回持久化终止回执，保留 stopping 状态等待重试")
-            db.commit()
-            raise
+            request_ids = _registered_worker_request_ids(row)
+            requested_token = str(row.execution_token or "")
+            receipts = _stop_registered_worker_requests(worker, row)
+            row = _record_worker_stop_receipts(db, row, worker, receipts, request_ids=request_ids,
+                                               execution_token=requested_token)
+            if row.status == "stopped":
+                db.commit()
+                return environment_to_dict(db, row, actor)
         except Exception as exc:
+            # A concurrent stop may have succeeded while this call was in
+            # flight. Accept that outcome only with exact persisted receipts.
+            db.rollback()
+            row = (db.query(SandboxEnvironment).filter_by(id=environment_id)
+                   .populate_existing().with_for_update().one())
+            if _has_current_worker_stop_evidence(db, row):
+                return environment_to_dict(db, row, actor)
+            if row.status in TERMINAL_STATES:
+                raise
             row.error = f"关闭 worker 失败：{str(exc)[:1000]}"
-            _append_event(db, row, "failed", "stop", "关闭 worker 失败，保留 stopping 状态等待重试")
+            message = ("关闭 worker 未返回持久化终止回执，保留 stopping 状态等待重试"
+                       if isinstance(exc, httpx.HTTPStatusError)
+                       else "关闭 worker 失败，保留 stopping 状态等待重试")
+            _append_event(db, row, "failed", "stop", message)
             db.commit()
             raise
     row.status = "stopped"

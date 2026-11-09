@@ -302,6 +302,21 @@ class DeepSeekAgent:
         return resp, int((time.time() - t0) * 1000)
 
     def _request_with_cancellation(self, url: str, headers: dict, payload: dict, *, on_cancel) -> tuple:
+        """Wrap the shared HTTP entry when an explicitly trusted billing scope exists."""
+        from app.services.billing_runtime_gate import metered_response_request
+
+        api_config = getattr(self, "api_config", None)
+        return metered_response_request(
+            model_name=self.model, payload=payload,
+            provider_name=getattr(api_config, "provider", "deepseek"),
+            base_url=getattr(self, "base_url", settings.deepseek_base_url),
+            credential_source=getattr(
+                api_config, "billing_credential_source", getattr(api_config, "source", "system"),
+            ),
+            send=lambda: self._request_without_billing(url, headers, payload, on_cancel=on_cancel),
+        )
+
+    def _request_without_billing(self, url: str, headers: dict, payload: dict, *, on_cancel) -> tuple:
         """团队调用绑定完整 async HTTP 生命周期；未绑定租约的调用沿用共享同步池。"""
         from app.services.agent_scheduler_runtime import (
             check_agent_execution,

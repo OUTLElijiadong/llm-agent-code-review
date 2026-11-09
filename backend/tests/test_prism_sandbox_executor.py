@@ -1578,6 +1578,54 @@ def test_remote_only_blackbox_never_selects_or_dispatches_a_worker(db, monkeypat
     assert _DormantThread.created[0].started is True
 
 
+@pytest.mark.parametrize("fail_before_commit", [False, True])
+def test_pentest_environment_association_is_atomic_before_worker_start(db, monkeypatch, fail_before_commit) -> None:
+    from app.models.pentest import PentestEngagement, PentestExecution, PentestExecutionActivity
+    from app.services.pentest_execution_context import pentest_activity_context, pentest_execution_context
+    from app.services.pentest_execution_service import associate_sandbox_during_creation
+
+    actor = _patch_environment_creation(db, monkeypatch, _archive({"main.py": "print('test')\n"}))
+    _persist_execution_worker(db)
+    engagement = PentestEngagement(public_id="association-probe", user_id=actor.id, project_id=91,
+                                   target_type="web", scope_json="{}", status="running", rules_ack=1)
+    db.add(engagement)
+    db.flush()
+    run = PentestExecution(engagement_id=engagement.id, owner_id=actor.id, project_id=91,
+                           generation_no=1, execution_token="a" * 32, status="running")
+    db.add(run)
+    db.flush()
+    activity = PentestExecutionActivity(execution_id=run.id, activity_key="sandbox:atomic",
+                                       kind="sandbox", status="dispatched")
+    db.add(activity)
+    db.commit()
+    execution_id, activity_id, actor_id = run.id, activity.id, actor.id
+
+    def associate(session, environment):
+        assert not _DormantThread.created
+        associate_sandbox_during_creation(session, environment)
+        if fail_before_commit:
+            raise RuntimeError("interrupt before commit")
+
+    with pentest_execution_context(execution_id=execution_id, token="a" * 32, project_id=91, owner_id=actor_id):
+        with pentest_activity_context(activity_id):
+            if fail_before_commit:
+                with pytest.raises(RuntimeError, match="interrupt before commit"):
+                    sandbox_service.create_environment(
+                        db, actor, {"project_id": 91, "purpose": "test", "language": "python",
+                                    "test_mode": "whitebox"}, on_created=associate)
+            else:
+                env = sandbox_service.create_environment(
+                    db, actor, {"project_id": 91, "purpose": "test", "language": "python",
+                                "test_mode": "whitebox"}, on_created=associate)
+    db.expire_all()
+    saved = db.get(PentestExecutionActivity, activity_id)
+    if fail_before_commit:
+        assert saved.sandbox_environment_id is None and not _DormantThread.created
+        assert db.query(SandboxEnvironment).count() == 0
+    else:
+        assert saved.sandbox_environment_id == env.id and _DormantThread.created[0].started
+
+
 def test_dispatch_thread_start_failure_is_terminal_and_publishes_failed_test_report(db, monkeypatch) -> None:
     archive = _archive({"main.py": "print('dispatch failure')\n"})
     actor = _patch_environment_creation(db, monkeypatch, archive)
@@ -1841,6 +1889,45 @@ def test_fast_terminal_execute_response_persists_worker_events_before_conclusion
     }
     assert worker_db.rollback.call_count == 0
     assert worker_db.close.call_count == 1
+
+
+@pytest.mark.parametrize("execution_fails", [False, True])
+def test_worker_observes_concurrent_stop_and_persists_worker_receipts(db, monkeypatch, execution_fails) -> None:
+    _persist_execution_owner(db)
+    _persist_execution_worker(db)
+    source_sha = hashlib.sha256(b"source").hexdigest()
+    env = SandboxEnvironment(
+        public_id="sbx_worker_stop", project_id=91, owner_id=17, worker_id=8, agent_code="test_verifier",
+        purpose="test", language="python", test_mode="whitebox", status="queued", runtime="runsc",
+        image_ref="image", source_sha256=source_sha, execution_token="worker-stop-token",
+        resource_policy_json="{}", agent_config_json='{"worker_mode":"whitebox","remote_only":false}',
+        expires_at=datetime.utcnow() + timedelta(hours=1),
+    )
+    db.add(env)
+    db.commit()
+    env_id, public_id = env.id, env.public_id
+    factory = sessionmaker(bind=db.get_bind(), expire_on_commit=False)
+
+    def call_worker(_worker, _method, path, payload):
+        if path == "/execute":
+            with factory.begin() as other:
+                other.query(SandboxEnvironment).filter_by(id=env_id).update({"status": "stopping"})
+            if execution_fails:
+                raise RuntimeError("worker response lost during stop")
+            return {"result": {"request_id": public_id, "source_sha256": source_sha, "status": "succeeded",
+                               "result": {"exit_code": 0}, "events": [], "last_sequence": 0}}
+        assert path == "/stop"
+        return {"result": {"request_id": payload["request_id"], "status": "stopped",
+                           "result": {"cleanup_confirmed": True}}}
+
+    monkeypatch.setattr(sandbox_service, "SessionLocal", factory)
+    monkeypatch.setattr(sandbox_service, "_call_worker", call_worker)
+    monkeypatch.setattr(sandbox_service, "_emit", lambda *_args, **_kwargs: None)
+    sandbox_service._execute_environment(env_id, "c291cmNl", execution_token="worker-stop-token")
+    db.expire_all()
+    assert db.get(SandboxEnvironment, env_id).status == "stopped"
+    evidence = db.query(SandboxEvent).filter_by(environment_id=env_id, stage="worker_stop_receipts").one()
+    assert json.loads(evidence.payload_json)["receipts"][0]["request_id"] == public_id
 
 
 def test_preview_session_token_scope_version_and_expiry(db, monkeypatch) -> None:
@@ -2360,6 +2447,85 @@ def test_late_browser_worker_result_respects_current_sandbox_state(
     else:
         assert json.loads(environment.result_json) == {"passed": True}
         assert db.query(SandboxArtifact).filter_by(environment_id=environment.id).count() == 0
+
+
+@pytest.mark.parametrize("status", ["stopping", "stopped", "expired"])
+def test_sandbox_cannot_register_new_worker_request_after_stop(db, status) -> None:
+    environment = SandboxEnvironment(
+        public_id="sbx_stop_snapshot", project_id=1, owner_id=1, agent_code="whitebox_tester",
+        purpose="test", language="python", test_mode="whitebox", status=status, runtime="runsc",
+        image_ref="image", source_sha256="a" * 64, execution_token="current-token", resource_policy_json="{}",
+        agent_config_json="{}", expires_at=datetime.utcnow() + timedelta(hours=1),
+    )
+    db.add(environment)
+    db.commit()
+    assert not sandbox_service._persist_worker_execution_snapshot(
+        db, environment, execution_bytes=b"archive", source_sha256="b" * 64, repair_round=1,
+        request_envelope={"request_id": "sbx_stop_snapshot-r1"},
+        request_config_json='{"worker_request_ids":["sbx_stop_snapshot-r1"]}', execution_token="current-token")
+    db.refresh(environment)
+    assert environment.worker_request_json is None
+
+
+def test_stop_refreshes_registered_requests_after_marking_stopping(db, monkeypatch) -> None:
+    actor = _persist_execution_owner(db)
+    worker = _persist_execution_worker(db)
+    environment = SandboxEnvironment(
+        public_id="sbx_stop_refresh", project_id=91, owner_id=actor.id, worker_id=worker.id,
+        agent_code="whitebox_tester", purpose="test", language="python", test_mode="whitebox", status="running",
+        runtime="runsc", image_ref="image", source_sha256="a" * 64, execution_token="current-token",
+        resource_policy_json="{}", agent_config_json="{}", expires_at=datetime.utcnow() + timedelta(hours=1),
+    )
+    db.add(environment)
+    db.commit()
+    db.query(SandboxEnvironment).filter_by(id=environment.id).update(
+        {"agent_config_json": '{"worker_request_ids":["sbx_stop_refresh-r1"]}'}, synchronize_session=False)
+    db.commit()
+    assert environment.agent_config_json == "{}"  # stale caller snapshot
+    stopped = []
+    monkeypatch.setattr(sandbox_service, "_get_visible", lambda *_args: environment)
+    monkeypatch.setattr(sandbox_service, "_can_manage", lambda *_args: True)
+    def stop_worker(_worker, row):
+        stopped.extend(sandbox_service._registered_worker_request_ids(row))
+        return {request_id: {"request_id": request_id, "status": "stopped",
+                             "result": {"cleanup_confirmed": True}} for request_id in stopped}
+
+    monkeypatch.setattr(sandbox_service, "_stop_registered_worker_requests", stop_worker)
+    monkeypatch.setattr(sandbox_service, "_publish_terminal_sandbox_report", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sandbox_service, "environment_to_dict", lambda *_args: {})
+    monkeypatch.setattr(sandbox_service.audit_service, "log", lambda *_args, **_kwargs: None)
+    sandbox_service.stop_environment(db, actor, environment.public_id)
+    assert "sbx_stop_refresh-r1" in stopped
+
+
+def test_stop_persists_verified_receipts_for_each_registered_worker_request(db, monkeypatch) -> None:
+    actor = _persist_execution_owner(db)
+    worker = _persist_execution_worker(db)
+    environment = SandboxEnvironment(
+        public_id="sbx_stop_receipts", project_id=91, owner_id=actor.id, worker_id=worker.id,
+        agent_code="whitebox_tester", purpose="test", language="python", test_mode="whitebox", status="running",
+        runtime="runsc", image_ref="image", source_sha256="a" * 64, execution_token="receipt-token",
+        resource_policy_json="{}", agent_config_json='{"worker_request_ids":["sbx_stop_receipts-r1"]}',
+        expires_at=datetime.utcnow() + timedelta(hours=1),
+    )
+    db.add(environment)
+    db.commit()
+    monkeypatch.setattr(sandbox_service, "_get_visible", lambda *_args: environment)
+    monkeypatch.setattr(sandbox_service, "_can_manage", lambda *_args: True)
+    monkeypatch.setattr(sandbox_service, "_call_worker", lambda _worker, _method, _path, payload: {
+        "result": {"request_id": payload["request_id"], "status": "stopped", "result": {"cleanup_confirmed": True}},
+    })
+    monkeypatch.setattr(sandbox_service, "_publish_terminal_sandbox_report", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sandbox_service, "environment_to_dict", lambda *_args: {})
+    monkeypatch.setattr(sandbox_service.audit_service, "log", lambda *_args, **_kwargs: None)
+    sandbox_service.stop_environment(db, actor, environment.public_id)
+    evidence = db.query(SandboxEvent).filter_by(environment_id=environment.id, stage="worker_stop_receipts").one()
+    payload = json.loads(evidence.payload_json)
+    assert payload["worker_id"] == worker.id
+    assert payload["execution_token_sha256"] == hashlib.sha256(b"receipt-token").hexdigest()
+    assert {item["request_id"] for item in payload["receipts"]} == {
+        "sbx_stop_receipts", "sbx_stop_receipts-r1"}
+    assert all(item["cleanup_confirmed"] is True for item in payload["receipts"])
 
 
 def test_sandbox_snapshot_and_finalizing_require_current_execution_token(db) -> None:

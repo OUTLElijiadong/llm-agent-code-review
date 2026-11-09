@@ -332,6 +332,12 @@ class ApiConfig:
     timeout_seconds: Optional[int] = None
     max_retries: Optional[int] = None
     temperature: Optional[float] = None
+    billing_eligible: bool = True
+
+    @property
+    def billing_credential_source(self) -> str:
+        """将失效配置回退标记传递给收费门，避免静默改用平台 Key 扣款。"""
+        return self.source if self.billing_eligible else "fallback"
 
 
 def _commit_api_key_security_change(db: Session, action: str) -> bool:
@@ -373,6 +379,9 @@ def resolve_api_config(
     Returns:
         ApiConfig: 最终使用的 API 配置
     """
+    # 若已启用的高优先级配置因解密/安全校验失败而回退，收费入口不得静默改用平台 Key。
+    billing_fallback_rejected = False
+
     # 尝试读取用户配置
     if user_id is not None:
         from app.models.api_config import UserApiConfig
@@ -385,6 +394,7 @@ def resolve_api_config(
         if row:
             decryption = decrypt_api_key_with_metadata(row.api_key_enc)
             if decryption is None:
+                billing_fallback_rejected = True
                 row.is_active = False
                 _commit_api_key_security_change(db, f"deactivate_user:{user_id}")
                 logger.warning(
@@ -392,6 +402,8 @@ def resolve_api_config(
                 )
             else:
                 key = decryption.plaintext
+                if not key:
+                    billing_fallback_rejected = True
                 if decryption.needs_rotation:
                     row.api_key_enc = encrypt_api_key(key)
                     if not _commit_api_key_security_change(db, f"rotate_user:{user_id}"):
@@ -399,6 +411,7 @@ def resolve_api_config(
                             f"[api_resolver] 用户 {user_id} 的 API Key 轮换未持久化，安全回退",
                         )
                         key = ""
+                        billing_fallback_rejected = True
                 if key:
                     try:
                         base_url = normalize_ai_base_url(
@@ -423,6 +436,7 @@ def resolve_api_config(
                             model=settings.deepseek_model,
                             provider="deepseek",
                             source="system",
+                            billing_eligible=False,
                         )
                     return ApiConfig(
                         api_key=key,
@@ -438,29 +452,33 @@ def resolve_api_config(
         from app.services import system_config_service
 
         gcfg = system_config_service.get_llm_config(db)
-        if (
-            gcfg
-            and gcfg.get("active")
-            and gcfg.get("api_key")
-            and gcfg.get("base_url")
-            and gcfg.get("model")
-        ):
-            base_url = normalize_ai_base_url(
-                gcfg["base_url"],
-                resolve_host=settings.enforce_ai_base_url_dns_check,
-                allow_private=False,
-            )
-            return ApiConfig(
-                api_key=gcfg["api_key"],
-                base_url=base_url,
-                model=gcfg["model"],
-                provider=gcfg.get("provider", "custom"),
-                source="global",
-                timeout_seconds=gcfg.get("timeout_seconds"),
-                max_retries=gcfg.get("max_retries"),
-                temperature=gcfg.get("temperature"),
-            )
+        if gcfg and gcfg.get("active"):
+            if gcfg.get("api_key") and gcfg.get("base_url") and gcfg.get("model"):
+                try:
+                    base_url = normalize_ai_base_url(
+                        gcfg["base_url"],
+                        resolve_host=settings.enforce_ai_base_url_dns_check,
+                        allow_private=False,
+                    )
+                except ValidationError as exc:
+                    logger.warning(f"[api_resolver] 全局 LLM 端点校验失败，收费回退关闭: {exc.message}")
+                    billing_fallback_rejected = True
+                else:
+                    return ApiConfig(
+                        api_key=gcfg["api_key"],
+                        base_url=base_url,
+                        model=gcfg["model"],
+                        provider=gcfg.get("provider", "custom"),
+                        source="global",
+                        timeout_seconds=gcfg.get("timeout_seconds"),
+                        max_retries=gcfg.get("max_retries"),
+                        temperature=gcfg.get("temperature"),
+                        billing_eligible=not billing_fallback_rejected,
+                    )
+            else:
+                billing_fallback_rejected = True
     except Exception as e:  # noqa: BLE001
+        billing_fallback_rejected = True
         logger.warning(f"[api_resolver] 全局 LLM 配置解析失败，回退系统默认: {e}")
 
     # 回退系统默认
@@ -474,4 +492,5 @@ def resolve_api_config(
         model=settings.deepseek_model,
         provider="deepseek",
         source="system",
+        billing_eligible=not billing_fallback_rejected,
     )

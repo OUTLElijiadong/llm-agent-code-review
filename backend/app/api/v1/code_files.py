@@ -1,18 +1,24 @@
 """
 代码文件管理API路由: 上传、新增、编辑、重命名、删除、版本管理、二进制下载
 """
+import asyncio
+import threading
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import List
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import Response
-from sqlalchemy.orm import Session
-from starlette.concurrency import run_in_threadpool
+from loguru import logger
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
-from app.core.exceptions import ConflictError, ValidationError
+from app.core.exceptions import AuthError, ConflictError, PermissionError, ServiceUnavailableError, ValidationError
 from app.core.permission_codes import PermissionCode
 from app.core.rbac_dependency import require_permission
 from app.models.user import User
@@ -27,9 +33,120 @@ from app.schemas.code_file import (
 from app.schemas.code_version import VersionDetailOut, VersionOut
 from app.schemas.common import PageOut, Resp
 from app.services import code_file_service
+from app.services.rbac_service import check_paid_permission_fenced
 from app.utils.multipart_limits import parse_limited_multipart
 
 router = APIRouter()
+_folder_upload_capacity = threading.BoundedSemaphore(4)
+_folder_upload_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="folder-upload")
+
+
+@dataclass(frozen=True)
+class _FolderActor:
+    user_id: int
+    token_version: int
+    token_expires_at: int
+
+
+@dataclass(frozen=True)
+class _FolderAuthorization:
+    user: User
+    reviewer_evidence: object | None
+    enforcement_ready: bool
+    transaction: object
+
+
+def _snapshot_folder_actor(user: User) -> _FolderActor:
+    user_id = getattr(user, "id", None)
+    version = getattr(user, "_authenticated_token_version", None)
+    expires_at = getattr(user, "_authenticated_token_expires_at", None)
+    if type(user_id) is not int or type(version) is not int or type(expires_at) is not int:
+        raise AuthError("登录状态已失效，请重新登录")
+    return _FolderActor(user_id, version, expires_at)
+
+
+def _authorize_folder_actor(
+    db: Session, actor: _FolderActor, *, permission_code: str = PermissionCode.FILE_UPLOAD, nowait: bool = False,
+) -> _FolderAuthorization:
+    if actor.token_expires_at <= int(datetime.now(timezone.utc).timestamp()):
+        raise AuthError("登录状态已过期，请重新登录")
+    evidence: list = []
+    enforcement_ready = bool(settings.billing_entitlement_enforcement_ready)
+    if not check_paid_permission_fenced(
+        db, actor.user_id, permission_code, expected_token_version=actor.token_version,
+        locked_reviewer_evidence=evidence,
+        **({"nowait": True} if nowait else {}),
+    ):
+        raise PermissionError("登录状态或操作权限已失效")
+    user = db.get(User, actor.user_id)
+    if user is None:
+        raise AuthError("登录状态已失效，请重新登录")
+    if len(evidence) != 1:
+        raise PermissionError("操作授权证据不可用")
+    transaction = db.get_transaction()
+    if transaction is None:
+        raise PermissionError("操作授权事务已失效")
+    return _FolderAuthorization(user, evidence[0], enforcement_ready, transaction)
+
+
+class _FolderCommitGuard:
+    """Recheck time-dependent evidence already locked by the current transaction."""
+
+    def __init__(self, db: Session, actor: _FolderActor, authorization: _FolderAuthorization):
+        self.db = db
+        self.actor = actor
+        self.authorization = authorization
+
+    def after_rollback(self) -> None:
+        # Quarantine starts a new transaction after the failed scan rolled back.
+        self.authorization = _authorize_folder_actor(self.db, self.actor)
+
+    def before_commit(self) -> None:
+        if self.db.get_transaction() is not self.authorization.transaction:
+            raise PermissionError("操作授权事务已失效")
+        if self.actor.token_expires_at <= int(datetime.now(timezone.utc).timestamp()):
+            raise AuthError("登录状态已过期，请重新登录")
+        if bool(settings.billing_entitlement_enforcement_ready) != self.authorization.enforcement_ready:
+            raise PermissionError("操作授权状态已变化，请重试")
+        if self.authorization.reviewer_evidence is not None:
+            from app.services.billing_entitlement_service import reviewer_entitlement_evidence_is_valid
+
+            if not reviewer_entitlement_evidence_is_valid(self.authorization.reviewer_evidence):
+                raise PermissionError("审查员权益已过期")
+
+
+def _close_folder_form(form) -> None:
+    """The submitted future owns every parsed file, even if it never starts."""
+    for _, item in form.multi_items():
+        if isinstance(item, StarletteUploadFile):
+            try:
+                item.file.close()
+            except Exception as exc:
+                # Keep closing remaining files even if one temporary file fails.
+                logger.warning("目录上传临时文件关闭失败: {}", type(exc).__name__)
+
+
+def _run_owned_folder_upload(engine: Engine, actor: _FolderActor, project_id: int,
+                             files: list[StarletteUploadFile], cancelled: threading.Event) -> dict:
+    # No request-scoped Session or ORM object is shared with this thread.
+    with sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)() as db:
+        return _upload_folder_items(db, None, project_id, files, actor=actor, cancelled=cancelled)
+
+
+async def _close_unsubmitted_folder_form(form) -> None:
+    """Release a parsed form even if cancellation interrupts its caller."""
+    try:
+        future = _folder_upload_executor.submit(_close_folder_form, form)
+    except BaseException:
+        try:
+            _close_folder_form(form)
+        finally:
+            _folder_upload_capacity.release()
+        raise
+    future.add_done_callback(lambda _future: _folder_upload_capacity.release())
+    wrapped = asyncio.wrap_future(future)
+    wrapped.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+    await asyncio.shield(wrapped)
 
 
 @router.get("", response_model=Resp[PageOut[CodeFileOut]],
@@ -62,10 +179,14 @@ def upload_code(
     user: User = Depends(get_current_user),
 ):
     """上传代码文件(Multipart)"""
+    actor = _snapshot_folder_actor(user)
+    authorization = _authorize_folder_actor(db, actor)
+    guard = _FolderCommitGuard(db, actor, authorization)
     try:
         file_id, lang, ver = code_file_service.upload(
-            db=db, user=user, project_id=project_id,
+            db=db, user=authorization.user, project_id=project_id,
             upload_file=file, file_path=file_path, language=language,
+            before_commit=guard.before_commit, after_rollback=guard.after_rollback,
         )
     except ValueError as exc:
         # 恶意软件/归档安全扫描拒绝属于可预期的用户输入结果,不能升级为 500。
@@ -81,9 +202,12 @@ def upload_code(
 
 def _upload_folder_items(
     db: Session,
-    user: User,
+    user: User | None,
     project_id: int,
     files: list[StarletteUploadFile],
+    *,
+    actor: _FolderActor | None = None,
+    cancelled: threading.Event | None = None,
 ) -> dict:
     """在线程池内沿用既有逐文件上传事务与结果合同。"""
     results = []
@@ -95,10 +219,24 @@ def _upload_folder_items(
     ])
 
     for upload_file, logical_path in zip(files, logical_paths):
+        if cancelled is not None and cancelled.is_set():
+            break
+        guard = None
+        if actor is not None:
+            authorization = _authorize_folder_actor(db, actor)
+            user = authorization.user
+            guard = _FolderCommitGuard(db, actor, authorization)
+        if cancelled is not None and cancelled.is_set():
+            db.rollback()
+            break
+        if user is None:
+            raise AuthError("登录状态已失效，请重新登录")
         try:
             file_id, lang, ver = code_file_service.upload(
                 db=db, user=user, project_id=project_id,
                 upload_file=upload_file, file_path=logical_path, language=None,
+                before_commit=guard.before_commit if guard else None,
+                after_rollback=guard.after_rollback if guard else None,
             )
             results.append({
                 "file_name": upload_file.filename,
@@ -142,13 +280,22 @@ async def upload_folder(
     Returns:
         Resp[dict]: 包含成功/失败计数和文件列表
     """
-    form = await parse_limited_multipart(
-        request.headers,
-        request.stream(),
-        max_file_bytes=settings.max_upload_size,
-        max_files=1000,
-    )
+    if not _folder_upload_capacity.acquire(blocking=False):
+        raise ServiceUnavailableError("当前目录上传较多，请稍后重试")
+    form = None
+    transferred = False
+    cancelled = threading.Event()
     try:
+        actor = _snapshot_folder_actor(user)
+        engine = db.get_bind()
+        if not isinstance(engine, Engine):
+            raise ServiceUnavailableError("目录上传需要独立数据库连接")
+        form = await parse_limited_multipart(
+            request.headers,
+            request.stream(),
+            max_file_bytes=settings.max_upload_size,
+            max_files=1000,
+        )
         raw_project_id = form.get("project_id")
         try:
             project_id = int(str(raw_project_id))
@@ -159,10 +306,32 @@ async def upload_folder(
         files = [item for item in form.getlist("files") if isinstance(item, StarletteUploadFile)]
         if not files:
             raise ValidationError("至少上传一个文件")
-        result = await run_in_threadpool(_upload_folder_items, db, user, project_id, files)
+        future = _folder_upload_executor.submit(_run_owned_folder_upload, engine, actor, project_id, files, cancelled)
+        transferred = True
+
+        def cleanup(_future: Future) -> None:
+            try:
+                _close_folder_form(form)
+            finally:
+                _folder_upload_capacity.release()
+
+        future.add_done_callback(cleanup)
+        wrapped = asyncio.wrap_future(future)
+        # A cancelled request may no longer await the worker's result.
+        wrapped.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+        try:
+            result = await asyncio.shield(wrapped)
+        except asyncio.CancelledError:
+            cancelled.set()
+            future.cancel()
+            raise
         return Resp(data=result)
     finally:
-        await form.close()
+        if not transferred:
+            if form is None:
+                _folder_upload_capacity.release()
+            else:
+                await _close_unsubmitted_folder_form(form)
 
 
 @router.post("", response_model=Resp[dict],

@@ -205,4 +205,22 @@ def test_resolve_config_falls_back_when_saved_url_is_unsafe(db, admin_user):
 
     cfg = resolve_api_config(db, user_id=admin_user.id)
     assert cfg.source == "system"
+    assert cfg.billing_eligible is False
+    assert cfg.billing_credential_source == "fallback"
     assert cfg.base_url != "http://127.0.0.1:11434"
+
+
+def test_resolve_config_marks_unsafe_global_fallback_non_billable(db, monkeypatch):
+    monkeypatch.setattr(
+        "app.services.system_config_service.get_llm_config",
+        lambda _db: {
+            "active": True, "api_key": "platform-key", "base_url": "http://127.0.0.1:9000",
+            "model": "deepseek-v4-flash", "provider": "deepseek",
+        },
+    )
+
+    cfg = resolve_api_config(db)
+
+    assert cfg.source == "system"
+    assert cfg.billing_eligible is False
+    assert cfg.billing_credential_source == "fallback"
