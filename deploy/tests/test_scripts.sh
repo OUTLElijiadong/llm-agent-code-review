@@ -368,6 +368,20 @@ case "${1:-}" in
     esac ;;
   inspect)
     case "$*" in
+      *'{{.State.Status}}'*)
+        if [[ "$*" == *cid-backend* && -f "${FAKE_RELEASE_WORKSPACE:?}/stopped" ]]; then
+          echo exited
+        else
+          echo running
+        fi ;;
+      *'com.docker.compose.service'*)
+        case "$*" in *cid-backend*) echo backend ;; *cid-frontend*) echo frontend ;; *) exit 1 ;; esac ;;
+      *'com.docker.compose.oneoff'*)
+        if [[ "$*" == *cid-backend* && "${FAKE_RELEASE_MODE:-}" == stopped_release_oneoff ]]; then
+          echo True
+        else
+          echo False
+        fi ;;
       *'{{.Image}}'*)
         case "$*" in *frontend*) printf 'sha256:%064d\n' 0 | tr 0 2 ;; *) printf 'sha256:%064d\n' 0 | tr 0 1 ;; esac ;;
       *'{{.Config.Image}}'*)
@@ -498,6 +512,24 @@ SCRIPT
   : > "$docker_log"
   cd "$workspace/deploy"
   case "$test_case" in
+    stopped_release_binding|stopped_release_oneoff)
+      touch "$workspace/stopped"
+      if [[ "$test_case" == stopped_release_oneoff ]]; then
+        export FAKE_RELEASE_MODE=stopped_release_oneoff
+        if APP_RELEASE="$previous_sha" APP_VERSION=3.8.2 \
+          BOUND_BACKEND_IMAGE_ID="sha256:$(printf '%064d' 0 | tr 0 1)" \
+          BOUND_FRONTEND_IMAGE_ID="sha256:$(printf '%064d' 0 | tr 0 2)" \
+          bash -c 'source "$1"; assert_recorded_release_environment' _ "$PWD/lib/common.sh" > "$output_file" 2>&1; then
+          echo 'Compose 一次性容器被错误接受为已停止发布容器' >&2; exit 1
+        fi
+        assert_contains "$output_file" '无法识别唯一的运行或已停止发布容器: backend'
+      else
+        APP_RELEASE="$previous_sha" APP_VERSION=3.8.2 \
+          BOUND_BACKEND_IMAGE_ID="sha256:$(printf '%064d' 0 | tr 0 1)" \
+          BOUND_FRONTEND_IMAGE_ID="sha256:$(printf '%064d' 0 | tr 0 2)" \
+          bash -c 'source "$1"; assert_recorded_release_environment' _ "$PWD/lib/common.sh" > "$output_file"
+        assert_contains "$docker_log" 'compose ps --all --quiet --status exited backend'
+      fi ;;
     write_version)
       APP_VERSION=9.9.9 bash -c 'source lib/common.sh; write_release_state "$1" "$2" "$2" "$2" all none 047_review_input_snapshot 3.8.4' _ "$workspace/new.env" "$current_sha"
       assert_contains "$workspace/new.env" 'APP_VERSION=3.8.4' ;;
@@ -522,12 +554,13 @@ SCRIPT
           echo "不可信账本未被拒绝: $test_case" >&2; exit 1
         fi
       fi ;;
-    ops_default_drift|ops_masked_drift|ops_running_drift|ops_consistent)
+    ops_default_drift|ops_masked_drift|ops_running_drift|ops_consistent|ops_stopped_container)
       if [[ "$test_case" == ops_default_drift || "$test_case" == ops_masked_drift ]]; then
         printf 'APP_VERSION=1.0.0\nAPP_RELEASE=cccccccccccccccccccccccccccccccccccccccc\nBACKEND_RELEASE=cccccccccccccccccccccccccccccccccccccccc\nFRONTEND_RELEASE=cccccccccccccccccccccccccccccccccccccccc\n' >> .env
       fi
       if [[ "$test_case" == ops_masked_drift ]]; then export APP_VERSION=3.8.2 APP_RELEASE="$previous_sha" BACKEND_RELEASE="$previous_sha" FRONTEND_RELEASE="$previous_sha"; fi
       [[ "$test_case" != ops_running_drift ]] || export FAKE_RELEASE_MODE=running_drift
+      [[ "$test_case" != ops_stopped_container ]] || touch "$workspace/stopped"
       status_code=0
       ./ops-check.sh > "$output_file" || status_code=$?
       python3 - "$output_file" "$test_case" "$status_code" <<'PY'
@@ -717,7 +750,7 @@ run_release_binding_tests() {
   local workspace="$1/release-binding"
   local test_case failed=0 passed=0
   mkdir -p "$workspace"
-  for test_case in write_version legacy_labels legacy_git missing_evidence conflicting_labels wrong_revision invalid_version digest_changed ops_default_drift ops_masked_drift ops_running_drift ops_consistent restore_missing_image restore_missing_evidence restore_invalid_heads restore_pinned_image rollback_version rollback_legacy rollback_missing_evidence rollback_ledger_compatible rollback_ledger_empty_old rollback_ledger_written_old rollback_ledger_reference_without_schema rollback_ledger_invalid_json rollback_ledger_probe_failure rollback_ledger_probe_unknown rollback_ledger_db_failure rollback_ledger_schema_unknown rollback_ledger_legacy rollback_member_supported rollback_member_old rollback_member_unknown rollback_member_probe_failure rollback_chat_authority_compatible rollback_chat_authority_old_refused rollback_chat_authority_absent_119_aware_refused rollback_chat_authority_partial_refused rollback_chat_authority_revision_mismatch rollback_chat_authority_schema_unknown rollback_chat_authority_multiple_revisions rollback_chat_authority_graph_invalid; do
+  for test_case in stopped_release_binding stopped_release_oneoff write_version legacy_labels legacy_git missing_evidence conflicting_labels wrong_revision invalid_version digest_changed ops_default_drift ops_masked_drift ops_running_drift ops_consistent ops_stopped_container restore_missing_image restore_missing_evidence restore_invalid_heads restore_pinned_image rollback_version rollback_legacy rollback_missing_evidence rollback_ledger_compatible rollback_ledger_empty_old rollback_ledger_written_old rollback_ledger_reference_without_schema rollback_ledger_invalid_json rollback_ledger_probe_failure rollback_ledger_probe_unknown rollback_ledger_db_failure rollback_ledger_schema_unknown rollback_ledger_legacy rollback_member_supported rollback_member_old rollback_member_unknown rollback_member_probe_failure rollback_chat_authority_compatible rollback_chat_authority_old_refused rollback_chat_authority_absent_119_aware_refused rollback_chat_authority_partial_refused rollback_chat_authority_revision_mismatch rollback_chat_authority_schema_unknown rollback_chat_authority_multiple_revisions rollback_chat_authority_graph_invalid; do
     if bash "$PWD/tests/test_scripts.sh" --release-case "$test_case" "$workspace/$test_case" > "$workspace/$test_case.log" 2>&1; then
       passed=$((passed + 1)); printf 'PASS %s\n' "$test_case"
     else
@@ -2360,6 +2393,7 @@ assert_contains ops-check.sh '"schema_version": 1'
 assert_contains ops-check.sh 'current_alembic_revision'
 assert_contains ops-check.sh 'http_redirect_code'
 assert_contains lib/common.sh 'container_id="$(service_container_id "$service")"'
+assert_contains lib/common.sh 'compose ps --all --quiet --status exited "$service"'
 assert_not_contains lib/common.sh 'compose ps -a -q "$service"'
 assert_contains prism_ops_executor.py '_configured_certbot_conf_dir() / "live"'
 assert_contains prism_ops_executor.py 'CERTBOT_CONF_DIR'

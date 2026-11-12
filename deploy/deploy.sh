@@ -199,14 +199,14 @@ deploy_stage="preflight"
 
 if [[ -f "$current_state" ]]; then
   load_release_environment "$current_state"
-  assert_running_release_environment
+  assert_recorded_release_environment
   current_sha="$APP_RELEASE"
   current_backend="$BACKEND_RELEASE"
   current_frontend="$FRONTEND_RELEASE"
   write_bound_release_state "$previous_state" "$current_state"
 else
-  backend_container="$(service_container_id backend || true)"
-  frontend_container="$(service_container_id frontend || true)"
+  backend_container="$(release_service_container_id backend || true)"
+  frontend_container="$(release_service_container_id frontend || true)"
   current_backend=""
   current_frontend=""
   if [[ -n "$backend_container" || -n "$frontend_container" ]]; then
@@ -223,7 +223,7 @@ else
     BOUND_BACKEND_IMAGE_ID="$(release_image_id "$backend_image")"
     BOUND_FRONTEND_IMAGE_ID="$(release_image_id "$frontend_image")"
     export BOUND_BACKEND_IMAGE_ID BOUND_FRONTEND_IMAGE_ID
-    assert_running_release_environment
+    assert_recorded_release_environment
     write_release_state \
       "$previous_state" "$current_sha" "$current_backend" "$current_frontend" \
       bootstrap none "$(current_alembic_revision)" "$current_version"
