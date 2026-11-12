@@ -72,7 +72,7 @@ test -z "$(git status --porcelain -- backend frontend deploy/docker-compose.yml 
 
 cd deploy
 ./issue-cert.sh example.com ops@example.com
-./deploy.sh all --revision "$release_sha"
+./deploy.sh all --revision "$release_sha" --confirm-no-external-chat-writers
 ```
 
 首次部署没有可验证的上一应用镜像时，自动回滚能力有限；应预留维护窗口并在完成后逐项确认：
@@ -105,10 +105,15 @@ cd deploy
 ./verify-backup.sh
 
 # 前后端必须绑定同一提交，禁止拆分发布造成版本漂移
-./deploy.sh all --revision "$release_sha"
+# 确认 Compose 外所有 code_review 写进程已停；119 或后继 head 会强制要求该确认
+./deploy.sh all --revision "$release_sha" --confirm-no-external-chat-writers
 ```
 
 当前仅允许目标 `all`，`backend`、`frontend` 拆分发布会被脚本拒绝。全量流程会再次执行强制发布前备份，并由目标 Backend 镜像执行 `alembic upgrade head`。数据库结构迁移使用一次性容器共享 MySQL 网络命名空间，并通过 `127.0.0.1` TCP 连接 `root@%` 完成 DDL；root 凭据只进入该一次性容器，长期运行的 Backend 仍使用普通应用数据库账号，且不会开启 `log_bin_trust_function_creators` 这类全局放宽开关。构建、迁移、容器健康、`/healthz`、`/readyz` 或 HTTPS 冒烟失败时，发布立即停止并在条件允许时切回上一应用镜像。
+
+目标迁移链包含 `119_chat_message_authority`（包括其后续 Alembic head）时，发布前须逐一确认连接 `code_review` 的 Compose 外 Backend、worker 和其他写进程已停止；确认后在命令中传入 `--confirm-no-external-chat-writers`。发布脚本会停止并核验 Compose Backend，核对数据库实际列、恰好三个与迁移定义一致的触发器（任何未知额外触发器均拒绝），再迁移并验证目标镜像的发送权限快照能力。目标 119 迁移预检中的数据库 revision 或权限结构无法读取/确认时，会停止并核实 Compose Backend；若候选代码中的 Alembic 版本图解析失败或目标链与 119 已知不兼容，则在任何迁移/应用切换前拒绝发布并保留当前 Backend。迁移部分完成、结构与 Alembic revision 不一致或数据库已领先目标 head 时，脚本拒绝启动旧/未知 Backend；保留 `pending.env` 和数据库，按前向修复处理。迁移后应用失败时，自动或手动回滚还须再次核对数据库结构和被绑定镜像能力；自动回滚先停当前 Backend，目标镜像不兼容时保持停机，手动回滚在替换容器前拒绝不兼容镜像并让当前 Backend 继续运行。该确认参数是操作者对 Compose 外写进程的停写确认，脚本无法枚举或替操作者停止外部进程。
+
+目标 head 早于迁移 119 时，发布仍会核对数据库当前 revision 和 119 物理结构：数据库领先旧目标时拒绝切换；无法读取 revision/schema 时直接拒绝本次发布并保留当前 Backend；revision 多行、可查询出的部分结构或 revision/schema 不一致时先尝试停止并核实 Compose Backend；旧 revision 下出现 119 结构时停止并要求前向核验。手动回滚遇到 119 结构查询失败、revision 未知/多行、权限快照图无法解析、部分完成或 revision/schema 不一致时，先停止并核实 Compose Backend；数据库结构完整但回滚目标镜像不兼容时，在切换前拒绝且保留当前 Backend 运行。revision 读取必须唯一；不得手工删改 `alembic_version` 或 119 触发器来绕过门禁。
 
 `deploy.sh` 在备份和构建前检查仓库、备份目录及 Docker 数据目录所在文件系统。沿用 `ops-check.sh` 的 `OPS_DISK_CRITICAL_PERCENT`（默认 95%）作为阻断阈值，同时每处要求至少 `DEPLOY_MIN_FREE_GIB`（默认 12 GiB）可用；85% 的常规告警本身不阻断。目录或容量无法采集、阈值配置非法也会拒绝发布。提高绝对保留量可在发布命令的环境中设置 `DEPLOY_MIN_FREE_GIB`，不能设置为 0 关闭门禁；大容量数据库仍需结合备份恢复验证和实际镜像体积评估余量。
 
@@ -173,7 +178,7 @@ cd /opt/code-review/deploy
 ./ops-check.sh
 ```
 
-仅允许 `all` 回滚，前后端必须保持同一提交。回滚前必须确认上一镜像仍存在，并评估当前数据库 schema 是否与上一应用兼容。数据库不兼容时，应保持停写并按独立恢复方案处理，禁止机械执行 Alembic downgrade。
+仅允许 `all` 回滚，前后端必须保持同一提交。回滚前必须确认上一镜像仍存在，并评估当前数据库 schema 是否与上一应用兼容。数据库不兼容时，应保持停写并按独立恢复方案处理，禁止机械执行 Alembic downgrade。迁移 119 及其后继 schema 只允许通过权限快照镜像 probe 的 Backend 回滚；若数据库仍在 119 之前，只允许不依赖 119 列的旧 reader。不完整/未知结构、多 current revision、revision/schema 不一致、兼容图解析失败或 reader 与 schema 不符均拒绝切换。结构/状态异常会先尝试停止并核实 Compose Backend；手动回滚在容器替换前拒绝不兼容镜像。
 
 ## 8. 运维巡检与定时任务
 

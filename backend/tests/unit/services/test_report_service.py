@@ -15,6 +15,7 @@ from app.models.review_task import ReviewTask
 from app.models.review_task_file import ReviewTaskFile
 from app.services.report_service import (
     _sandbox_requested_mode,
+    _task_coverage,
     display_report_score,
     get_report_detail,
     list_reports,
@@ -49,6 +50,18 @@ def test_report_score_follows_reviewed_scope(status, coverage, score, expected):
     )
 
     assert display_report_score(task, score) == expected
+
+
+def test_report_coverage_never_exposes_internal_billing_subject():
+    task = SimpleNamespace(
+        status="success", review_type="standard", total_files=1,
+        coverage={"coverage_status": "complete", "_billing_subject": {"owner_id": 987, "group_id": 321}},
+    )
+
+    coverage = _task_coverage(task)
+
+    assert coverage["coverage_status"] == "complete"
+    assert "_billing_subject" not in coverage
 
 
 def _make_project(db, admin_user):

@@ -1000,6 +1000,54 @@ def test_memory_fallback_is_thread_safe_across_independent_event_loops() -> None
     asyncio.run(verify())
 
 
+@pytest.mark.asyncio
+async def test_public_responses_allows_provider_tools_when_caller_supplies_billing_key() -> None:
+    observed: list[dict[str, Any]] = []
+    tools = [{"type": "web_search"}]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["authorization"] == "Bearer caller-owned-key"
+        observed.append(json.loads(request.content))
+        return httpx.Response(200, json=_response("resp_search", []))
+
+    service = DeepSeekResponsesService(
+        storage=MemoryTranscriptStore(),
+        client_factory=_client_factory(handler),
+    )
+    response = await service.create(
+        {"model": "deepseek-v4-flash", "input": "find recent docs", "tools": tools},
+        "Bearer caller-owned-key",
+    )
+
+    assert isinstance(response, BufferedGatewayResponse)
+    assert response.status_code == 200
+    assert observed[0]["tools"] == tools
+
+
+@pytest.mark.asyncio
+async def test_public_responses_without_scope_is_blocked_when_commercial_metering_is_ready(monkeypatch) -> None:
+    from app.core.config import settings
+    from app.services.billing_ledger_service import BillingError
+
+    monkeypatch.setattr(settings, "billing_commercial_metering_ready", True)
+    network_called = False
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal network_called
+        network_called = True
+        return httpx.Response(200, json=_response("should-not-send", []))
+
+    service = DeepSeekResponsesService(
+        storage=MemoryTranscriptStore(),
+        client_factory=_client_factory(handler),
+    )
+    with pytest.raises(BillingError, match="未进入可信计费作用域"):
+        await service.create(
+            {"model": "deepseek-v4-flash", "input": "hello"}, "Bearer caller-owned-key",
+        )
+    assert network_called is False
+
+
 @pytest.mark.parametrize(
     ("base_url", "expected"),
     [

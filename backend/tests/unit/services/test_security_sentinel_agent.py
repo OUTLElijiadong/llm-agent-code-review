@@ -13,7 +13,8 @@ import pytest
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from app.agents.base import AgentResult
+from app.agents import security_sentinel_agent as sentinel_module
+from app.agents.base import AgentContext, AgentResult
 from app.agents.events import AgentEventType
 from app.agents.security_sentinel_agent import (
     SecuritySentinelAgent,
@@ -125,6 +126,37 @@ def _make_task(task_id=1, user_id=1, project_id=1):
         task_name="t1", review_type="security", status="success",
         total_files=1, processed_files=1,
     )
+
+
+def test_enterprise_scan_uses_team_call_cap_and_skips_mutable_project_archive(db, monkeypatch):
+    monkeypatch.setattr(sentinel_module.settings, "security_semantic_max_requests", 256)
+    ctx = AgentContext(
+        user_id=1,
+        extra={"enterprise_agent_team": {"enterprise_id": 10, "max_calls_per_task": 4}},
+    )
+    assert sentinel_module._semantic_request_limit(ctx) == 4
+    assert sentinel_module._enterprise_archive_persistence_enabled(ctx) is False
+    assert sentinel_module._enterprise_archive_persistence_enabled(AgentContext(user_id=1)) is True
+
+    project = _make_project(project_id=9941, user_id=1, name="企业隔离扫描")
+    agent = SecuritySentinelAgent()
+    agent.inject(db, user=_make_user("admin", uid=1))
+    monkeypatch.setattr(project_source_service, "load_project_source_files", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        project_source_service,
+        "begin_source_archive_audit",
+        lambda *_args, **_kwargs: pytest.fail("企业扫描不能改写项目当前源码归档结果"),
+    )
+    monkeypatch.setattr(
+        project_source_service,
+        "finish_source_archive_audit",
+        lambda *_args, **_kwargs: pytest.fail("企业扫描不能终结项目当前源码归档结果"),
+    )
+
+    result = agent.scan_project(project.id, ctx=ctx)
+
+    assert result.success is False
+    assert result.failure_kind == "empty_scan_input"
 
 
 def _patch_project_source(monkeypatch, files):

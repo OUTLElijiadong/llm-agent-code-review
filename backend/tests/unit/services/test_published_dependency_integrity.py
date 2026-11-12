@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from studio_rbac_test_support import grant_studio_actor
 
 from app.ai.multi_agent import GENERAL_AGENT
 from app.core.exceptions import ConflictError, ValidationError
@@ -16,6 +17,8 @@ from app.services.declarative_agent_runtime import DeclarativeReviewAgentFactory
 def _published_package(db, admin_user):
     reviewer = User(username="integrity_reviewer", password="local-only", role="reviewer", status=1)
     db.add(reviewer)
+    db.flush()
+    grant_studio_actor(db, reviewer)
     db.commit()
     _, skill_version = agent_studio_service.create_skill(
         db, reviewer, code="integrity_skill", name="Integrity skill", description="",
@@ -127,6 +130,8 @@ def test_exhausted_delegation_depth_does_not_silently_claim_complete(db, admin_u
 def test_real_frozen_release_chain_beyond_depth_is_rejected_before_model(db, admin_user, monkeypatch):
     reviewer = User(username="depth_reviewer", password="local-only", role="reviewer", status=1)
     db.add(reviewer)
+    db.flush()
+    grant_studio_actor(db, reviewer)
     db.commit()
     child = None
     for depth in range(3, -1, -1):

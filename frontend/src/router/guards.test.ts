@@ -13,10 +13,21 @@ const auth = vi.hoisted(() => ({
     hasPermission: vi.fn<(permission: string) => boolean>(() => false),
   },
 }))
+const workspace = vi.hoisted(() => ({
+  activeSpace: 'personal',
+  activeEnterpriseId: null as number | null,
+  syncIdentity: vi.fn(),
+  activatePersonal: vi.fn(() => { workspace.activeSpace = 'personal'; workspace.activeEnterpriseId = null }),
+  activateEnterprise: vi.fn((id?: number | null) => {
+    workspace.activeSpace = 'enterprise'
+    if (id !== undefined) workspace.activeEnterpriseId = id
+  }),
+}))
 
 vi.mock('@/stores/user', () => ({
   useUserStore: () => auth.user,
 }))
+vi.mock('@/stores/workspace', () => ({ useWorkspaceStore: () => workspace }))
 
 import { setupGuards } from './guards'
 
@@ -60,6 +71,13 @@ function resetAuthHarness(): void {
 }
 
 beforeEach(resetAuthHarness)
+beforeEach(() => {
+  workspace.activeSpace = 'personal'
+  workspace.activeEnterpriseId = null
+  workspace.syncIdentity.mockReset()
+  workspace.activatePersonal.mockClear()
+  workspace.activateEnterprise.mockClear()
+})
 
 describe('router guards', () => {
   it('allows public pages and redirects an authenticated login visit to role home', async () => {
@@ -189,6 +207,18 @@ describe('router guards', () => {
     ).toBe(true)
     expect(auth.user.hasRole).not.toHaveBeenCalled()
     expect(auth.user.hasPermission).not.toHaveBeenCalled()
+  })
+
+  it('企业上下文拦截个人路由，显式进入企业路由会设置企业模式', async () => {
+    const { before } = installHarness()
+    auth.user.token = 'token'
+    auth.user.profile = { id: 7, role: 'user' }
+    workspace.activeSpace = 'enterprise'
+
+    expect(await before(route('/forum', { workspace: 'personal' }), route('/enterprise')))
+      .toEqual({ path: '/enterprise', replace: true })
+    expect(await before(route('/enterprise', { workspace: 'enterprise' }), route('/dashboard'))).toBe(true)
+    expect(workspace.activateEnterprise).toHaveBeenCalledOnce()
   })
 
   it('updates the document title after navigation', () => {

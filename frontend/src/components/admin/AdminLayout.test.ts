@@ -1,8 +1,9 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createMemoryHistory, createRouter, type RouteRecordRaw } from 'vue-router'
 import { describe, expect, it, vi } from 'vitest'
 import { useUserStore } from '@/stores/user'
+import { useWorkspaceStore } from '@/stores/workspace'
 
 import AdminLayout from './AdminLayout.vue'
 import source from './AdminLayout.vue?raw'
@@ -58,7 +59,11 @@ it('管理员布局保留管理菜单，并单独显示论坛和支持入口', a
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
-      ...paths.map((path) => ({ path, component: { template: '<main />' } })),
+      ...paths.map((path) => ({
+        path,
+        component: { template: '<main />' },
+        meta: path === '/forum' ? { workspace: 'personal' as const } : {},
+      } as RouteRecordRaw)),
       { path: '/admin/:pathMatch(.*)*', component: { template: '<main />' } },
     ],
   })
@@ -67,6 +72,7 @@ it('管理员布局保留管理菜单，并单独显示论坛和支持入口', a
   const userStore = useUserStore(pinia)
   userStore.token = 'test-token'
   userStore.profile = { id: 1, username: 'admin', role: 'super_admin', status: 1 }
+  const workspace = useWorkspaceStore(pinia)
   const wrapper = mount(AdminLayout, {
     global: {
       plugins: [pinia, router],
@@ -87,6 +93,13 @@ it('管理员布局保留管理菜单，并单独显示论坛和支持入口', a
     expect(wrapper.find('[data-route="/forum"]').exists()).toBe(true)
     expect(wrapper.find('[data-route="/support"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('社区与支持')
+
+    workspace.activateEnterprise(25)
+    await flushPromises()
+    expect(wrapper.find('[data-route="/forum"]').exists()).toBe(false)
+    workspace.activatePersonal()
+    await flushPromises()
+    expect(wrapper.find('[data-route="/forum"]').exists()).toBe(true)
   } finally {
     wrapper.unmount()
   }

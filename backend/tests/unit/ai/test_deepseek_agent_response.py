@@ -20,6 +20,14 @@ from app.ai.deepseek_agent import (
 from app.ai.exceptions import AiServiceError
 
 
+@pytest.fixture(autouse=True)
+def legacy_model_call_opt_in(monkeypatch):
+    """响应解析测试显式运行旧版未计量兼容路径。"""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "billing_allow_unmetered_external_calls", True)
+
+
 class _Response:
     def __init__(self, status_code: int, body=None, text: str = ""):
         self.status_code = status_code

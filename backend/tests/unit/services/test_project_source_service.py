@@ -611,7 +611,7 @@ def test_code_file_write_access_uses_project_row_lock(monkeypatch) -> None:
     locked_query = project_query.filter.return_value.with_for_update.return_value
     locked_query.populate_existing.return_value.first.return_value = project
     archive_query = MagicMock()
-    archive_query.filter.return_value.first.return_value = None
+    archive_query.filter.return_value.with_for_update.return_value.first.return_value = None
     db.query.side_effect = [project_query, archive_query]
     db.get.return_value = project
     permission_check = MagicMock(return_value="owner")
@@ -625,6 +625,6 @@ def test_code_file_write_access_uses_project_row_lock(monkeypatch) -> None:
     )
 
     assert result is project
-    project_query.filter.return_value.with_for_update.assert_called_once_with()
+    project_query.filter.return_value.with_for_update.assert_called_once_with(nowait=True)
     locked_query.populate_existing.assert_called_once_with()
-    permission_check.assert_called_once_with(db, 7, actor, need_write=True)
+    permission_check.assert_called_once_with(db, 7, actor, need_write=True, lock=True, nowait=True)

@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import httpx
 import pytest
 
 from app.ai.deepseek_agent import DeepSeekAgent, DeepSeekOutputTruncatedError, _clamp_max_tokens
 from app.services import roundtable_followup_service as followup
+
+pytestmark = pytest.mark.usefixtures("mark_fake_model_credentials_as_user")
 
 
 def _agent(*, retries: int = 0) -> DeepSeekAgent:
@@ -16,6 +20,8 @@ def _agent(*, retries: int = 0) -> DeepSeekAgent:
     agent.model = "deepseek-v4-flash"
     agent.timeout = 1
     agent.max_retries = retries
+    agent._billing_credential_source = "user"
+    agent.api_config = SimpleNamespace(source="user")
     return agent
 
 

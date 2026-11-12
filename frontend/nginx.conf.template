@@ -176,6 +176,28 @@ server {
         proxy_read_timeout 600s;
     }
 
+    location ~ ^/api/enterprises/[1-9][0-9]*/knowledge/attachments$ {
+        # 8 MiB 文件上限 + multipart 表单和请求边界余量。
+        client_max_body_size 9m;
+        error_page 413 = @json_request_too_large;
+        error_page 502 503 504 = @json_api_unavailable;
+        proxy_intercept_errors off;
+        proxy_request_buffering off;
+        proxy_pass http://backend:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Request-Id $request_id;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_connect_timeout 120s;
+        proxy_send_timeout 600s;
+        proxy_read_timeout 600s;
+    }
+
     location = /api/me/avatar/image {
         client_max_body_size 1m;
         error_page 413 = @json_request_too_large;
@@ -183,6 +205,49 @@ server {
         proxy_intercept_errors off;
         proxy_request_buffering off;
         proxy_pass http://backend:8000/api/me/avatar/image;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Request-Id $request_id;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_connect_timeout 120s;
+        proxy_send_timeout 600s;
+        proxy_read_timeout 600s;
+    }
+
+    location = /api/billing/admin/statements/import {
+        # 12 MiB 账单文件 + 1 MiB multipart 边界余量，与后端解析前限流一致。
+        client_max_body_size 13m;
+        error_page 413 = @json_request_too_large;
+        error_page 502 503 504 = @json_api_unavailable;
+        proxy_intercept_errors off;
+        proxy_request_buffering off;
+        proxy_pass http://backend:8000/api/billing/admin/statements/import;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Request-Id $request_id;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_connect_timeout 120s;
+        proxy_send_timeout 600s;
+        proxy_read_timeout 600s;
+    }
+
+    location = /api/billing/admin/fund-statements/import {
+        client_max_body_size 13m;
+        error_page 413 = @json_request_too_large;
+        error_page 502 503 504 = @json_api_unavailable;
+        proxy_intercept_errors off;
+        proxy_request_buffering off;
+        proxy_pass http://backend:8000/api/billing/admin/fund-statements/import;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

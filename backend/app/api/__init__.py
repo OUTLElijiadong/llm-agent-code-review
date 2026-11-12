@@ -25,8 +25,17 @@ from app.api.v1 import (
     auth,
     avatars,
     beta_invites,
+    billing,
     code_files,
     dashboard,
+    enterprise_agent_teams,
+    enterprise_assets,
+    enterprise_chat,
+    enterprise_content,
+    enterprise_knowledge,
+    enterprise_org,
+    enterprise_projects,
+    enterprise_remote_approval,
     evolution,
     feedback,
     forum,
@@ -36,6 +45,9 @@ from app.api.v1 import (
     maintenance,
     mcp_governance,
     pentest,
+    pentest_admin_evidence,
+    personal_agent_publications,
+    personal_agents,
     project_members,
     projects,
     rbac,
@@ -47,10 +59,25 @@ from app.api.v1 import (
     security,
     user_profile,
     users,
+    wechat_fund_admin,
 )
 
 api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["鉴权"])
+api_router.include_router(billing.router)
+api_router.include_router(wechat_fund_admin.router)
+api_router.include_router(personal_agents.router)
+api_router.include_router(personal_agent_publications.router)
+api_router.include_router(enterprise_org.router, prefix="/enterprises", tags=["企业组织"])
+api_router.include_router(enterprise_projects.router)
+api_router.include_router(enterprise_assets.router)
+api_router.include_router(enterprise_assets.publication_router)
+api_router.include_router(enterprise_assets.platform_publication_router)
+api_router.include_router(enterprise_chat.router)
+api_router.include_router(enterprise_agent_teams.router)
+api_router.include_router(enterprise_content.router)
+api_router.include_router(enterprise_knowledge.router)
+api_router.include_router(enterprise_remote_approval.router)
 api_router.include_router(users.router, prefix="/users", tags=["用户管理"])
 api_router.include_router(projects.router, prefix="/projects", tags=["项目"])
 # v2.4: 项目成员管理(挂在 /projects/{project_id}/members 下)
@@ -94,4 +121,5 @@ api_router.include_router(beta_invites.router, prefix="/admin/beta-codes", tags=
 api_router.include_router(rbac.router, prefix="/rbac", tags=["RBAC权限管理"])
 # 授权渗透测试(七阶段流水线, 创建/授权/启动/进度/取消)
 api_router.include_router(pentest.router, prefix="/pentest", tags=["渗透测试"])
+api_router.include_router(pentest_admin_evidence.router, prefix="/pentest")
 api_router.include_router(remote_pentest.router, prefix="/remote-pentest", tags=["远程网站安全评估"])

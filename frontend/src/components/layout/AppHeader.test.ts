@@ -5,6 +5,7 @@ const harness = vi.hoisted(() => ({
   permission: true,
   agentPermission: true,
   role: 'user',
+  activeSpace: 'personal',
   push: vi.fn(),
   replace: vi.fn(),
 }))
@@ -20,7 +21,8 @@ vi.mock('vue-router', () => ({
       matched: [{}],
       meta: path === '/agents'
         ? { permissions: ['agent:view', 'agent_asset:create'] }
-        : path.startsWith('/remote-pentests') ? { permissions: ['pentest:view'] } : {},
+        : path.startsWith('/remote-pentests') ? { permissions: ['pentest:view'] }
+          : ['/forum', '/knowledge', '/usage'].includes(path) ? { workspace: 'personal' } : {},
     }),
   }),
 }))
@@ -36,6 +38,11 @@ vi.mock('@/stores/user', () => ({
     hasPermission: (code: string) => code === 'agent:chat' ? harness.agentPermission : harness.permission,
     logout: vi.fn(),
   }),
+}))
+
+vi.mock('@/stores/workspace', () => ({
+  getActiveWorkspaceMode: () => harness.activeSpace,
+  useWorkspaceStore: () => ({ activeSpace: harness.activeSpace }),
 }))
 
 import AppHeader from './AppHeader.vue'
@@ -61,6 +68,7 @@ describe('AppHeader navigation visibility', () => {
     harness.permission = true
     harness.agentPermission = true
     harness.role = 'user'
+    harness.activeSpace = 'personal'
     harness.push.mockReset()
     harness.replace.mockReset()
   })
@@ -103,6 +111,15 @@ describe('AppHeader navigation visibility', () => {
       expect.objectContaining({ title: '代码沙箱', path: '/sandboxes' }),
       expect.objectContaining({ title: '个人中心', path: '/profile' }),
     ]))
+    wrapper.unmount()
+  })
+
+  it('企业空间功能导航不显示个人论坛与个人知识库', () => {
+    harness.activeSpace = 'enterprise'
+    const wrapper = mountHeader()
+    const items = (wrapper.vm as any).searchItems as Array<{ path?: string }>
+    expect(items.some((item) => item.path === '/forum')).toBe(false)
+    expect(items.some((item) => item.path === '/knowledge')).toBe(false)
     wrapper.unmount()
   })
 

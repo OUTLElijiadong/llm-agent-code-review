@@ -10,7 +10,11 @@ import httpx
 from app.core.security import create_access_token
 from app.core.site_request_context import trusted_request_origin
 from app.models.user import User
-from app.services.admin_capability_registry import AdminCapabilitySpec, operation_contract
+from app.services.admin_capability_registry import (
+    PENTEST_EVIDENCE_MAIN_SESSION_CAPABILITIES,
+    AdminCapabilitySpec,
+    operation_contract,
+)
 
 
 class AdminCapabilityError(ValueError):
@@ -66,10 +70,26 @@ async def execute_api(
     origin = trusted_request_origin()
     if spec.method == "PUT" and path == "/api/admin/security-center/automatic-blocking" and origin is None:
         raise AdminCapabilityError("缺少可信管理员请求来源，请重新发起自动封禁策略更新", status_code=409)
+    token_version = getattr(user, "token_version", 0) or 0
+    token_options = {}
+    if spec.code in PENTEST_EVIDENCE_MAIN_SESSION_CAPABILITIES:
+        # Never refresh an invalidated main-session credential into a new
+        # valid one merely because this ORM instance was reloaded later.
+        authenticated_version = getattr(user, "_authenticated_token_version", None)
+        authenticated_expiry = getattr(user, "_authenticated_token_expires_at", None)
+        if (type(authenticated_version) is not int or authenticated_version < 0
+                or type(authenticated_expiry) is not int):
+            raise AdminCapabilityError("渗透执行证据需要当前主会话重新登录", status_code=401)
+        token_version = authenticated_version
+        # The re-entry credential must never outlive the actual request JWT.
+        # The receiving route verifies expiration, including the race between
+        # signing and execution.
+        token_options["expires_at"] = authenticated_expiry
     token = create_access_token(
         int(user.id),
         str(user.role),
-        int(getattr(user, "token_version", 0) or 0),
+        int(token_version),
+        **token_options,
     )
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False, client=(origin or "127.0.0.1", 0))
     async with httpx.AsyncClient(transport=transport, base_url="http://prism.internal", timeout=120.0) as client:

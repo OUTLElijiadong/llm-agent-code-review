@@ -11,10 +11,15 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.ai.multi_agent import GENERAL_AGENT
+from app.core.config import settings
 from app.core.database import Base
 from app.models.agent_team import AgentTeam, AgentTeamMember, AgentTeamTask
+from app.models.billing_ledger import BillingLimit, BillingReservation
 from app.models.code_file import CodeFile
 from app.models.code_version import CodeVersion
+from app.models.enterprise_org import Enterprise, EnterpriseGroup, EnterpriseMember
+from app.models.enterprise_project import EnterpriseProject
 from app.models.project import Project
 from app.models.review_task import ReviewTask
 from app.models.user import User
@@ -22,6 +27,7 @@ from app.schemas.review import ReviewStartIn
 from app.services import agent_scheduler_runtime as runtime
 from app.services import review_service
 from app.services.ai_usage_context import usage_context
+from app.services.billing_ledger_service import get_or_create_wallet, grant
 from app.services.review_input_service import freeze_task_inputs
 
 
@@ -43,6 +49,9 @@ def rows(tmp_path, monkeypatch):
     monkeypatch.setattr("app.services.agent_model_service.resolve_subagent_config", lambda *_a, **_k: None)
     monkeypatch.setattr("app.utils.api_resolver.resolve_api_config", lambda *_a, **_k: None)
     with sessions() as db:
+        from app.services.billing_rate_catalog_service import seed_test_baseline
+
+        seed_test_baseline(db)
         user = User(username="worker-scope", password="unused", role="admin", status=1)
         db.add(user)
         db.flush()
@@ -237,6 +246,197 @@ def test_guard_detaches_from_callers_connection_transaction(rows, monkeypatch):
         with pytest.raises(review_service.TaskSupersededError):
             review_service._assert_review_execution_authorized(rows.review.id, rows.user.id, "review-token")
         assert connection.in_transaction()
+
+
+def test_review_start_persists_authenticated_personal_payer(rows, monkeypatch):
+    monkeypatch.setattr(settings, "billing_commercial_metering_ready", True)
+    with rows.sessions.begin() as db:
+        get_or_create_wallet(db, "user", rows.user.id)
+
+    dispatched = []
+
+    class DeferredThread:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def start(self):
+            dispatched.append(self.kwargs)
+
+    monkeypatch.setattr(review_service.threading, "Thread", DeferredThread)
+    result = review_service.start(rows.db, rows.user, ReviewStartIn(
+        project_id=rows.project.id, file_ids=[rows.source.id], review_type="full",
+    ))
+
+    with rows.sessions() as db:
+        task = db.get(ReviewTask, result.id)
+        assert task.coverage["_billing_subject"] == {
+            "owner_type": "user",
+            "owner_id": rows.user.id,
+            "enterprise_id": None,
+            "group_id": None,
+            "binding_status": "unbound",
+        }
+    assert len(dispatched) == 1
+
+
+def test_enterprise_review_without_company_wallet_fails_closed_despite_personal_wallet(rows, monkeypatch):
+    monkeypatch.setattr(settings, "billing_commercial_metering_ready", True)
+    with rows.sessions.begin() as db:
+        get_or_create_wallet(db, "user", rows.user.id)
+        company = Enterprise(name="无企业钱包", owner_id=rows.user.id, seat_limit=4,
+                             paid_order_id=f"review-no-wallet-{rows.user.id}", status="active")
+        db.add(company)
+        db.flush()
+        group = EnterpriseGroup(enterprise_id=company.id, name="小组", status="active")
+        db.add_all([
+            EnterpriseMember(enterprise_id=company.id, user_id=rows.user.id, role="owner", status="active"),
+            group,
+        ])
+        db.flush()
+        db.add(EnterpriseProject(enterprise_id=company.id, project_id=rows.project.id,
+                                 group_id=group.id, status="active"))
+
+    monkeypatch.setattr(
+        "app.services.billing_checkout_service.enterprise_subscription_status",
+        lambda *_args, **_kwargs: "active",
+    )
+    with rows.sessions() as db:
+        with pytest.raises(review_service.PaymentRequiredError, match="计费账户尚未开通"):
+            review_service._resolve_review_billing_context(
+                db, db.get(User, rows.user.id), db.get(Project, rows.project.id),
+            )
+
+
+def test_review_worker_rejects_changed_payer_snapshot(rows, monkeypatch):
+    monkeypatch.setattr(settings, "billing_commercial_metering_ready", True)
+    with rows.sessions.begin() as db:
+        get_or_create_wallet(db, "user", rows.user.id)
+
+    wrong_subject = {
+        "owner_type": "enterprise", "owner_id": rows.user.id + 1,
+        "enterprise_id": rows.user.id + 1, "group_id": 9, "binding_status": "active",
+    }
+    with rows.sessions() as db:
+        with pytest.raises(review_service.ReviewAuthorizationRevokedError, match="计费主体已变化"):
+            review_service._resolve_review_billing_context(
+                db, db.get(User, rows.user.id), db.get(Project, rows.project.id),
+                expected_subject=wrong_subject,
+            )
+
+
+@pytest.mark.parametrize("payer", ["personal", "enterprise"])
+def test_review_worker_scope_reaches_collaboration_child_and_charges_bound_wallet(rows, monkeypatch, payer):
+    from app.services import billing_runtime_gate
+
+    monkeypatch.setattr(settings, "billing_commercial_metering_ready", True)
+    enterprise_id = None
+    group_id = None
+    with rows.sessions.begin() as db:
+        personal_wallet = get_or_create_wallet(db, "user", rows.user.id)
+        grant(db, wallet_id=personal_wallet.id, grant_key=f"review-personal-{payer}",
+              kind="purchase", amount_milli=1_000_000)
+        if payer == "personal":
+            expected_subject = {
+                "owner_type": "user", "owner_id": rows.user.id,
+                "enterprise_id": None, "group_id": None, "binding_status": "unbound",
+            }
+        else:
+            company = Enterprise(name="审查计费企业", owner_id=rows.user.id, seat_limit=4,
+                                 paid_order_id=f"review-paid-{rows.user.id}", status="active")
+            db.add(company)
+            db.flush()
+            enterprise_id = company.id
+            group = EnterpriseGroup(enterprise_id=enterprise_id, name="审查小组", status="active")
+            db.add_all([
+                EnterpriseMember(enterprise_id=enterprise_id, user_id=rows.user.id,
+                                 role="owner", status="active"),
+                group,
+            ])
+            db.flush()
+            group_id = group.id
+            db.add(EnterpriseProject(enterprise_id=enterprise_id, project_id=rows.project.id,
+                                     group_id=group_id, status="active"))
+            enterprise_wallet = get_or_create_wallet(db, "enterprise", enterprise_id)
+            grant(db, wallet_id=enterprise_wallet.id, grant_key=f"review-enterprise-{payer}",
+                  kind="purchase", amount_milli=1_000_000)
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            db.add(BillingLimit(
+                limit_key=f"review-limit-{payer}", enterprise_id=enterprise_id, category="normal",
+                group_id=group_id, user_id=rows.user.id,
+                period_start=now - timedelta(days=1), period_end=now + timedelta(days=30),
+                limit_milli=1_000_000, used_milli=0, reserved_milli=0,
+            ))
+            expected_subject = {
+                "owner_type": "enterprise", "owner_id": enterprise_id,
+                "enterprise_id": enterprise_id, "group_id": group_id, "binding_status": "active",
+            }
+        task = db.get(ReviewTask, rows.review.id)
+        task.coverage = {**(task.coverage or {}), "_billing_subject": expected_subject}
+
+    monkeypatch.setattr(
+        "app.services.billing_checkout_service.enterprise_subscription_status",
+        lambda *_args, **_kwargs: "active",
+    )
+    observed = []
+
+    def metered_child_call(*_args, **_kwargs):
+        ticket = billing_runtime_gate.begin_attempt(
+            model_name="deepseek-flash",
+            payload={"model": "deepseek-flash", "input": "审查源码", "max_output_tokens": 4},
+                provider_name="deepseek",
+                base_url=settings.deepseek_base_url,
+                credential_source="system",
+        )
+        observed.append({
+            "personal_wallet_id": ticket["scope"]["personal_wallet_id"],
+            "enterprise_wallet_id": ticket["scope"]["enterprise_wallet_id"],
+            "enterprise_id": ticket["scope"]["enterprise_id"],
+            "group_id": ticket["scope"]["group_id"],
+            "allow_personal": ticket["scope"]["allow_personal"],
+        })
+        billing_runtime_gate.finish_attempt(ticket, {"input_tokens": 2, "output_tokens": 1})
+        return '{"summary":"未发现问题","issues":[]}', {}
+
+    monkeypatch.setattr(review_service, "_call_single_agent", metered_child_call)
+
+    def execute(db, shared_agent, api_config, task, user, files, rules, profiles, experience_section,
+                *, authorization_check=None, **_kwargs):
+        findings = review_service._review_chunk_collaborative(
+            db, shared_agent, api_config, task, rows.source, rules, user,
+            (GENERAL_AGENT,), 0,
+            SimpleNamespace(text=rows.source.content, start_line=1, context=""),
+            experience_section=experience_section, authorization_check=authorization_check,
+        )
+        assert findings == []
+
+    monkeypatch.setattr(review_service, "_execute_review", execute)
+    review_service._run_review_task(rows.review.id, rows.user.id, "review-token")
+
+    assert len(observed) == 1
+    assert observed[0]["allow_personal"] is False
+    with rows.sessions() as db:
+        reservation = db.query(BillingReservation).one()
+        assert reservation.status == "settled"
+        assert reservation.user_id == rows.user.id
+        if payer == "personal":
+            assert observed[0] == {
+                "personal_wallet_id": personal_wallet.id,
+                "enterprise_wallet_id": None,
+                "enterprise_id": None,
+                "group_id": None,
+                "allow_personal": False,
+            }
+            assert reservation.personal_wallet_id == personal_wallet.id
+            assert reservation.enterprise_wallet_id is None
+        else:
+            assert observed[0]["personal_wallet_id"] is None
+            assert observed[0]["enterprise_wallet_id"] is not None
+            assert observed[0]["enterprise_id"] == enterprise_id
+            assert observed[0]["group_id"] == group_id
+            assert reservation.personal_wallet_id is None
+            assert reservation.enterprise_wallet_id == observed[0]["enterprise_wallet_id"]
+            assert reservation.enterprise_id == enterprise_id
+            assert reservation.group_id == group_id
 
 
 def test_worker_rejects_foreign_review_without_mutating_it(rows, monkeypatch):

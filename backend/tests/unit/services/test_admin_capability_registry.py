@@ -23,6 +23,8 @@ from app.services.admin_capability_service import AdminCapabilityError, prepare_
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
 FRONTEND_API_CAPABILITY = {
+    "pentestEvidence:inspectPentestEvidence": "pentest_evidence.inspect",
+    "pentestEvidence:listPentestActivities": "pentest_evidence.activities",
     "adminOverview:getSystemStatus": "overview.system",
     "adminOverview:getSecurityPosture": "overview.security",
     "adminOverview:getLoginGeo": "overview.geo",
@@ -209,7 +211,7 @@ def test_report_template_capabilities_remain_admin_only() -> None:
 def test_all_registered_capabilities_bind_existing_openapi_operations() -> None:
     openapi = app.openapi()
     # 固定角色模型移除新建角色与页面未使用的逐用户角色查询能力。
-    assert len(ADMIN_CAPABILITIES) == 143
+    assert len(ADMIN_CAPABILITIES) == 145
     assert len(CAPABILITY_BY_CODE) == len(ADMIN_CAPABILITIES)
     for spec in ADMIN_CAPABILITIES:
         contract = operation_contract(spec, openapi)
@@ -225,6 +227,21 @@ def test_every_api_function_imported_by_admin_views_maps_to_a_capability() -> No
     assert CAPABILITY_BY_CODE["security_center.decoy.apply"].risk == "critical"
     for api_function, capability in FRONTEND_API_CAPABILITY.items():
         assert capability in CAPABILITY_BY_CODE, api_function
+
+
+def test_pentest_evidence_capabilities_are_super_admin_main_session_only() -> None:
+    from app.services.agent_responses_service import _SUPER_ADMIN_ONLY_CAPABILITIES
+    from app.services.site_agent_service import capability_requires_main_session, resolve_site_input
+
+    for name in ("pentest_evidence.inspect", "pentest_evidence.activities"):
+        spec = CAPABILITY_BY_CODE[name]
+        assert spec.method == "GET"
+        assert spec.permission == "server_ops:view"
+        assert name in _SUPER_ADMIN_ONLY_CAPABILITIES
+        assert capability_requires_main_session("admin", name)
+        with pytest.raises(ValueError, match="主会话"):
+            resolve_site_input({"operation": "execute_capability", "scope": "admin", "capability": name,
+                                "params": {}})
 
 
 def test_external_knowledge_source_mutations_require_server_operations_permission() -> None:

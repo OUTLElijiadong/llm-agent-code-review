@@ -1140,6 +1140,70 @@ async def test_executes_multiple_function_calls_before_next_model_turn() -> None
     assert [item["call_id"] for item in outputs] == ["call_a", "call_b"]
 
 
+@pytest.mark.parametrize("failure_kind", ["usage_unknown", "tool_result_missing"])
+@pytest.mark.asyncio
+async def test_unknown_or_missing_external_tool_result_stops_remaining_calls_and_model_turn(failure_kind):
+    class UncertainExecutor:
+        def __init__(self):
+            self.calls = []
+
+        async def execute(self, call, *, approved=False):
+            self.calls.append(call.call_id)
+            if len(self.calls) == 1:
+                return ToolExecutionResult.failure("外部结果待确认", failure_kind=failure_kind)
+            return ToolExecutionResult.success({"should_not_run": True})
+
+    transport = ScriptedTransport([
+        _function_response(
+            ("call_search", "search_enterprise_web", {"query": "查询"}),
+            ("call_write", "create_private_agent_skill_draft", {"title": "草稿"}),
+        ),
+        _message_response("不应再次调用模型"),
+    ])
+    executor = UncertainExecutor()
+
+    result = await _runtime(transport, executor).start("查找后执行", run_id=f"run_{failure_kind}")
+
+    assert result.status == FAILED
+    assert executor.calls == ["call_search"]
+    assert len(transport.payloads) == 1
+    assert "外部结果待确认" in result.error
+
+
+@pytest.mark.parametrize("failure_kind", ["usage_unknown", "tool_result_missing"])
+@pytest.mark.asyncio
+async def test_halted_external_tool_response_cannot_be_retried_or_replay_remaining_calls(failure_kind):
+    class UncertainExecutor:
+        def __init__(self):
+            self.calls = []
+
+        async def execute(self, call, *, approved=False):
+            self.calls.append(call.call_id)
+            if call.call_id == "call_search":
+                return ToolExecutionResult.failure("外部结果待确认", failure_kind=failure_kind)
+            return ToolExecutionResult.success({"unexpected": True})
+
+    transport = ScriptedTransport([
+        _function_response(
+            ("call_search", "search_enterprise_web", {"query": "查询"}),
+            ("call_write", "create_private_agent_skill_draft", {"title": "草稿"}),
+        ),
+        _message_response("不得从已停止轮次继续"),
+    ])
+    executor = UncertainExecutor()
+    runtime = _runtime(transport, executor)
+
+    first = await runtime.start("查询后操作", run_id=f"run_halted_{failure_kind}")
+    assert first.status == FAILED
+    with pytest.raises(InvalidRunStateError, match="发送新消息"):
+        await runtime.retry(first.run_id)
+
+    checkpoint = await runtime.get_checkpoint(first.run_id)
+    assert checkpoint.context_metadata["non_retryable_tool_response"]["discarded_call_ids"] == ["call_write"]
+    assert executor.calls == ["call_search"]
+    assert len(transport.payloads) == 1
+
+
 @pytest.mark.asyncio
 async def test_approval_executes_exact_call_and_resumes_without_new_user_message() -> None:
     class ApprovalExecutor(RecordingExecutor):
@@ -1193,6 +1257,123 @@ async def test_approval_executes_exact_call_and_resumes_without_new_user_message
     resumed_input = transport.payloads[1]["input"]
     assert sum(1 for item in resumed_input if item.get("role") == "user") == 1
     assert resumed_input[-1]["call_id"] == "call_delete"
+
+
+@pytest.mark.asyncio
+async def test_clarification_resumes_same_call_before_independent_approval() -> None:
+    class ClarifyingExecutor(RecordingExecutor):
+        cleared = False
+
+        async def execute(self, call: ToolCall, *, approved: bool = False) -> ToolExecutionResult:
+            self.calls.append((call, approved))
+            if call.name == "publish" and not self.cleared:
+                return ToolExecutionResult(status="clarification_required", operation="澄清当前动作")
+            if call.name == "publish" and not approved:
+                return ToolExecutionResult.approval_required(operation="公告独立审批", impact="发布", danger=True)
+            return ToolExecutionResult.success(call.name)
+
+    transport = ScriptedTransport([
+        _function_response(("call_1", "publish", {}), ("call_2", "later", {})),
+        _message_response("完成"),
+    ])
+    executor = ClarifyingExecutor()
+    runtime = _runtime(transport, executor)
+    paused = await runtime.start("执行", run_id="clarification-staged")
+    assert paused.status == "waiting_clarification"
+    assert len(transport.payloads) == 1
+    assert [(call.call_id, approved) for call, approved in executor.calls] == [("call_1", False)]
+
+    executor.cleared = True
+    approval = await runtime.resume_clarification("clarification-staged", "call_1")
+    assert approval.status == WAITING_APPROVAL
+    assert len(transport.payloads) == 1
+    completed = await runtime.approve("clarification-staged", "call_1")
+    assert completed.status == COMPLETED
+    assert [(call.call_id, approved) for call, approved in executor.calls] == [
+        ("call_1", False), ("call_1", False), ("call_1", True), ("call_2", False),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_clarification_cancellation_never_executes_remaining_tools_or_calls_model_again() -> None:
+    class ClarifyingExecutor(RecordingExecutor):
+        async def execute(self, call: ToolCall, *, approved: bool = False) -> ToolExecutionResult:
+            self.calls.append((call, approved))
+            return ToolExecutionResult(status="clarification_required", operation="澄清当前动作")
+
+    transport = ScriptedTransport([_function_response(("call_1", "first", {}), ("call_2", "later", {}))])
+    executor = ClarifyingExecutor()
+    runtime = _runtime(transport, executor)
+    paused = await runtime.start("执行", run_id="clarification-cancel")
+    assert paused.status == "waiting_clarification"
+    stopped = await runtime.cancel("clarification-cancel", reason="本人停止")
+    assert stopped.status == CANCELLED
+    assert len(transport.payloads) == 1
+    assert [(call.call_id, approved) for call, approved in executor.calls] == [("call_1", False)]
+
+
+@pytest.mark.asyncio
+async def test_resuming_without_a_valid_clarification_does_not_grant_authority() -> None:
+    class WaitingExecutor(RecordingExecutor):
+        async def execute(self, call: ToolCall, *, approved: bool = False) -> ToolExecutionResult:
+            self.calls.append((call, approved))
+            return ToolExecutionResult(status="clarification_required", operation="澄清当前动作")
+
+    transport = ScriptedTransport([_function_response(("call_1", "write", {}), ("call_2", "later", {}))])
+    executor = WaitingExecutor()
+    runtime = _runtime(transport, executor)
+    assert (await runtime.start("执行", run_id="clarification-no-grant")).status == "waiting_clarification"
+    assert (await runtime.resume_clarification("clarification-no-grant", "call_1")).status == "waiting_clarification"
+    assert len(transport.payloads) == 1
+    assert [(call.call_id, approved) for call, approved in executor.calls] == [("call_1", False), ("call_1", False)]
+
+
+@pytest.mark.asyncio
+async def test_clarification_after_approval_cannot_fall_through_to_model_or_remaining_calls() -> None:
+    class ChangedExecutor(RecordingExecutor):
+        async def execute(self, call: ToolCall, *, approved: bool = False) -> ToolExecutionResult:
+            self.calls.append((call, approved))
+            if not approved:
+                return ToolExecutionResult.approval_required(operation="发布", impact="公告", danger=True)
+            return ToolExecutionResult(status="clarification_required", operation="权限已变化")
+
+    transport = ScriptedTransport([_function_response(("call_1", "publish", {}), ("call_2", "later", {}))])
+    executor = ChangedExecutor()
+    runtime = _runtime(transport, executor)
+    assert (await runtime.start("执行", run_id="clarification-after-approval")).status == WAITING_APPROVAL
+    result = await runtime.approve("clarification-after-approval", "call_1")
+    assert result.status == FAILED
+    assert len(transport.payloads) == 1
+    assert [(call.call_id, approved) for call, approved in executor.calls] == [("call_1", False), ("call_1", True)]
+    with pytest.raises(InvalidRunStateError):
+        await runtime.retry("clarification-after-approval")
+
+
+@pytest.mark.asyncio
+async def test_cross_runtime_cancel_wins_over_clarification_after_approval() -> None:
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class SlowExecutor(RecordingExecutor):
+        async def execute(self, call: ToolCall, *, approved: bool = False) -> ToolExecutionResult:
+            self.calls.append((call, approved))
+            if not approved:
+                return ToolExecutionResult.approval_required(operation="发布", impact="公告", danger=True)
+            entered.set()
+            await release.wait()
+            return ToolExecutionResult(status="clarification_required", operation="权限变化")
+
+    store, executor = InMemoryCheckpointStore(), SlowExecutor()
+    transport = ScriptedTransport([_function_response(("call_1", "publish", {}), ("call_2", "later", {}))])
+    runtime = DeepSeekResponsesRuntime(transport=transport, tool_executor=executor, checkpoint_store=store)
+    canceller = DeepSeekResponsesRuntime(transport=transport, tool_executor=executor, checkpoint_store=store)
+    assert (await runtime.start("执行", run_id="clarification-cross-cancel")).status == WAITING_APPROVAL
+    task = asyncio.create_task(runtime.approve("clarification-cross-cancel", "call_1"))
+    await entered.wait()
+    assert (await canceller.cancel("clarification-cross-cancel", reason="停止")).status == CANCELLED
+    release.set()
+    assert (await task).status == CANCELLED
+    assert len(transport.payloads) == 1
+    assert [(call.call_id, approved) for call, approved in executor.calls] == [("call_1", False), ("call_1", True)]
 
 
 @pytest.mark.asyncio
@@ -1937,6 +2118,47 @@ async def test_truncated_stream_never_executes_partial_function_call() -> None:
     assert result.status == FAILED
     assert executor.calls == []
     assert "终止帧" in result.error
+
+
+@pytest.mark.asyncio
+async def test_cancelled_terminal_response_is_checkpointed_without_executing_partial_tools() -> None:
+    response = {
+        "id": "resp_cancelled",
+        "object": "response",
+        "status": "cancelled",
+        "usage": {"input_tokens": 12, "output_tokens": 3},
+        "output": [
+            {
+                "type": "function_call",
+                "id": "item_partial",
+                "call_id": "call_partial",
+                "name": "side_effect",
+                "arguments": "{}",
+            }
+        ],
+    }
+    transport = ScriptedTransport([[
+        {"type": "response.cancelled", "response": response},
+    ]])
+    executor = RecordingExecutor()
+    store = InMemoryCheckpointStore()
+    runtime = DeepSeekResponsesRuntime(
+        transport=transport,
+        tool_executor=executor,
+        checkpoint_store=store,
+    )
+
+    result = await runtime.start("执行", run_id="run_upstream_cancelled")
+    checkpoint = await store.load("run_upstream_cancelled")
+
+    assert result.status == FAILED
+    assert result.response["id"] == "resp_cancelled"
+    assert "cancelled" in result.error
+    assert checkpoint is not None
+    assert checkpoint.last_response["status"] == "cancelled"
+    assert checkpoint.output_text == ""
+    assert checkpoint.transcript == [{"role": "user", "content": "执行"}]
+    assert executor.calls == []
 
 
 @pytest.mark.asyncio

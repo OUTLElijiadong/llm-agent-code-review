@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from studio_rbac_test_support import grant_studio_actor
 
 from app.api.v1 import admin_agent_releases, agent_governance
 from app.core.database import Base, get_db
@@ -15,7 +16,7 @@ from app.core.dependencies import get_current_user
 from app.core.error_handlers import register_handlers
 from app.models.agent_governance import ApprovalItem
 from app.models.custom_agent import CustomAgent, CustomAgentRelease, CustomAgentVersion
-from app.models.rbac import Permission, Role, RolePermission, UserRole
+from app.models.rbac import Permission, Role, RolePermission
 from app.models.user import User
 from app.services import agent_studio_service, approval_service
 
@@ -30,6 +31,9 @@ def release_api():
     admin = User(username="release-admin", password="x", role="admin", status=1)
     reviewer = User(username="release-reviewer", password="x", role="reviewer", status=1)
     db.add_all([admin, reviewer])
+    db.flush()
+    grant_studio_actor(db, admin)
+    grant_studio_actor(db, reviewer)
     db.commit()
 
     app = FastAPI()
@@ -206,14 +210,13 @@ def test_release_service_rejects_reviewer_even_without_route_guard(release_api):
 
 
 def _misgrant_release_permissions(db, reviewer, *codes: str) -> None:
-    role = Role(name="审查员", code="reviewer", status="active", is_builtin=1)
+    role = db.query(Role).filter_by(code="reviewer").one()
     permissions = [
         Permission(code=code, name=code, module="agent", type="api") for code in codes
     ]
-    db.add_all([role, *permissions])
+    db.add_all(permissions)
     db.flush()
     db.add_all([
-        UserRole(user_id=reviewer.id, role_id=role.id),
         *(RolePermission(role_id=role.id, permission_id=permission.id) for permission in permissions),
     ])
     db.commit()

@@ -42,6 +42,7 @@ def test_mesh_line_offset_accepts_supported_values(value):
         ("invalid_json", False),
         ("incomplete_response", False),
         ("billing_error", False),
+        ("budget_exhausted", False),
         ("usage_accounting_error", False),
         ("transport_error", True),
     ],

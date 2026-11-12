@@ -35,6 +35,7 @@ from app.services.report_service import (
     task_metrics_access_filter,
     visible_report_review_types,
 )
+from app.services.review_coverage import public_review_coverage
 
 # ── 仪表盘聚合缓存 ──────────────────────────────────────────────────────────
 # 工作台一次加载并发请求 summary/risk-distribution/issue-type-statistics 三个接口,
@@ -332,7 +333,7 @@ def get_summary(db: Session, user: User) -> dict:
             "status": task.status,
             "review_type": task.review_type,
             "score": visible_score if visible_score is not None and 0 <= visible_score <= 100 else None,
-            "coverage": task.coverage if isinstance(task.coverage, dict) else None,
+            "coverage": public_review_coverage(task.coverage),
             "create_time": iso_utc(task.create_time),
         })
 

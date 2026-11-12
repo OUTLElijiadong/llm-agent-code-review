@@ -42,6 +42,7 @@ from app.services.context_fidelity import (
 RUNNING = "running"
 WAITING_APPROVAL = "waiting_approval"
 WAITING_INPUT = "waiting_input"
+WAITING_CLARIFICATION = "waiting_clarification"
 APPROVING = "approving"
 REJECTING = "rejecting"
 ANSWERING = "answering"
@@ -429,7 +430,7 @@ class InMemoryCheckpointStore:
             if value is None or value.get("status") != expected_status:
                 return None
             pending = value.get("pending") or {}
-            if expected_status in {WAITING_APPROVAL, WAITING_INPUT} and not pending:
+            if expected_status in {WAITING_APPROVAL, WAITING_INPUT, WAITING_CLARIFICATION} and not pending:
                 return None
             call = pending.get("call") or {}
             if tool_call_id and call.get("call_id") != tool_call_id:
@@ -461,6 +462,7 @@ class DeepSeekResponsesRuntime:
         on_round: Optional[Callable[[Mapping[str, Any]], None]] = None,
         image_assets: Optional[Mapping[str, str]] = None,
         coordinator_only: bool = False,
+        reject_tool_calls: bool = False,
     ) -> None:
         if max_rounds < 1:
             raise ValueError("max_rounds 必须大于 0")
@@ -487,6 +489,7 @@ class DeepSeekResponsesRuntime:
         # 发往上游的 payload 在此还原;恢复运行缺项时降级为文字说明。
         self._image_assets: Dict[str, str] = dict(image_assets) if image_assets else {}
         self._coordinator_only = coordinator_only
+        self._reject_tool_calls = reject_tool_calls
         self._locks: Dict[str, asyncio.Lock] = {}
         self._cancel_events: Dict[str, asyncio.Event] = {}
         self._cancel_reasons: Dict[str, str] = {}
@@ -521,6 +524,44 @@ class DeepSeekResponsesRuntime:
                 await on_created()
             return await self._drive(checkpoint)
 
+    async def drive_persisted(self, run_id: str) -> RuntimeResult:
+        """Resume a checkpoint that the owning service atomically moved to RUNNING.
+
+        Queue ownership, lease fencing, tenant authorization, and billing remain the
+        adapter's responsibility; this method only enters the reusable Responses loop.
+        """
+        lock = self._locks.setdefault(run_id, asyncio.Lock())
+        async with lock:
+            checkpoint = await self._require_checkpoint(run_id)
+            if checkpoint.status != RUNNING or checkpoint.pending is not None:
+                raise InvalidRunStateError(
+                    f"运行 {run_id} 当前状态为 {checkpoint.status}，不能启动持久化任务"
+                )
+            return await self._drive(checkpoint)
+
+    async def resume_clarification(self, run_id: str, tool_call_id: str) -> RuntimeResult:
+        """Re-evaluate the same call after its owning adapter verifies a clarification.
+
+        This method grants no authorization: the executor must recheck the
+        persisted decision, current actor and exact call before any effect.
+        """
+        lock = self._locks.setdefault(run_id, asyncio.Lock())
+        async with lock:
+            preview = await self._require_checkpoint(run_id)
+            self._require_pending(preview, WAITING_CLARIFICATION, tool_call_id)
+            checkpoint = await self._claim_pending(
+                run_id, expected_status=WAITING_CLARIFICATION, claimed_status=RUNNING, tool_call_id=tool_call_id,
+            )
+            pending = checkpoint.pending
+            assert pending is not None
+            calls = [pending.call, *pending.remaining_calls]
+            checkpoint.context_metadata["clarification_resume_in_progress"] = pending.call.call_id
+            await self._store.save(checkpoint)
+            checkpoint.pending = None
+            await self._store.save(checkpoint)
+            paused = await self._process_calls(checkpoint, calls)
+            return paused or await self._drive(checkpoint)
+
     async def approve(
         self,
         run_id: str,
@@ -549,6 +590,24 @@ class DeepSeekResponsesRuntime:
             pending = checkpoint.pending
             assert pending is not None
             execution = await self._execute_tool(pending.call, approved=True)
+            persisted_cancelled = await self._refresh_cancelled_checkpoint(checkpoint)
+            if persisted_cancelled is not None:
+                return persisted_cancelled
+            if execution.status == "clarification_required":
+                # A later authority change cannot be treated as an ordinary
+                # tool failure: that would run remaining calls or let the model
+                # rewrite the request. Re-initiation is required until a safe
+                # multi-stage approval/clarification resume is wired in.
+                checkpoint.context_metadata["non_retryable_tool_response"] = {
+                    "failed_call_id": pending.call.call_id[:128],
+                    "failure_kind": "clarification_after_approval",
+                    "discarded_call_ids": [item.call_id[:128] for item in pending.remaining_calls[:64]],
+                }
+                checkpoint.pending = None
+                checkpoint.status = FAILED
+                checkpoint.error = "审批后权限需要重新澄清；本次运行已停止，请重新发起。"
+                await self._store.save(checkpoint)
+                return self._result(checkpoint)
             if _is_approval_required(execution.status):
                 checkpoint.error = "工具在已批准后仍要求审批，已停止以避免重复审批循环"
                 checkpoint.status = FAILED
@@ -671,15 +730,24 @@ class DeepSeekResponsesRuntime:
         lock = self._locks.setdefault(run_id, asyncio.Lock())
         async with lock:
             preview = await self._require_checkpoint(run_id)
+            halted = _non_retryable_tool_response(preview)
+            if halted is not None:
+                if halted.get("failure_kind") == "clarification_after_approval":
+                    raise InvalidRunStateError("审批后权限需要重新澄清；请发送新消息重新发起。")
+                raise InvalidRunStateError(
+                    "该运行轮次因工具结果或账单无法确认而永久停止；请按提示完成对账后发送新消息。"
+                )
+            if preview.context_metadata.get("clarification_resume_in_progress"):
+                raise InvalidRunStateError("澄清恢复过程已中断，请发送新消息重新发起。")
             if preview.status not in _TERMINAL_RECOVERABLE_STATUSES:
                 raise InvalidRunStateError(
                     f"运行 {run_id} 当前状态为 {preview.status}，只有失败/未完成/超轮数运行可以重试"
                 )
             claimed_status = RUNNING
             if preview.pending is not None:
-                claimed_status = (
-                    WAITING_INPUT if preview.pending.kind == "input" else WAITING_APPROVAL
-                )
+                claimed_status = (WAITING_INPUT if preview.pending.kind == "input" else
+                                  WAITING_CLARIFICATION if preview.pending.kind == "clarification" else
+                                  WAITING_APPROVAL)
             checkpoint = await self._store.claim(
                 run_id,
                 expected_status=preview.status,
@@ -1297,6 +1365,16 @@ class DeepSeekResponsesRuntime:
                     checkpoint,
                     reason=self._cancel_reasons.get(checkpoint.run_id, ""),
                 )
+            halted = _non_retryable_tool_response(checkpoint)
+            if halted is not None:
+                checkpoint.status = FAILED
+                checkpoint.pending = None
+                checkpoint.error = ("审批后权限需要重新澄清；请发送新消息重新发起。"
+                                    if halted.get("failure_kind") == "clarification_after_approval" else (
+                    "外部工具结果或账单不能安全闭环；原运行已停止，请按提示完成对账后发送新消息。"
+                ))
+                await self._store.save(checkpoint)
+                return self._result(checkpoint, events=events)
             recovered = await self._recover_interrupted_completed_calls(checkpoint)
             if recovered is not None:
                 return replace(
@@ -1623,6 +1701,9 @@ class DeepSeekResponsesRuntime:
                     checkpoint.status = FAILED
                     error_value = response.get("error")
                     checkpoint.error = _stringify_output(error_value) if error_value else "模型响应失败"
+                elif upstream_status == CANCELLED:
+                    checkpoint.status = FAILED
+                    checkpoint.error = "上游模型请求返回 cancelled 终态；未执行其中的工具调用，请显式重试"
                 elif upstream_status == INCOMPLETE:
                     reason = str((response.get("incomplete_details") or {}).get("reason") or "")
                     next_budget = min(output_budget * 2, MAX_RETRY_OUTPUT_TOKENS)
@@ -1761,6 +1842,8 @@ class DeepSeekResponsesRuntime:
         已确认的副作用。
         """
 
+        if _non_retryable_tool_response(checkpoint) is not None:
+            return None
         if str(checkpoint.last_response.get("status") or "") != COMPLETED:
             return None
         output_items = [
@@ -1788,6 +1871,8 @@ class DeepSeekResponsesRuntime:
         checkpoint: RunCheckpoint,
         calls: Sequence[ToolCall],
     ) -> Optional[RuntimeResult]:
+        if self._reject_tool_calls and calls:
+            raise InvalidRunStateError("当前运行不允许调用工具")
         for index, call in enumerate(calls):
             persisted_cancelled = await self._refresh_cancelled_checkpoint(checkpoint)
             if persisted_cancelled is not None:
@@ -1863,6 +1948,30 @@ class DeepSeekResponsesRuntime:
             persisted_cancelled = await self._refresh_cancelled_checkpoint(checkpoint)
             if persisted_cancelled is not None:
                 return persisted_cancelled
+            if checkpoint.context_metadata.get("clarification_resume_in_progress") == call.call_id:
+                checkpoint.context_metadata.pop("clarification_resume_in_progress", None)
+            if execution.status == "clarification_required":
+                checkpoint.status = WAITING_CLARIFICATION
+                checkpoint.pending = PendingAction(
+                    kind="clarification",
+                    call=call,
+                    remaining_calls=remaining,
+                    operation=execution.operation or call.name,
+                    impact=execution.impact,
+                    danger=execution.danger,
+                    approval_id=execution.approval_id,
+                    preview=copy.deepcopy(execution.preview),
+                )
+                await self._store.save(checkpoint)
+                if self._cancel_requested(checkpoint.run_id):
+                    return await self._mark_cancelled(
+                        checkpoint, reason=self._cancel_reasons.get(checkpoint.run_id, ""),
+                    )
+                return self._result(checkpoint, events=[{
+                    "type": "response.clarification.required",
+                    "run_id": checkpoint.run_id,
+                    "tool_call_id": call.call_id,
+                }])
             if _is_approval_required(execution.status):
                 checkpoint.status = WAITING_APPROVAL
                 checkpoint.pending = PendingAction(
@@ -1898,6 +2007,21 @@ class DeepSeekResponsesRuntime:
                 return self._result(checkpoint, events=[event])
 
             checkpoint.transcript.append(_tool_output_item(call, execution))
+            if execution.failure_kind in {"usage_unknown", "tool_result_missing", "clarification_closed"}:
+                # Never ask the provider to reason past an external action whose
+                # billing/result pair is unknown or whose durable result was lost.
+                # Remaining calls from this response are intentionally discarded.
+                checkpoint.context_metadata["non_retryable_tool_response"] = {
+                    "response_id": str(checkpoint.last_response.get("id") or "")[:128],
+                    "failed_call_id": call.call_id[:128],
+                    "failure_kind": execution.failure_kind,
+                    "discarded_call_ids": [item.call_id[:128] for item in remaining[:64] if item.call_id],
+                }
+                checkpoint.status = FAILED
+                checkpoint.pending = None
+                checkpoint.error = execution.error or "工具结果待核对；已停止后续模型与工具调用。"
+                await self._store.save(checkpoint)
+                return self._result(checkpoint)
             await self._store.save(checkpoint)
         return None
 
@@ -2219,6 +2343,11 @@ def _has_tool_evidence(transcript: Sequence[Mapping[str, Any]], tool_call_id: st
         and str(item.get("call_id") or "") == tool_call_id
         for item in transcript
     )
+
+
+def _non_retryable_tool_response(checkpoint: RunCheckpoint) -> Optional[Mapping[str, Any]]:
+    marker = checkpoint.context_metadata.get("non_retryable_tool_response")
+    return marker if isinstance(marker, Mapping) else None
 
 
 def _without_unpaired_function_calls(
@@ -2639,7 +2768,7 @@ async def _collect_response(output: TransportOutput) -> Tuple[Dict[str, Any], Li
         events.extend(copy.deepcopy(dict(event)) for event in output if isinstance(event, Mapping))
     else:
         raise TypeError("transport 返回值必须是响应对象或 Responses 事件流")
-    terminal_types = {"response.completed", "response.incomplete", "response.failed"}
+    terminal_types = {"response.completed", "response.incomplete", "response.failed", "response.cancelled"}
     if not any(str(event.get("type") or "") in terminal_types for event in events):
         error = IncompleteResponseStreamError("Responses 事件流在终止帧之前结束")
         error.observed_response = _response_from_events(events)
@@ -2687,7 +2816,7 @@ def _response_from_events(events: Sequence[Mapping[str, Any]]) -> Dict[str, Any]
         candidate_metadata = event.get("response")
         if isinstance(candidate_metadata, Mapping):
             observed_metadata.update(copy.deepcopy(dict(candidate_metadata)))
-        if event_type in {"response.completed", "response.incomplete", "response.failed"}:
+        if event_type in {"response.completed", "response.incomplete", "response.failed", "response.cancelled"}:
             candidate = event.get("response")
             if isinstance(candidate, Mapping):
                 completed_response = copy.deepcopy(dict(candidate))

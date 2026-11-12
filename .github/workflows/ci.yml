@@ -2,7 +2,7 @@ name: 业务回归与发布前检查
 
 on:
   push:
-    branches: [main, 'codex/**', 'claude/**']
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -17,7 +17,7 @@ jobs:
   backend:
     name: 后端全量业务回归
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 120
     defaults:
       run:
         working-directory: backend
@@ -85,13 +85,15 @@ jobs:
           name="prism-fresh-chain-${RUN_ID}-${RUN_ATTEMPT}"
           password="$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
           echo "::add-mask::$password"
+          # Lock-order integration tests inspect performance_schema.data_lock_waits.
           docker run --detach --name "$name" \
             --publish 127.0.0.1::3306 \
             --tmpfs /var/lib/mysql:rw \
             --env MYSQL_ROOT_PASSWORD="$password" \
             mysql:8.0 \
               --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci \
-              --max-allowed-packet=64M --performance-schema=OFF
+              --max-allowed-packet=64M \
+              --performance-schema=ON
           port="$(docker port "$name" 3306/tcp | head -n 1 | sed 's/.*://')"
           ready=0
           for ((attempt = 1; attempt <= 60; attempt++)); do

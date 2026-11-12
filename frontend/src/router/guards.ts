@@ -5,6 +5,7 @@
 
 import type { Router, RouteLocationNormalized, RouteRecordRaw } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { useWorkspaceStore } from '@/stores/workspace'
 import { getRoleHomePath } from '@/utils/roleHome'
 
 /**
@@ -24,6 +25,8 @@ declare module 'vue-router' {
     permissions?: string[]
     /** 是否仅允许唯一超级管理员 admin,此限制不可被普通管理员绕过 */
     superAdmin?: boolean
+    /** 仅控制全站个人/企业页面模式，不替代后端资源授权 */
+    workspace?: 'personal' | 'enterprise'
     /** 后台合并中心所属业务域,用于在一个容器内切换子功能 */
     unifiedDomain?: 'agents' | 'operations' | 'access' | 'platform'
   }
@@ -36,6 +39,7 @@ declare module 'vue-router' {
 export function setupGuards(router: Router): void {
   router.beforeEach(async (to: RouteLocationNormalized, _from: RouteLocationNormalized) => {
     const user = useUserStore()
+    const workspace = useWorkspaceStore()
 
     if (to.meta.public) {
       if ((to.path === '/login' || to.path === '/register') && user.token) {
@@ -43,15 +47,19 @@ export function setupGuards(router: Router): void {
           if (!user.profile) {
             await user.fetchProfile()
           }
+          workspace.syncIdentity(user.profile?.id, user.token)
           return { path: getRoleHomePath(user.profile?.role), replace: true }
         } catch {
           user.clearSession()
         }
+      } else if (!user.token) {
+        workspace.syncIdentity(null, null)
       }
       return true
     }
 
     if (!user.token) {
+      workspace.syncIdentity(null, null)
       return { path: '/login', query: { redirect: to.fullPath } }
     }
 
@@ -64,8 +72,17 @@ export function setupGuards(router: Router): void {
       }
     }
 
+    workspace.syncIdentity(user.profile?.id, user.token)
+
     if (to.path === '/') {
       return { path: getRoleHomePath(user.profile?.role), replace: true }
+    }
+
+    // 空间标记只切换页面模式；企业 ID 和成员资格仍由企业 API 按当前用户重新验证。
+    if (to.meta.workspace === 'enterprise') {
+      workspace.activateEnterprise(workspace.activeEnterpriseId)
+    } else if (to.meta.workspace === 'personal' && workspace.activeSpace === 'enterprise') {
+      return { path: '/enterprise', replace: true }
     }
 
     // 唯一超级管理员限制必须先于 admin 的通用 RBAC 放行。

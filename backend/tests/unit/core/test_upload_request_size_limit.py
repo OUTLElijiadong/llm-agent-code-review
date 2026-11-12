@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 import pytest
 from starlette.responses import JSONResponse
 
@@ -59,6 +62,7 @@ async def _invoke(
         max_source_bytes=4,
         max_folder_bytes=8,
         max_avatar_bytes=2,
+        max_knowledge_attachment_bytes=10,
         max_json_bytes=4,
     )
     await middleware(scope, receive, send)
@@ -118,6 +122,50 @@ async def test_folder_and_avatar_use_independent_request_limits():
     assert folder_sent[0]["status"] == 200
     assert avatar_called is False
     assert avatar_sent[0]["status"] == 413
+
+
+@pytest.mark.asyncio
+async def test_enterprise_knowledge_attachment_limit_applies_before_body_reaches_parser():
+    path = "/api/enterprises/7/knowledge/attachments"
+    accepted, accepted_sent = await _invoke(path=path, body=b"1234567890", content_length="10",
+                                             content_type="multipart/form-data; boundary=test")
+    rejected, rejected_sent = await _invoke(path=path, body=b"12345678901", content_length="11",
+                                             content_type="multipart/form-data; boundary=test")
+    assert accepted is True and accepted_sent[0]["status"] == 200
+    assert rejected is False and rejected_sent[0]["status"] == 413
+
+
+@pytest.mark.asyncio
+async def test_enterprise_knowledge_attachment_chunked_body_limit_is_enforced():
+    called, sent = await _invoke(
+        path="/api/enterprises/7/knowledge/attachments", body=b"12345678901",
+        content_type="multipart/form-data; boundary=test",
+    )
+    assert called is True
+    assert sent[0]["status"] == 413
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('path', ['/api/billing/admin/statements/import', '/api/billing/admin/fund-statements/import'])
+async def test_statement_import_request_limit_accepts_13_mib_and_rejects_more_before_parser(path):
+    allowed_size = 13 * 1024 * 1024
+    allowed, _ = await _invoke(path=path, body=b"", content_length=str(allowed_size),
+                               content_type="multipart/form-data; boundary=test")
+    rejected, sent = await _invoke(path=path, body=b"", content_length=str(allowed_size + 1),
+                                   content_type="multipart/form-data; boundary=test")
+    assert allowed is True
+    assert rejected is False
+    assert sent[0]["status"] == 413
+
+
+@pytest.mark.parametrize('path', ['/api/billing/admin/statements/import', '/api/billing/admin/fund-statements/import'])
+def test_statement_import_nginx_body_limit_matches_file_and_multipart_cap(path):
+    repository = Path(__file__).resolve().parents[4]
+    template = (repository / "frontend/nginx.conf.template").read_text(encoding="utf-8")
+    match = re.search(rf"location = {re.escape(path)}\s*\{{([^}}]+)\}}", template, re.S)
+    assert match is not None
+    assert "client_max_body_size 13m;" in match.group(1)
+    assert f"proxy_pass http://backend:8000{path};" in match.group(1)
 
 
 @pytest.mark.asyncio

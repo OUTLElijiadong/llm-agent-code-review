@@ -334,6 +334,26 @@ class TestLegacyExecuteOutputRecovery:
         assert "覆盖不完整" in result.error
         assert len(calls) == 2  # 原请求和一次单行焦点请求，不整项原样重试
 
+    def test_budget_exhaustion_does_not_enter_response_recovery(self, agent, monkeypatch):
+        calls = []
+
+        def reject_for_budget(_message, **_kwargs):
+            calls.append(True)
+            return AgentResult(
+                success=False,
+                error="企业团队预算已用尽",
+                failure_kind="budget_exhausted",
+                http_attempts=0,
+            )
+
+        monkeypatch.setattr(agent, "call_json", reject_for_budget)
+
+        result = agent.execute("value = calculate()", "检查缺陷", "python", "sample.py")
+
+        assert result.success is False
+        assert result.failure_kind == "budget_exhausted"
+        assert calls == [True]
+
 
 class TestExecuteReviewOutputRecovery:
     def test_real_execute_review_path_recovers_with_bounded_source_and_absolute_lines(

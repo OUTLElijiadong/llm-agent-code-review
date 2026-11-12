@@ -1288,6 +1288,7 @@ def test_http_attempt_has_exact_owned_ledger_and_contract_status(db, actor, monk
     def configure(db, agent, user_id=None):
         assert user_id == actor.id
         agent._base_url, agent._api_key, agent._model = "https://unit.example/v1", "unit", "requested-unit-model"
+        agent._billing_credential_source = "user"
         agent._max_retries = 0
         agent._emit = lambda *args, **kwargs: None
         return agent
@@ -1350,6 +1351,7 @@ def test_http_truncation_retry_records_both_calls_and_raises_budget_once(db, act
     def configure(db, agent, user_id=None):
         assert user_id == actor.id
         agent._base_url, agent._api_key, agent._model = "https://unit.example/v1", "unit", "requested-unit-model"
+        agent._billing_credential_source = "user"
         agent._max_retries = 0
         agent._emit = lambda *args, **kwargs: None
         return agent

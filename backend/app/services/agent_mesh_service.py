@@ -2475,7 +2475,9 @@ def render_terminal_team_fallback(snapshot: Mapping[str, Any]) -> str:
                 f"（第 {line} 行）" if line else ""
             )
             severity = str(item.get("severity") or "").strip()
-            lines.append(f"- {f'[{severity}] ' if severity else ''}{str(item.get('title') or '未命名问题')[:80]}{location}")
+            prefix = f"[{severity}] " if severity else ""
+            title = str(item.get("title") or "未命名问题")[:80]
+            lines.append(f"- {prefix}{title}{location}")
         if len(findings) > 6:
             lines.append(f"- 其余 {len(findings) - 6} 个见团队详情。")
     elif facts and status == "completed":

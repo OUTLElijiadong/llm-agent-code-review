@@ -65,7 +65,13 @@ def env(tmp_path: Path) -> dict[str, str]:
     proc = tmp_path / "proc"
     proc.mkdir()
     (proc / "meminfo").write_text("MemAvailable: 1000 kB\nSwapFree: 2000 kB\n", encoding="utf-8")
-    base = {k: v for k, v in os.environ.items() if k not in {"DOCKER_CONFIG", "PRISM_LOCK_WAIT_SECONDS"}}
+    sensitive_markers = ("_TOKEN", "_KEY", "_SECRET", "_PASSWORD", "_CREDENTIAL")
+    base = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in {"DOCKER_CONFIG", "PRISM_LOCK_WAIT_SECONDS"}
+        and not any(marker in key.upper() for marker in sensitive_markers)
+    }
     base.update({
         "PATH": f"{fake_bin}:{base['PATH']}",
         "FAKE_LOG": str(tmp_path / "calls.log"),
@@ -208,17 +214,35 @@ def test_lock_is_released_after_failure(repo: Path, env: dict[str, str]) -> None
 
 def test_shared_lock_held_by_live_process_is_a_normal_skip(repo: Path, env: dict[str, str]) -> None:
     lock = repo / "deploy" / ".releases" / ".maintenance.lock"
+    proc_root = Path(env["PRISM_PROC_ROOT"])
+    boot_id = "01234567-89ab-cdef-0123-456789abcdef"
+    boot_id_file = proc_root / "sys" / "kernel" / "random" / "boot_id"
+    boot_id_file.parent.mkdir(parents=True)
+    boot_id_file.write_text(f"{boot_id}\n", encoding="utf-8")
     holder = subprocess.Popen(
-        ["bash", "-c", f'source "{repo}/deploy/lib/common.sh"; acquire_directory_lock "{lock}"; sleep 30'],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
+        ["sleep", "30"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
     )
     try:
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline and not Path(f"{lock}.owner").exists():
-            time.sleep(0.05)
+        holder_proc = proc_root / str(holder.pid)
+        holder_proc.mkdir()
+        # linux_process_identity reads state (field 3) and start ticks (field 22).
+        stat_fields = ["S", *("0" for _ in range(18)), "12345"]
+        (holder_proc / "stat").write_text(
+            f"{holder.pid} (bash) {' '.join(stat_fields)}\n", encoding="utf-8",
+        )
+        lock.mkdir()
+        Path(f"{lock}.owner").write_text(
+            f"pid={holder.pid}\nstarted_epoch={int(time.time())}\ncommand=sleep\n"
+            f"process_start_ticks=12345\nboot_id={boot_id}\n",
+            encoding="utf-8",
+        )
         result = run_cleanup(repo, env, "--apply")
-        assert result.returncode == 0
+        assert result.returncode == 0, latest_log(env)
         log = latest_log(env)
+        assert "readonly variable" not in log
         assert "SKIP: deployment, backup, rollback, or another maintenance task holds the shared lock" in log
         assert f"pid={holder.pid}" in log
         assert "builder prune" not in calls(env)

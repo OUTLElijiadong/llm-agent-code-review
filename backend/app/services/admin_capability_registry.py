@@ -16,6 +16,12 @@ WRITE = "write"
 CRITICAL = "critical"
 _VALID_RISKS = {READ, WRITE, CRITICAL}
 
+# Evidence is account-sensitive and must remain in the authenticated main
+# session. Background team tasks do not carry a user's original JWT proof.
+PENTEST_EVIDENCE_MAIN_SESSION_CAPABILITIES = frozenset({
+    "pentest_evidence.inspect", "pentest_evidence.activities",
+})
+
 
 @dataclass(frozen=True)
 class AdminCapabilitySpec:
@@ -117,6 +123,15 @@ ADMIN_PAGE_ROUTES: tuple[str, ...] = (
 
 
 ADMIN_CAPABILITIES: tuple[AdminCapabilitySpec, ...] = (
+    AdminCapabilitySpec(
+        "pentest_evidence.inspect", "/admin/operations", "核查个人渗透执行证据",
+        "GET", "/api/pentest/admin/evidence/{public_id}", READ, "server_ops:view", "pentest-evidence",
+    ),
+    AdminCapabilitySpec(
+        "pentest_evidence.activities", "/admin/operations", "核查渗透执行活动与账本关联",
+        "GET", "/api/pentest/admin/evidence/{public_id}/executions/{execution_id}/activities",
+        READ, "server_ops:view", "pentest-evidence",
+    ),
     _cap("forum.posts.pin", "/forum", "置顶或取消置顶论坛帖子", "PUT", "/api/forum/posts/{post_id}/pin", WRITE),
     _cap("feedback.reply", "/support", "管理员回复用户反馈", "PUT", "/api/feedback/{feedback_id}/reply", WRITE),
     _cap("feedback.read", "/support", "管理员确认反馈已读", "POST", "/api/feedback/{feedback_id}/read", WRITE),

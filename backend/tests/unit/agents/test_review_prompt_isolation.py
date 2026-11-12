@@ -9,6 +9,8 @@ import pytest
 from app.agents.base import AgentResult, BaseAgent
 from app.agents.review_agent import CodeReviewerAgent
 
+pytestmark = pytest.mark.usefixtures("mark_fake_model_credentials_as_user")
+
 
 def test_shared_reviewer_uses_request_local_prompt_under_concurrency(monkeypatch):
     agent = CodeReviewerAgent()

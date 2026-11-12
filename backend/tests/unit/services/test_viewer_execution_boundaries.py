@@ -258,7 +258,14 @@ def test_sandbox_queued_work_rechecks_role_and_still_reclaims_worker(db, monkeyp
     monkeypatch.setattr(sandbox, "_call_worker", lambda *a, **k: pytest.fail("no worker execution"))
     monkeypatch.setattr(sandbox, "configure_subagent", lambda *a, **k: pytest.fail("no model setup"))
     cleanup = []
-    monkeypatch.setattr(sandbox, "_stop_registered_worker_requests", lambda *a: cleanup.append(rows.env.public_id))
+    def confirmed_cleanup(_worker, environment):
+        cleanup.append(environment.public_id)
+        return {
+            request_id: {"request_id": request_id, "status": "stopped", "result": {"cleanup_confirmed": True}}
+            for request_id in sandbox._registered_worker_request_ids(environment)
+        }
+
+    monkeypatch.setattr(sandbox, "_stop_registered_worker_requests", confirmed_cleanup)
     monkeypatch.setattr(sandbox, "_emit", lambda *a, **k: None)
     sandbox._execute_environment(rows.env.id, execution_token="local-lease")
     db.refresh(rows.env)

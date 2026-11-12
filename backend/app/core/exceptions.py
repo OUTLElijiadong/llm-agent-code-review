@@ -126,6 +126,14 @@ class ServiceUnavailableError(AppError):
     next_action = "请稍后重试；若持续失败，请提供请求编号给管理员"
 
 
+class PaymentRequiredError(AppError):
+    """调用需要有效订阅或足够的已入账额度。"""
+
+    code = 40200
+    http_status = 402
+    next_action = "请联系企业管理员续费或充值后再试"
+
+
 class TooManyRequestsError(AppError):
     """请求在短时间窗口内超过安全阈值。"""
 

@@ -208,7 +208,26 @@ class TestResolveApiConfig:
         db.refresh(row)
 
         assert cfg.source == "system"
+        assert cfg.billing_eligible is False
+        assert cfg.billing_credential_source == "fallback"
         assert row.is_active is False
+
+    def test_resolve_empty_decrypted_user_key_marks_fallback_non_billable(self, db):
+        from app.models.api_config import UserApiConfig
+        from app.utils.api_resolver import encrypt_api_key, resolve_api_config
+
+        row = UserApiConfig(
+            user_id=78, provider="deepseek", api_key_enc=encrypt_api_key(""),
+            base_url="https://api.deepseek.com/v1", model="deepseek-v4-flash", is_active=True,
+        )
+        db.add(row)
+        db.commit()
+
+        config = resolve_api_config(db, user_id=78)
+
+        assert config.source == "system"
+        assert config.billing_eligible is False
+        assert config.billing_credential_source == "fallback"
 
     def test_resolve_with_none_user_id_returns_system(self, db):
         """user_id=None 时直接返回系统默认"""
@@ -283,6 +302,8 @@ class TestResolveApiConfig:
         config = resolve_api_config(db, user_id=1002)
 
         assert config.source == "system"
+        assert config.billing_eligible is False
+        assert config.billing_credential_source == "fallback"
         assert messages
         assert all(plaintext not in message for message in messages)
         assert all(old_ciphertext not in message for message in messages)

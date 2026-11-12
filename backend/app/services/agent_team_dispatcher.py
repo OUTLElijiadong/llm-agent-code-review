@@ -4,23 +4,28 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from contextlib import nullcontext
 from typing import Any
 
 from loguru import logger
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.permission_codes import PermissionCode
 from app.models.agent_team import AgentTeam, AgentTeamEvent, AgentTeamTask
+from app.models.billing_ledger import BillingReservation, BillingWallet
 from app.models.user import User
 from app.services import agent_team_service, rbac_service
+from app.services import billing_ledger_service as ledger
 from app.services.agent_scheduler_runtime import (
     AgentExecutionCancelled,
     agent_execution_scope,
     check_agent_execution,
 )
 from app.services.ai_usage_context import model_attribution, usage_context
+from app.services.billing_ledger_service import BillingError
+from app.services.billing_runtime_gate import billing_scope
 
 _scheduler = None
 
@@ -102,6 +107,69 @@ def _owner_access_error(db: Session, owner_id: int, task_input: dict | None = No
         except AppError:
             return "项目执行资格已撤销或资源范围已变化，团队任务已阻断"
     return ""
+
+
+def _task_billing_scope(db: Session, team: AgentTeam, task: AgentTeamTask,
+                        member: Any, claimed: dict[str, Any]):
+    """Bill paid personal-team model attempts to the owner and fence unknown retries."""
+    if not settings.billing_commercial_metering_ready:
+        return nullcontext()
+    if team.surface != "user":
+        raise BillingError("管理端 Agent 团队尚无可验证的付款主体，禁止平台代付")
+
+    bind = db.get_bind()
+    factory = sessionmaker(
+        bind=getattr(bind, "engine", bind), autocommit=False, autoflush=False, expire_on_commit=False,
+    )
+    owner_id = int(team.user_id)
+    team_id = int(team.id)
+    task_id = int(task.id)
+    lease_token = str(claimed.get("lease_token") or "")
+    member_id = int(member.id)
+    address = str(claimed.get("address") or "")
+    request_prefix = f"agent-team:{team_id}:task:{task_id}:attempt-{int(claimed.get('attempt_count') or 0)}"
+    unresolved_prefix = f"agent-team:{team_id}:task:{task_id}:attempt-%"
+    task_input = agent_team_service._unjson(task.input_json, {})
+
+    with factory.begin() as billing_db:
+        wallet = billing_db.query(BillingWallet).filter_by(owner_type="user", owner_id=owner_id).first()
+        if wallet is None or ledger.available_milli(billing_db, int(wallet.id)) <= 0:
+            raise BillingError("個人积分不足或个人账本不存在，Agent 团队未执行")
+        unresolved = billing_db.query(BillingReservation.id).filter(
+            BillingReservation.request_key.like(unresolved_prefix),
+            BillingReservation.status.in_(("reserved", "unknown")),
+        ).first()
+        if unresolved is not None:
+            raise BillingError("该团队任务存在未核清的模型预占，禁止自动重试并重复计费")
+        wallet_id = int(wallet.id)
+
+    def attempt_guard(guard_db: Session, _request_key: str) -> None:
+        try:
+            _active_team, _active_task, active_member = agent_team_service.require_active_task_lease(
+                guard_db, team_id=team_id, task_id=task_id, lease_token=lease_token,
+                owner_user_id=owner_id, lock=True,
+            )
+        except agent_team_service.AgentTeamError as exc:
+            raise BillingError("Agent 团队任务租约失效，模型请求已阻断") from exc
+        if int(active_member.id) != member_id or active_member.address != address:
+            raise BillingError("Agent 团队成员已变化，模型请求已阻断")
+        access_error = _owner_access_error(
+            guard_db, owner_id, task_input, team_id=team_id, task_id=task_id,
+        )
+        if access_error:
+            raise BillingError(access_error)
+
+    return billing_scope(
+        session_factory=factory,
+        user_id=owner_id,
+        personal_wallet_id=wallet_id,
+        max_input_tokens=int(settings.deepseek_context_window_tokens),
+        max_output_tokens=int(settings.deepseek_max_output_tokens),
+        allow_personal=False,
+        usage_kind="member",
+        request_key_prefix=request_prefix,
+        attempt_guard=attempt_guard,
+    )
 
 
 def _execute_claimed(team_id: int, claimed: dict[str, Any]) -> dict[str, bool]:
@@ -248,7 +316,8 @@ def _execute_claimed(team_id: int, claimed: dict[str, Any]) -> dict[str, bool]:
                     ):
                         raise agent_team_service.AgentTeamLeaseError("团队成员声明与持久化任务不匹配")
 
-            with agent_execution_scope(check_lease), usage_context(owner_id, fields, db=db):
+            with agent_execution_scope(check_lease), usage_context(owner_id, fields, db=db), \
+                    _task_billing_scope(db, team, _task, member, claimed):
                 check_agent_execution()
                 _, result = _handle(
                     db,

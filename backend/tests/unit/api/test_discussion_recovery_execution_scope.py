@@ -22,6 +22,8 @@ from app.models.review_task import ReviewTask
 from app.models.roundtable import RoundtableSession
 from app.services import agent_scheduler_runtime as runtime
 
+pytestmark = pytest.mark.usefixtures("mark_fake_model_credentials_as_user")
+
 
 @pytest.fixture
 def recovery(tmp_path, monkeypatch):

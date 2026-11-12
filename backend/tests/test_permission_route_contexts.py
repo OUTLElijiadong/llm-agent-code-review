@@ -22,10 +22,20 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
 
     monkeypatch.setattr(app, "openapi", lambda: pytest.fail("OpenAPI cannot prove authorization"))
     plan = m.build_plan()
-    assert len(plan["routes"]) == 363  # 4.1.20 -6 旧直调路由，+2 CNVD/CNNVD 官方漏洞源 GET 接口
-    assert len({row["endpoint"] for row in plan["routes"]}) == 45
+    assert len(plan["routes"]) == 538  # 含企业澄清的读取、决策和续跑接口
+    assert len({row["endpoint"] for row in plan["routes"]}) == 58
     paths = {(row["method"], row["path"]) for row in plan["routes"]}
     assert {
+        ("GET", "/api/enterprises/{enterprise_id}/conversations/proactive-settings"),
+        ("PUT", "/api/enterprises/{enterprise_id}/conversations/proactive-settings"),
+        ("GET", ("/api/enterprises/{enterprise_id}/conversations/{conversation_id}/"
+                 "assistant-runs/{run_id}/clarification")),
+        ("POST", ("/api/enterprises/{enterprise_id}/conversations/{conversation_id}/"
+                  "assistant-runs/{run_id}/clarification/{request_id}/decision")),
+        ("POST", ("/api/enterprises/{enterprise_id}/conversations/{conversation_id}/"
+                  "assistant-runs/{run_id}/clarification/{request_id}/resume")),
+        ("GET", "/api/pentest/admin/evidence/{public_id}"),
+        ("GET", "/api/pentest/admin/evidence/{public_id}/executions/{execution_id}/activities"),
         ("POST", "/api/auth/login"),
         ("POST", "/v1/responses"),
         ("POST", "/api/discuss/sessions/{session_id}/stop"),
@@ -41,6 +51,57 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
         ("POST", "/api/sandboxes/remote-target-authorization"),
         ("GET", "/api/admin/observability/alerts/page"),
         ("GET", "/api/admin/overview/token-usage"),
+        ("POST", "/api/billing/admin/refunds/{refund_no}/decision"),
+        ("PUT", "/api/billing/admin/refund-reviewers/{user_id}"),
+        ("GET", "/api/billing/admin/refund-reviewers"),
+        ("GET", "/api/billing/refund-reviews"),
+        ("GET", "/api/me/agent-runs"),
+        ("POST", "/api/enterprise-asset-catalog/{publication_id}/runs"),
+        ("GET", "/api/enterprise-asset-catalog/{publication_id}/runs/{run_id}"),
+        ("GET", "/api/enterprise-asset-catalog/{publication_id}/runs/by-request/{request_key}"),
+        ("GET", "/api/billing/admin/reservations/reconciliation"),
+        ("GET", "/api/billing/admin/reservations/{reservation_id}/reconciliation/events"),
+        ("POST", "/api/billing/admin/reservations/{reservation_id}/reconciliation/recover-stale"),
+        ("POST", "/api/billing/admin/reservations/{reservation_id}/reconciliation/proposals"),
+        ("POST", "/api/billing/admin/reservations/{reservation_id}/reconciliation/decision"),
+        ("PUT", "/api/billing/admin/reconciliation/reviewers/{user_id}"),
+        ("GET", "/api/billing/admin/reconciliation/reviewers"),
+        ("GET", "/api/billing/reconciliation/reviews"),
+        ("GET", "/api/billing/reconciliation/reviews/{reservation_id}"),
+        ("GET", "/api/me/agents"),
+        ("POST", "/api/me/agents"),
+        ("GET", "/api/me/agents/{agent_id}"),
+        ("PUT", "/api/me/agents/{agent_id}"),
+        ("GET", "/api/me/agents/{agent_id}/versions"),
+        ("POST", "/api/me/agents/{agent_id}/disable"),
+        ("POST", "/api/me/agents/{agent_id}/runs"),
+        ("GET", "/api/me/agents/{agent_id}/runs/by-request/{request_key}"),
+        ("GET", "/api/me/agents/{agent_id}/runs/{run_id}"),
+        ("POST", "/api/me/agents/{agent_id}/publication-requests"),
+        ("GET", "/api/me/personal-agent-publications"),
+        ("POST", "/api/me/personal-agent-publications/{publication_id}/withdraw"),
+        ("GET", "/api/admin/personal-agent-publications"),
+        ("POST", "/api/admin/personal-agent-publications/{publication_id}/decision"),
+        ("POST", "/api/admin/personal-agent-publications/{publication_id}/revoke"),
+        ("GET", "/api/personal-agent-catalog"),
+        ("POST", "/api/personal-agent-catalog/{publication_id}/runs"),
+        ("GET", "/api/personal-agent-catalog/{publication_id}/runs/by-request/{request_key}"),
+        ("GET", "/api/personal-agent-catalog/{publication_id}/runs/{run_id}"),
+        ("PUT", "/api/billing/admin/rate-reviewers/{user_id}"),
+        ("GET", "/api/billing/admin/rate-reviewers"),
+        ("GET", "/api/billing/rate-reviews"),
+        ("GET", "/api/billing/rate-reviews/{catalog_id}"),
+        ("POST", "/api/billing/rate-reviews/{catalog_id}/approve"),
+        ("POST", "/api/billing/rate-reviews/{catalog_id}/reject"),
+        ("POST", "/api/billing/rate-catalogs/{catalog_id}/cancel-requests"),
+        ("GET", "/api/billing/rate-cancel-requests"),
+        ("POST", "/api/billing/rate-cancel-requests/{request_id}/decision"),
+        ("GET", "/api/billing/admin/rate-catalogs"),
+        ("POST", "/api/billing/admin/rate-catalogs"),
+        ("POST", "/api/billing/admin/rate-catalogs/{catalog_id}/approve"),
+        ("POST", "/api/billing/admin/rate-catalogs/{catalog_id}/reject"),
+        ("POST", "/api/billing/admin/rate-catalogs/{catalog_id}/cancel"),
+        ("GET", "/api/billing/enterprises/{enterprise_id}/orders"),
         ("GET", "/api/admin/security-center/automatic-blocking"),
         ("PUT", "/api/admin/security-center/automatic-blocking"),
         ("POST", "/api/admin/security-center/automatic-blocking/release"),
@@ -60,8 +121,67 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
         ("GET", "/api/remote-pentest/tasks/{public_id}/report"),
         ("GET", "/api/remote-pentest/tasks/{public_id}/report/export"),
     } <= paths
-    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 349
-    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 284
+    enterprise_scope_routes = {
+        ("GET", "/api/enterprises/{enterprise_id}/projects"),
+        ("GET", "/api/enterprises/{enterprise_id}/agent-teams"),
+        ("GET", "/api/enterprises/{enterprise_id}/agent-teams/{team_id}"),
+        ("GET", "/api/enterprises/{enterprise_id}/agent-teams/{team_id}/security-artifacts/{artifact_id}"),
+        ("HEAD", "/api/enterprises/{enterprise_id}/agent-teams/{team_id}/security-artifacts/{artifact_id}"),
+        ("POST", "/api/enterprises/{enterprise_id}/agent-teams/{team_id}/cancel"),
+        ("POST", "/api/enterprises/{enterprise_id}/agent-teams/{team_id}/retry"),
+        ("POST", "/api/enterprises/{enterprise_id}/projects"),
+        ("PUT", "/api/enterprises/{enterprise_id}/projects/{project_id}/grants/{user_id}"),
+        ("DELETE", "/api/enterprises/{enterprise_id}/projects/{project_id}/grants/{user_id}"),
+        ("GET", "/api/enterprises/{enterprise_id}/knowledge/attachments"),
+        ("GET", "/api/enterprises/{enterprise_id}/knowledge/attachments/search"),
+        ("POST", "/api/enterprises/{enterprise_id}/knowledge/attachments"),
+        ("GET", "/api/enterprises/{enterprise_id}/knowledge/attachments/{attachment_id}/download"),
+        ("DELETE", "/api/enterprises/{enterprise_id}/knowledge/attachments/{attachment_id}"),
+    }
+    assert enterprise_scope_routes <= paths
+    enterprise_rows = [row for row in plan["routes"] if (row["method"], row["path"]) in enterprise_scope_routes]
+    assert len(enterprise_rows) == len(enterprise_scope_routes)
+    assert all(
+        row["endpoint"]
+        in {
+            "app/api/v1/enterprise_projects.py",
+            "app/api/v1/enterprise_knowledge.py",
+            "app/api/v1/enterprise_agent_teams.py",
+        }
+        and row["anonymous"] == "ready"
+        and row["no_permission"] == "blocked"
+        and "app.core.dependencies.get_current_user" in row["dependency_order"]
+        and not row["unknown_dependencies"]
+        for row in enterprise_rows
+    )
+    rate_catalog_routes = {
+        ("GET", "/api/billing/admin/rate-catalogs"),
+        ("POST", "/api/billing/admin/rate-catalogs"),
+        ("POST", "/api/billing/admin/rate-catalogs/{catalog_id}/approve"),
+        ("POST", "/api/billing/admin/rate-catalogs/{catalog_id}/reject"),
+        ("POST", "/api/billing/admin/rate-catalogs/{catalog_id}/cancel"),
+    }
+    rate_catalog_rows = [row for row in plan["routes"]
+                         if (row["method"], row["path"]) in rate_catalog_routes]
+    assert len(rate_catalog_rows) == len(rate_catalog_routes)
+    assert all(
+        row["endpoint"] == "app/api/v1/billing.py"
+        and row["guard"] == "app.core.dependencies.require_super_admin"
+        and row["anonymous"] == row["no_permission"] == "ready"
+        and not row["unknown_dependencies"]
+        for row in rate_catalog_rows
+    )
+    recovery = [row for row in plan["routes"] if (
+        row["method"], row["path"]
+    ) == ("POST", "/api/billing/admin/reservations/{reservation_id}/reconciliation/recover-stale")]
+    assert len(recovery) == 1
+    assert recovery[0]["endpoint"] == "app/api/v1/billing.py"
+    assert recovery[0]["guard"] == "app.core.dependencies.require_super_admin"
+    assert recovery[0]["anonymous"] == recovery[0]["no_permission"] == "ready"
+    assert "app.core.dependencies.get_current_user" in recovery[0]["dependency_order"]
+    assert not recovery[0]["unknown_dependencies"]
+    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 522
+    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 322
     vulnerability_endpoints = {
         "/api/security/vulnerability-sources": security.get_vulnerability_sources,
         "/api/security/vulnerability-records": security.get_vulnerability_records,
@@ -86,30 +206,28 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
         assert route.methods == {"GET"}
         assert route.endpoint is vulnerability_endpoints[route.path]
         guards = [
-            dependency.call for dependency in route.dependant.dependencies
+            dependency.call
+            for dependency in route.dependant.dependencies
             if getattr(dependency.call, "__code__", None) is guard_code
         ]
         assert len(guards) == 1
         assert inspect.getclosurevars(guards[0]).nonlocals["permission_code"] == "security:view"
     stop_route = next(
-        row for row in plan["routes"]
+        row
+        for row in plan["routes"]
         if row["method"] == "POST" and row["path"] == "/api/discuss/sessions/{session_id}/stop"
     )
     assert stop_route["anonymous"] == "ready"
     assert stop_route["no_permission"] == "blocked"
     assert "app.core.dependencies.get_current_user" in stop_route["dependency_order"]
-    feedback_stats = [row for row in plan["routes"]
-                      if row["method"] == "GET" and row["path"] == "/api/feedback/stats"]
+    feedback_stats = [row for row in plan["routes"] if row["method"] == "GET" and row["path"] == "/api/feedback/stats"]
     assert len(feedback_stats) == 1
     assert feedback_stats[0]["no_permission"] == "blocked"
     assert "app.core.dependencies.get_current_user" in feedback_stats[0]["dependency_order"]
     assert not feedback_stats[0]["unknown_dependencies"]
     blocking_routes = [row for row in plan["routes"] if "automatic-blocking" in row["path"]]
     assert len(blocking_routes) == 3
-    assert all(
-        row["guard"] == "app.core.dependencies.require_super_admin"
-        for row in blocking_routes
-    )
+    assert all(row["guard"] == "app.core.dependencies.require_super_admin" for row in blocking_routes)
     new_security_routes = {
         ("POST", "/api/admin/security-center/trace/ip"),
         ("GET", "/api/admin/security-center/surface"),
@@ -117,10 +235,7 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
         ("GET", "/api/admin/security-center/decoy"),
         ("POST", "/api/admin/security-center/decoy/apply"),
     }
-    security_rows = [
-        row for row in plan["routes"]
-        if (row["method"], row["path"]) in new_security_routes
-    ]
+    security_rows = [row for row in plan["routes"] if (row["method"], row["path"]) in new_security_routes]
     assert len(security_rows) == len(new_security_routes)
     assert all(
         row["guard"] == "app.core.dependencies.require_super_admin"
@@ -134,8 +249,7 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
     }
     asset_routes = [row for row in plan["routes"] if row["path"] in private_assets]
     assert {row["path"] for row in asset_routes} == private_assets
-    assert all(row["method"] == "GET" and row["anonymous"] == row["no_permission"] == "ready"
-               for row in asset_routes)
+    assert all(row["method"] == "GET" and row["anonymous"] == row["no_permission"] == "ready" for row in asset_routes)
     remote_guards = {
         ("GET", "/api/remote-pentest/rules"): "pentest:start",
         ("POST", "/api/remote-pentest/tasks"): "pentest:start",

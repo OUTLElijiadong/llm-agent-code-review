@@ -1,7 +1,7 @@
 """
 用户表ORM模型
 """
-from sqlalchemy import Column, DateTime, Index, Integer, SmallInteger, String
+from sqlalchemy import BigInteger, Column, DateTime, Index, Integer, SmallInteger, String
 
 from app.core.database import Base
 from app.models.base import IdMixin, TimestampMixin
@@ -21,6 +21,7 @@ class User(Base, IdMixin, TimestampMixin):
     avatar = Column(String(64), comment="头像标识: 空=默认 / builtin:key / upload")
     role = Column(String(20), nullable=False, default="user")
     status = Column(SmallInteger, nullable=False, default=1, comment="1=启用,0=禁用,-1=已删除(软删)")
+    clarification_authority_version = Column(BigInteger, nullable=False, default=0, server_default="0")
     last_login = Column(DateTime)
     last_login_ip = Column(String(64), comment="最后登录来源 IP")
     token_version = Column(

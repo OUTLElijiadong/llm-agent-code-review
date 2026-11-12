@@ -1,5 +1,7 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
+import { createPinia, setActivePinia } from 'pinia'
+import { useWorkspaceStore } from '@/stores/workspace'
 
 import {
   extractAgentNavigations,
@@ -7,6 +9,9 @@ import {
   resolveLocalNavigationRequest,
   renderAuthorizedAgentMarkdown,
 } from './agentNavigation'
+
+beforeEach(() => setActivePinia(createPinia()))
+afterEach(() => setActivePinia(createPinia()))
 
 function guard(permission: boolean) {
   return {
@@ -19,6 +24,18 @@ function guard(permission: boolean) {
 }
 
 describe('shared navigation visibility', () => {
+  it('企业空间的小菱导航不会显示或执行个人论坛链接', () => {
+    useWorkspaceStore().activateEnterprise(23)
+    const router = {
+      resolve: ({ path }: { path: string }) => ({
+        matched: path === '/forum' ? [{ path: '/forum' }] : [],
+        meta: path === '/forum' ? { workspace: 'personal' } : {},
+      }),
+    }
+
+    expect(isNavigationPathAllowed(router as never, '/forum', guard(true))).toBe(false)
+  })
+
   it('fails closed for unknown, external and unauthorized routes', () => {
     const resolve = vi.fn(({ path }: { path: string }) => ({
       matched: path === '/known' ? [{}] : [],
@@ -414,6 +431,7 @@ describe('local navigation cost guard', () => {
 describe('真实管理入口重定向权限', () => {
   const routes = [{ path: '/admin', meta: { role: 'admin' }, children: [
     { path: 'platform', component: {}, meta: { title: '平台配置中心' } },
+    { path: 'operations', component: {}, meta: { title: '运行与审计中心' } },
     ...['embedding', 'mcp-workers', 'llm'].map(section => ({
       path: section, redirect: { path: '/admin/platform', query: { section } },
       meta: { superAdmin: true },
@@ -428,5 +446,11 @@ describe('真实管理入口重定向权限', () => {
     const superAdmin = { ...actor, isSuperAdmin: () => true }
     expect(isNavigationPathAllowed(router, `/admin/${section}`, superAdmin)).toBe(true)
     expect(isNavigationPathAllowed(router, `/admin/platform?section=${section}`, superAdmin)).toBe(true)
+  })
+  it('普通管理员不可通过小菱导航打开最高管理员的渗透证据核查', () => {
+    const actor = { ...guard(true), isAdmin: () => true }
+    expect(isNavigationPathAllowed(router, '/admin/operations?section=pentest-evidence', actor)).toBe(false)
+    expect(isNavigationPathAllowed(router, '/admin/operations?section=pentest-evidence',
+      { ...actor, isSuperAdmin: () => true })).toBe(true)
   })
 })

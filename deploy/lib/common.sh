@@ -255,9 +255,15 @@ current_alembic_revision() {
     MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql \
       --protocol=TCP -h 127.0.0.1 -uroot "$MYSQL_DATABASE" \
       --batch --skip-column-names \
-      -e "SELECT version_num FROM alembic_version LIMIT 1"
-  ' 2>/dev/null | tr -d '\r' | tail -n 1 || true)"
-  printf '%s\n' "${revision:-unknown}"
+      -e "SELECT version_num FROM alembic_version"
+  ' 2>/dev/null | tr -d '\r' || true)"
+  if [[ "$revision" =~ ^[A-Za-z0-9_]+$ ]]; then
+    printf '%s\n' "$revision"
+  elif [[ "$revision" == *$'\n'* ]]; then
+    printf 'ambiguous\n'
+  else
+    printf 'unknown\n'
+  fi
 }
 
 # 只读查询当前数据库，不向宿主日志/新镜像传递数据库凭据。
@@ -268,6 +274,144 @@ checkpoint_database_query() {
       --protocol=TCP -h 127.0.0.1 -uroot "$MYSQL_DATABASE" \
       --connect-timeout=10 --batch --raw --skip-column-names -e "$1"
   ' _ "$1" 2>/dev/null
+}
+
+# 检查迁移 119 的物理结构和三项保护触发器。Alembic 版本号本身不能证明
+# MySQL DDL 已全部提交；MySQL 的 DDL 可能在迁移失败时留下部分对象。
+# 参数: 无。返回 absent / complete / partial；无法查询时返回非零。
+chat_authority_database_state() {
+  local result schema_state migration_file schema_probe
+  result="$(checkpoint_database_query "$(cat <<'SQL'
+    SELECT /*+ MAX_EXECUTION_TIME(15000) */ /* prism_chat_authority_schema */
+      JSON_OBJECT(
+        'column_count',
+        (SELECT COUNT(*) FROM information_schema.columns
+         WHERE table_schema = DATABASE() AND table_name = 'enterprise_chat_message'
+           AND column_name = 'sender_authority_rank'),
+        'triggers',
+        COALESCE((SELECT JSON_ARRAYAGG(JSON_OBJECT(
+                    'trigger_name', trigger_name,
+                    'action_timing', action_timing,
+                    'event_manipulation', event_manipulation,
+                    'action_statement', action_statement
+                  ))
+                  FROM information_schema.triggers
+                  WHERE trigger_schema = DATABASE() AND event_object_table = 'enterprise_chat_message'),
+                 JSON_ARRAY())
+      )
+SQL
+  )" | tr -d '\r')" || return 1
+  migration_file="$(dirname "${BASH_SOURCE[0]}")/../../backend/alembic/versions/119_chat_message_authority.py"
+  schema_probe="$(dirname "${BASH_SOURCE[0]}")/chat_authority_schema_compatibility.py"
+  [[ -r "$migration_file" && -r "$schema_probe" ]] || return 1
+  schema_state="$(printf '%s' "$result" | python3 "$schema_probe" "$migration_file")" || return 1
+  case "$schema_state" in
+    absent|complete|partial) printf '%s\n' "$schema_state" ;;
+    *) return 1 ;;
+  esac
+}
+
+# 检查目标 Backend 镜像是否实现迁移 119 的消息写入和权限快照读取契约。
+# 参数: $1 已按 digest 绑定的 Backend 镜像。
+# 返回: 完整实现时 0；未知、旧版本或 probe 故障时终止发布/回滚。
+assert_chat_authority_image_capability() {
+  local image_id="$1" expected="$2" capability failure_message
+  local probe_file
+  case "$expected" in
+    supported)
+      failure_message="目标镜像不支持 119 小菱消息权限快照契约，拒绝启动；保留数据库并前向修复" ;;
+    unsupported)
+      failure_message="目标镜像需要 119 小菱消息权限快照结构，但数据库尚未具备该结构；拒绝启动并保留当前版本" ;;
+    *) fatal "小菱权限快照能力检查参数无效" ;;
+  esac
+  probe_file="$(dirname "${BASH_SOURCE[0]}")/chat_authority_compatibility.py"
+  [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] \
+    || fatal "小菱权限快照兼容门缺少已绑定 Backend 镜像 ID"
+  [[ -r "$probe_file" ]] || fatal "小菱权限快照能力 probe 不可读，拒绝切换镜像"
+  capability="$(docker run --rm -i --memory 128m --pids-limit 32 \
+    --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+    --entrypoint python "$image_id" - < "$probe_file")" \
+    || fatal "目标镜像小菱权限快照能力验证失败，拒绝启动；保留数据库并前向修复"
+  [[ "$capability" == supported || "$capability" == unsupported ]] \
+    || fatal "目标镜像小菱权限快照能力结果未知，拒绝启动并保留当前版本"
+  [[ "$capability" == "$expected" ]] || fatal "$failure_message"
+  log_info "小菱权限快照镜像能力符合(schema_expected=$expected, image=$image_id)"
+}
+
+assert_chat_authority_image_compatible() {
+  assert_chat_authority_image_capability "$1" supported
+}
+
+assert_chat_authority_image_requires_absent_schema() {
+  assert_chat_authority_image_capability "$1" unsupported
+}
+
+# 发布/回滚前确保没有本 Compose 项目的 Backend 写入者仍在运行。
+# 外部 Worker 不受 Compose 管理，迁移 119 时还需要操作者单独确认已停写。
+# 参数: 无。返回: 已确认全部 Compose Backend 容器停止时 0，否则终止事务。
+stop_chat_authority_writers() {
+  local running
+  chat_authority_stop_attempted=1
+  compose stop backend || fatal "停止 Compose Backend 写入者失败；不得执行聊天权限迁移"
+  running="$(compose ps --status running --quiet backend 2>/dev/null)" \
+    || fatal "无法确认 Compose Backend 写入者已停止；不得执行聊天权限迁移"
+  [[ -z "${running//[$' \t\r\n']/}" ]] \
+    || fatal "仍有 Compose Backend 写入者运行；不得执行聊天权限迁移"
+  deployment_mutated=1
+  log_info "Compose Backend 写入者已全部停止"
+}
+
+# 对手动或自动回滚应用同一迁移 119 兼容门。旧库可以继续使用旧 reader；
+# 只要 119 列/触发器已经出现，就必须使用完整兼容镜像，部分状态一律拒绝。
+# 参数: 无。返回: 目标镜像与当前数据库都可确认兼容时 0，否则拒绝容器切换。
+assert_chat_authority_rollback_compatible() {
+  local schema revision relation versions_dir revision_probe
+  if ! schema="$(chat_authority_database_state)"; then
+    stop_chat_authority_writers
+    fatal "无法只读确认小菱权限快照结构；Backend 已停，拒绝回滚并保留账本/数据"
+  fi
+  revision="$(current_alembic_revision)"
+  if [[ "$revision" == unknown || "$revision" == ambiguous ]]; then
+    stop_chat_authority_writers
+    fatal "Alembic current revision 缺失或不唯一；Backend 已停，拒绝回滚并保留数据"
+  fi
+  versions_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../backend/alembic/versions" && pwd -P)" \
+    || { stop_chat_authority_writers; fatal "当前 release 不含 Alembic revision 图；Backend 已停，拒绝确认回滚兼容性"; }
+  revision_probe="$(dirname "${BASH_SOURCE[0]}")/alembic_revision_compatibility.py"
+  [[ -r "$revision_probe" ]] \
+    || { stop_chat_authority_writers; fatal "Alembic revision 兼容 probe 不可读；Backend 已停，拒绝回滚"; }
+  if ! relation="$(python3 "$revision_probe" "$versions_dir" "$revision" "119_chat_message_authority")"; then
+    stop_chat_authority_writers
+    fatal "无法确认数据库是否已经跨过迁移 119；Backend 已停，拒绝回滚"
+  fi
+  case "$schema" in
+    absent)
+      if [[ "$relation" != descendant ]]; then
+        stop_chat_authority_writers
+        fatal "数据库已记录迁移 119 或其后继，但权限列/触发器缺失；Backend 已停，拒绝回滚并前向修复"
+      fi
+      # 回滚目标可能比数据库 revision 新（例如 119-aware 镜像配 118 schema）。
+      # 旧库只有在目标 reader 不依赖新列时才能启动；未知或相反能力都失败关闭。
+      assert_chat_authority_image_requires_absent_schema "$BOUND_BACKEND_IMAGE_ID"
+      log_info "小菱权限快照回滚门通过(schema=absent, revision=$revision)"
+      ;;
+    complete)
+      if [[ "$relation" != compatible ]]; then
+        stop_chat_authority_writers
+        fatal "119 权限结构已存在，但 Alembic revision 仍在迁移 119 之前或状态未知；Backend 已停，拒绝回滚"
+      fi
+      assert_chat_authority_image_compatible "$BOUND_BACKEND_IMAGE_ID"
+      log_info "小菱权限快照回滚门通过(schema=complete, revision=$revision)"
+      ;;
+    partial)
+      stop_chat_authority_writers
+      fatal "小菱权限快照迁移结构不完整或触发器定义不符；Backend 已停，拒绝回滚并前向修复"
+      ;;
+    *)
+      stop_chat_authority_writers
+      fatal "小菱权限快照结构状态未知；Backend 已停，拒绝回滚并前向修复"
+      ;;
+  esac
 }
 
 # 在切换容器前拒绝不认识当前检查点格式的目标镜像。
@@ -357,13 +501,21 @@ lock_owner_file() {
 # 参数: $1 为锁目录。
 # 返回: 始终返回 0。
 write_lock_owner() {
-  local owner_file tmp_file
+  local owner_file tmp_file process_identity process_start boot_id
   owner_file="$(lock_owner_file "$1")"
   tmp_file="$owner_file.$$"
+  process_identity="$(linux_process_identity "$$" 2>/dev/null || true)"
+  process_start="${process_identity#* }"
+  [[ "$process_identity" == "$process_start" ]] && process_start=""
+  boot_id="$(linux_boot_id 2>/dev/null || true)"
   {
     printf 'pid=%s\n' "$$"
     printf 'started_epoch=%s\n' "$(date -u '+%s')"
     printf 'command=%s\n' "${0##*/}"
+    if [[ -n "$process_identity" && -n "$process_start" && -n "$boot_id" ]]; then
+      printf 'process_start_ticks=%s\n' "$process_start"
+      printf 'boot_id=%s\n' "$boot_id"
+    fi
   } > "$tmp_file" 2>/dev/null && mv -f "$tmp_file" "$owner_file" 2>/dev/null || rm -f "$tmp_file" 2>/dev/null
   return 0
 }
@@ -389,13 +541,83 @@ lock_owner_field() {
   return 1
 }
 
+# Linux 上一次读取进程状态与启动 tick。进程 exec 成其他程序时 PID 和启动 tick 不变，
+# 可识别 PID 复用，也能把 zombie 与仍在运行的进程区分开。非 Linux 环境返回失败。
+# 参数: $1 为 PID。返回: stdout 输出 state 与 /proc/<pid>/stat 的第 22 字段。
+linux_process_identity() {
+  local pid="$1" stat_line proc_root="${PRISM_PROC_ROOT:-/proc}"
+  local -a fields
+  [[ "$pid" =~ ^[0-9]+$ && -r "$proc_root/$pid/stat" ]] || return 1
+  IFS= read -r stat_line < "$proc_root/$pid/stat" || return 1
+  # comm 可包含空格和右括号；删除到最后一个 ") " 后再按空格解析字段 3..22。
+  stat_line="${stat_line##*) }"
+  read -r -a fields <<< "$stat_line"
+  (( ${#fields[@]} >= 20 )) || return 2
+  [[ "${fields[0]}" =~ ^[[:alpha:]]$ && "${fields[19]}" =~ ^[0-9]+$ ]] || return 2
+  printf '%s %s\n' "${fields[0]}" "${fields[19]}"
+}
+
+# Linux 启动标识用于避免重启后 PID 与启动 tick 恰好重合。
+linux_boot_id() {
+  local proc_root="${PRISM_PROC_ROOT:-/proc}" boot_id
+  IFS= read -r boot_id < "$proc_root/sys/kernel/random/boot_id" || return 1
+  [[ "$boot_id" =~ ^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$ ]] || return 1
+  printf '%s\n' "$boot_id"
+}
+
 # 判断锁的记录持有者是否仍在运行。
 # 参数: $1 为锁目录。
 # 返回: 0=仍在运行；1=持有进程已不存在（含 pid 被其他程序复用）；2=无法判断。
 lock_owner_alive() {
-  local lock_dir="$1" pid command cmdline
+  local lock_dir="$1" pid command process_start owner_boot_id current_boot_id current_identity current_state current_start proc_root kill_error cmdline
   pid="$(lock_owner_field "$lock_dir" pid)" || return 2
   [[ "$pid" =~ ^[0-9]+$ ]] || return 2
+  process_start="$(lock_owner_field "$lock_dir" process_start_ticks || true)"
+  owner_boot_id="$(lock_owner_field "$lock_dir" boot_id || true)"
+  if [[ -n "$process_start" || -n "$owner_boot_id" ]]; then
+    [[ "$process_start" =~ ^[0-9]+$ && "$owner_boot_id" =~ ^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$ ]] || return 2
+    proc_root="${PRISM_PROC_ROOT:-/proc}"
+    current_boot_id="$(linux_boot_id 2>/dev/null || true)"
+    if [[ -n "$current_boot_id" ]]; then
+      [[ "$current_boot_id" == "$owner_boot_id" ]] || return 1
+      current_identity="$(linux_process_identity "$pid" 2>/dev/null)"
+      case $? in
+        0) ;;
+        1)
+          # A present proc directory with unreadable/vanished stat is ambiguous; never call it stale.
+          [[ -d "$proc_root/$pid" ]] && return 2
+          ;;
+        *) return 2 ;;
+      esac
+      [[ "$(linux_boot_id 2>/dev/null || true)" == "$current_boot_id" ]] || return 2
+      if [[ -z "$current_identity" ]]; then
+        if kill_error="$(kill -0 "$pid" 2>&1)"; then
+          return 2
+        fi
+        case "$kill_error" in
+          *"No such process"*) return 1 ;;
+          *) return 2 ;;
+        esac
+      fi
+      current_state="${current_identity%% *}"
+      current_start="${current_identity#* }"
+      [[ "$current_state" == Z || "$current_state" == X ]] && return 1
+      [[ "$current_start" == "$process_start" ]] || return 1
+      return 0
+    fi
+    # If procfs is unavailable (for example, a lock moved to macOS), retain the
+    # conservative kill -0 behavior; a live PID is never declared stale by name.
+    if [[ ! -d "$proc_root" ]]; then
+      if kill_error="$(kill -0 "$pid" 2>&1)"; then
+        return 0
+      fi
+      case "$kill_error" in
+        *"No such process"*) return 1 ;;
+        *) return 2 ;;
+      esac
+    fi
+    return 2
+  fi
   command="$(lock_owner_field "$lock_dir" command || true)"
   if [[ -r "/proc/$pid/cmdline" ]]; then
     cmdline="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
@@ -645,13 +867,22 @@ run_admin_alembic() {
 # 参数: 无。
 # 返回: 一致时 0，否则返回 1。
 assert_alembic_at_head() {
-  local heads current
+  local heads current current_output current_count
   heads="$(run_admin_alembic heads 2>/dev/null | awk '{print $1}' | sed '/^$/d')"
   if [[ "$(printf '%s\n' "$heads" | wc -l | tr -d ' ')" != "1" ]]; then
     log_warn "Alembic 必须只有一个 head，实际: ${heads:-none}"
     return 1
   fi
-  current="$(run_admin_alembic current 2>/dev/null | awk '{print $1}' | tail -n 1)"
+  current_output="$(run_admin_alembic current 2>/dev/null)" || {
+    log_warn "无法读取 Alembic current revision"
+    return 1
+  }
+  current_count="$(printf '%s\n' "$current_output" | awk 'NF {count += 1} END {print count + 0}')"
+  if [[ "$current_count" != "1" ]]; then
+    log_warn "Alembic current 必须只有一个 revision，实际行数: $current_count"
+    return 1
+  fi
+  current="$(printf '%s\n' "$current_output" | awk 'NF {print $1}')"
   if [[ "$current" != "$heads" ]]; then
     log_warn "Alembic revision 不一致(current=${current:-none}, head=$heads)"
     return 1

@@ -14,6 +14,8 @@ from app.agents import event_bus as module
 from app.agents.base import AgentContext, BaseAgent
 from app.agents.events import AgentEvent, AgentEventType
 
+pytestmark = pytest.mark.usefixtures("mark_fake_model_credentials_as_user")
+
 
 @pytest.fixture(autouse=True)
 def _restore_event_bus_state() -> AsyncIterator[None]:

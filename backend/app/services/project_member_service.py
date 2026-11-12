@@ -6,32 +6,100 @@
 """
 from __future__ import annotations
 
+from functools import wraps
+from time import time
 from typing import Optional
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
+from app.core.exceptions import (
+    AuthError,
+    BadRequestError,
+    ConflictError,
+    ForbiddenError,
+    NotFoundError,
+    ServiceUnavailableError,
+)
+from app.core.permission_codes import PermissionCode
+from app.models.enterprise_project import EnterpriseProject
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.user import User
-from app.services.rbac_service import is_admin_user
+from app.services.rbac_service import is_admin_user, resolve_effective_role_code
 
 HIDDEN_PROJECT_STATUSES = ("deleted", "quarantined")
 PROJECT_MEMBER_ROLES = frozenset({"owner", "reviewer", "viewer"})
-PROJECT_WRITE_ROLES = frozenset({"admin", "owner"})
-PROJECT_EXECUTION_ROLES = frozenset({"admin", "owner", "reviewer"})
+PROJECT_WRITE_ROLES = frozenset({"admin", "owner", "enterprise_admin", "enterprise_leader", "enterprise_editor"})
+PROJECT_EXECUTION_ROLES = frozenset({
+    "admin", "owner", "reviewer", "enterprise_admin", "enterprise_leader", "enterprise_editor", "enterprise_reviewer"
+})
 
 
-def _require_visible_project(db: Session, project_id: int) -> Project:
+def _enterprise_binding(db: Session, project_id: int, *, lock: bool = False,
+                        nowait: bool = False) -> Optional[EnterpriseProject]:
+    # 包含停用绑定：不能因绑定停用而退回个人 owner/admin 的旧权限。
+    query = db.query(EnterpriseProject).filter_by(project_id=project_id)
+    return (query.populate_existing().with_for_update(nowait=nowait) if lock else query).first()
+
+
+def _reject_legacy_enterprise_member_ops(db: Session, project_id: int, *, lock: bool = False,
+                                         nowait: bool = False) -> None:
+    if _enterprise_binding(db, project_id, lock=lock, nowait=nowait):
+        raise ServiceUnavailableError("企业项目授权须使用企业权限接口；该入口暂未开放")
+
+
+def _member_write_lock_conflicts(function):
+    """Return a retryable conflict when a current authorization lock is busy."""
+    @wraps(function)
+    def wrapped(db: Session, *args, **kwargs):
+        try:
+            return function(db, *args, **kwargs)
+        except OperationalError as exc:
+            code = getattr(exc.orig, "args", (None,))[0]
+            if db.get_bind().dialect.name == "mysql" and code in (1205, 1213, 3572):
+                db.rollback()
+                raise ConflictError("项目或成员权限正在变更，请刷新后重试", code=40901) from exc
+            raise
+    return wrapped
+
+
+def _lock_member_write_scope(db: Session, project_id: int, operator: Optional[User]) -> None:
+    # Preserve caller changes before populate_existing refreshes ORM objects.
+    # Each public member mutation already commits its surrounding transaction.
+    db.flush()
+    if operator is not None and (token_version := getattr(operator, "_authenticated_token_version", None)) is not None:
+        # API route dependencies run before this service. Fence their specific
+        # grant again, so an RR snapshot cannot retain a revoked permission.
+        # This check locks reviewer entitlement before actor/RBAC rows, matching
+        # the billing service's lock order. Internal calls without JWT retain
+        # their existing trusted-caller semantics.
+        from app.services.rbac_service import check_paid_permission_fenced
+
+        if not check_paid_permission_fenced(
+            db, operator.id, PermissionCode.PROJECT_MEMBER_MANAGE, expected_token_version=token_version,
+            nowait=True,
+        ):
+            raise ForbiddenError("没有管理项目成员的权限", code=40303)
+    # Binding acquires the project row before creating EnterpriseProject. The
+    # current binding read below therefore cannot fall back to stale personal
+    # ownership while a bind is committing. NOWAIT prevents lock-order cycles.
+    _require_visible_project(db, project_id, lock=True, nowait=True)
+    _reject_legacy_enterprise_member_ops(db, project_id, lock=True, nowait=True)
+    if operator is not None:
+        require_project_access(db, project_id, operator, need_write=True, lock=True, nowait=True)
+
+
+def _require_visible_project(db: Session, project_id: int, *, lock: bool = False,
+                             nowait: bool = False) -> Project:
     """内部隔离态与软删除态对业务调用均表现为不存在。"""
-    project = (
+    query = (
         db.query(Project)
         .populate_existing()
         .filter(Project.id == project_id)
-        .one_or_none()
     )
+    project = (query.with_for_update(nowait=nowait) if lock else query).one_or_none()
     if not project or project.status in HIDDEN_PROJECT_STATUSES:
         raise NotFoundError("项目不存在", code=40400)
     return project
@@ -53,36 +121,46 @@ def get_visible_project_ids(db: Session, user: Optional[User]) -> tuple[list[int
             - scope='global': 管理员视角,返回全部项目
             - scope='self': 普通用户视角,返回 owner ∪ member 项目
     """
+    bindings = db.query(EnterpriseProject).all()
+    enterprise_ids = {int(row.project_id) for row in bindings}
     if user is None or is_admin_user(db, user.id):
         rows = db.query(Project.id).filter(Project.status.notin_(HIDDEN_PROJECT_STATUSES)).all()
-        return [r[0] for r in rows], "global"
+        visible = {int(r[0]) for r in rows} - enterprise_ids
+        scope = "global"
+    else:
+        # owner 项目
+        owner_rows = (
+            db.query(Project.id)
+            .filter(Project.user_id == user.id, Project.status.notin_(HIDDEN_PROJECT_STATUSES))
+            .all()
+        )
+        # member 项目
+        member_rows = (
+            db.query(ProjectMember.project_id)
+            .join(Project, Project.id == ProjectMember.project_id)
+            .filter(ProjectMember.user_id == user.id,
+                    ProjectMember.role_in_project.in_(PROJECT_MEMBER_ROLES),
+                    Project.status.notin_(HIDDEN_PROJECT_STATUSES))
+            .all()
+        )
+        visible = ({int(row[0]) for row in owner_rows} | {int(row[0]) for row in member_rows}) - enterprise_ids
+        scope = "self"
 
-    # owner 项目
-    owner_rows = (
-        db.query(Project.id)
-        .filter(Project.user_id == user.id, Project.status.notin_(HIDDEN_PROJECT_STATUSES))
-        .all()
-    )
-    owner_ids = [r[0] for r in owner_rows]
+    # 后台无用户上下文也不能无条件读取企业项目。
+    if user is not None:
+        from app.services.enterprise_project_policy import require_enterprise_project_access
 
-    # member 项目
-    member_rows = (
-        db.query(ProjectMember.project_id)
-        .join(Project, Project.id == ProjectMember.project_id)
-        .filter(ProjectMember.user_id == user.id,
-                ProjectMember.role_in_project.in_(PROJECT_MEMBER_ROLES),
-                Project.status.notin_(HIDDEN_PROJECT_STATUSES))
-        .all()
-    )
-    member_ids = [r[0] for r in member_rows]
-
-    # union 去重
-    visible_ids = list(set(owner_ids) | set(member_ids))
-    return visible_ids, "self"
+        for binding in bindings:
+            try:
+                require_enterprise_project_access(db, binding.enterprise_id, binding.project_id, user.id, "view")
+            except (ForbiddenError, NotFoundError):
+                continue
+            visible.add(int(binding.project_id))
+    return sorted(visible), scope
 
 
 def is_project_member(
-    db: Session, project_id: int, user: User
+    db: Session, project_id: int, user: User, *, lock: bool = False, nowait: bool = False
 ) -> tuple[bool, str]:
     """判断用户对项目的访问角色。
 
@@ -100,29 +178,41 @@ def is_project_member(
             - (False, ""): 无访问权限
     """
     # owner 检查
-    project = (
+    query = (
         db.query(Project)
         .populate_existing()
         .filter(Project.id == project_id)
-        .one_or_none()
     )
+    project = (query.with_for_update(nowait=nowait) if lock else query).one_or_none()
     if not project or project.status in HIDDEN_PROJECT_STATUSES:
         return False, ""
-    if is_admin_user(db, user.id):
+    binding = _enterprise_binding(db, project_id, lock=lock, nowait=nowait)
+    if binding:
+        from app.services.enterprise_project_policy import require_enterprise_project_access
+
+        try:
+            role = require_enterprise_project_access(
+                db, binding.enterprise_id, project_id, user.id, "view", lock=lock, nowait=nowait,
+            )
+        except (ForbiddenError, NotFoundError):
+            return False, ""
+        return True, f"enterprise_{role}"
+    admin = is_admin_user(db, user.id, lock=True, nowait=nowait) if lock else is_admin_user(db, user.id)
+    if admin:
         return True, "admin"
     if project.user_id == user.id:
         return True, "owner"
 
     # member 检查
-    member = (
+    member_query = (
         db.query(ProjectMember)
         .populate_existing()
         .filter(
             ProjectMember.project_id == project_id,
             ProjectMember.user_id == user.id,
         )
-        .first()
     )
+    member = (member_query.with_for_update(nowait=nowait) if lock else member_query).first()
     if member and member.role_in_project in PROJECT_MEMBER_ROLES:
         return True, member.role_in_project
 
@@ -130,7 +220,8 @@ def is_project_member(
 
 
 def require_project_access(
-    db: Session, project_id: int, user: User, need_write: bool = False
+    db: Session, project_id: int, user: User, need_write: bool = False, *,
+    lock: bool = False, nowait: bool = False,
 ) -> str:
     """校验用户对项目的访问权限,失败抛异常。
 
@@ -152,9 +243,25 @@ def require_project_access(
         NotFoundError: 项目不存在
         ForbiddenError: 无访问权限或写权限不足
     """
-    _require_visible_project(db, project_id)
+    if lock:
+        # The owner shortcut below is not authentication. Revalidate the
+        # account and its unique active role under the same current-read lock
+        # before trusting any project relationship from this transaction.
+        authenticated_version = getattr(user, "_authenticated_token_version", None)
+        authenticated_expiry = getattr(user, "_authenticated_token_expires_at", None)
+        if not resolve_effective_role_code(db, user.id, lock=True, nowait=nowait):
+            raise ForbiddenError("账号不存在、已禁用或角色不可用", code=40301)
+        current_user = db.get(User, user.id)
+        if authenticated_version is not None and authenticated_version != (current_user.token_version or 0):
+            raise AuthError("账号已在另一台设备登录，当前设备已下线", code=40102)
+        if authenticated_expiry is not None and authenticated_expiry <= time():
+            raise AuthError("token非法或已过期", code=40101)
+        _require_visible_project(db, project_id, lock=True, nowait=nowait)
+        can_access, role = is_project_member(db, project_id, user, lock=True, nowait=nowait)
+    else:
+        _require_visible_project(db, project_id)
+        can_access, role = is_project_member(db, project_id, user)
 
-    can_access, role = is_project_member(db, project_id, user)
     if not can_access:
         # 无访问权限:对写请求记录失败审计(读请求不记录,避免日志膨胀)
         if need_write:
@@ -188,6 +295,11 @@ def require_project_access(
 def require_project_execution(db: Session, project_id: int, user: User) -> str:
     """项目只读资格不授予审查、模型或环境执行；全局 RBAC 仍由入口求交。"""
     role = require_project_access(db, project_id, user, need_write=False)
+    binding = _enterprise_binding(db, project_id)
+    if binding:
+        from app.services.enterprise_project_policy import require_enterprise_project_access
+
+        require_enterprise_project_access(db, binding.enterprise_id, project_id, user.id, "execute")
     if role not in PROJECT_EXECUTION_ROLES:
         raise ForbiddenError("只读项目成员不能执行审查、讨论或环境任务", code=40300)
     return role
@@ -260,9 +372,26 @@ def project_resource_capabilities(db: Session, user: User, project_ids, *, proje
     member_roles = dict(db.query(ProjectMember.project_id, ProjectMember.role_in_project).filter(
         ProjectMember.project_id.in_(ids), ProjectMember.user_id == user.id,
     ).all())
+    bindings = {int(row.project_id): row for row in db.query(EnterpriseProject).filter(
+        EnterpriseProject.project_id.in_(ids)
+    ).all()}
     administrator = is_admin_user(db, int(user.id))
     result = {}
     for project_id, owner_id in project_rows:
+        binding = bindings.get(int(project_id))
+        if binding:
+            from app.services.enterprise_project_policy import require_enterprise_project_access
+
+            capabilities = {"can_write": False, "can_execute": False}
+            for key, action in (("can_write", "write"), ("can_execute", "execute")):
+                try:
+                    require_enterprise_project_access(db, binding.enterprise_id, project_id, user.id, action)
+                except (ForbiddenError, NotFoundError):
+                    pass
+                else:
+                    capabilities[key] = True
+            result[project_id] = capabilities
+            continue
         role = "admin" if administrator else "owner" if owner_id == user.id else member_roles.get(project_id, "")
         result[project_id] = {"can_write": role in PROJECT_WRITE_ROLES,
                               "can_execute": role in PROJECT_EXECUTION_ROLES}
@@ -282,9 +411,8 @@ def _audit_project_access(
     """记录项目访问审计日志(内部函数,失败不影响主业务)。
 
     提交策略:
-        - status="failed": 立即 commit,因为外层即将 raise 异常触发 rollback,
-          若不立即提交审计日志会被回滚丢失
-        - status="success": commit=False,由外层事务统一提交,避免破坏业务事务原子性
+        - status="failed": 在外层事务结束后尝试独立写入，不能接管调用方事务。
+        - status="success": commit=False,由外层事务统一提交,避免破坏业务事务原子性。
 
     Args:
         db: 数据库会话
@@ -296,9 +424,13 @@ def _audit_project_access(
         detail: 审计说明文本
     """
     try:
+        if status == "failed":
+            from app.services.project_access_audit import record_project_denial
+
+            record_project_denial(db, user, project_id, role)
+            return
         from app.services import audit_service
-        # 失败审计必须立即提交,否则会被外层异常 rollback 丢失
-        commit_now = (status == "failed")
+
         audit_service.log(
             db,
             user,
@@ -307,13 +439,17 @@ def _audit_project_access(
             target_id=str(project_id),
             detail=detail,
             status=status,
-            commit=commit_now,
+            commit=False,
         )
-    except Exception:
+    except Exception as exc:
         # 审计失败不影响主业务流程
-        pass
+        if status == "failed":
+            from loguru import logger
+
+            logger.error("[project-denial-audit] 无法登记拒绝审计 error_type={}", type(exc).__name__)
 
 
+@_member_write_lock_conflicts
 def add_member(
     db: Session,
     project_id: int,
@@ -340,14 +476,11 @@ def add_member(
     """
     if role not in PROJECT_MEMBER_ROLES:
         raise BadRequestError("项目内角色必须为负责人、审查员或只读成员", code=40000)
-    if operator is not None:
-        require_project_access(db, project_id, operator, need_write=True)
-
-    # 校验项目存在
-    _require_visible_project(db, project_id)
+    _lock_member_write_scope(db, project_id, operator)
 
     # 校验用户存在
-    target_user = db.get(User, user_id)
+    target_user = (db.query(User).filter_by(id=user_id).populate_existing()
+                   .with_for_update(nowait=True).first())
     if not target_user or target_user.status != 1:
         raise NotFoundError("用户不存在或已禁用", code=40400)
 
@@ -358,7 +491,7 @@ def add_member(
             ProjectMember.project_id == project_id,
             ProjectMember.user_id == user_id,
         )
-        .first()
+        .populate_existing().with_for_update(nowait=True).first()
     )
     if existing:
         raise BadRequestError("该用户已是项目成员", code=40000)
@@ -385,6 +518,7 @@ def add_member(
     return member
 
 
+@_member_write_lock_conflicts
 def remove_member(
     db: Session,
     project_id: int,
@@ -407,9 +541,7 @@ def remove_member(
         ForbiddenError: 操作者无权限
         BadRequestError: 不能移除项目 owner
     """
-    if operator is not None:
-        require_project_access(db, project_id, operator, need_write=True)
-    _require_visible_project(db, project_id)
+    _lock_member_write_scope(db, project_id, operator)
 
     # 不允许移除 owner
     member = (
@@ -418,7 +550,7 @@ def remove_member(
             ProjectMember.project_id == project_id,
             ProjectMember.user_id == user_id,
         )
-        .first()
+        .populate_existing().with_for_update(nowait=True).first()
     )
     if not member:
         return False
@@ -436,6 +568,7 @@ def remove_member(
     return True
 
 
+@_member_write_lock_conflicts
 def update_member_role(
     db: Session,
     project_id: int,
@@ -462,9 +595,7 @@ def update_member_role(
     """
     if new_role not in PROJECT_MEMBER_ROLES:
         raise BadRequestError("项目内角色必须为负责人、审查员或只读成员", code=40000)
-    if operator is not None:
-        require_project_access(db, project_id, operator, need_write=True)
-    _require_visible_project(db, project_id)
+    _lock_member_write_scope(db, project_id, operator)
 
     member = (
         db.query(ProjectMember)
@@ -472,7 +603,7 @@ def update_member_role(
             ProjectMember.project_id == project_id,
             ProjectMember.user_id == user_id,
         )
-        .first()
+        .populate_existing().with_for_update(nowait=True).first()
     )
     if not member:
         raise NotFoundError("成员不存在", code=40400)
@@ -497,6 +628,7 @@ def list_members(db: Session, project_id: int) -> list[dict]:
     Returns:
         list[dict]: 成员列表,每项含 id/user_id/username/nickname/role_in_project/create_time
     """
+    _reject_legacy_enterprise_member_ops(db, project_id)
     rows = (
         db.query(
             ProjectMember.id,
@@ -531,6 +663,7 @@ def list_members(db: Session, project_id: int) -> list[dict]:
 
 def search_member_candidates(db: Session, project_id: int, query: str, *, limit: int = 10) -> list[dict]:
     """按用户名/邮箱查找可加入该项目的启用账号，不返回邮箱等敏感字段。"""
+    _reject_legacy_enterprise_member_ops(db, project_id)
     term = query.strip()
     if len(term) < 2:
         raise BadRequestError("搜索词至少需要 2 个字符")
@@ -563,6 +696,7 @@ def ensure_owner_member(db: Session, project_id: int, user_id: int) -> None:
         project_id: 项目ID
         user_id: 拥有者用户ID
     """
+    _reject_legacy_enterprise_member_ops(db, project_id)
     _require_visible_project(db, project_id)
     existing = (
         db.query(ProjectMember)

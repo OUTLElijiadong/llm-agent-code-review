@@ -28,6 +28,7 @@ def ledger_db(tmp_path):
 def remote(monkeypatch):
     calls, actions = [], []
     original_client = httpx.Client
+    monkeypatch.setattr(embedding_service.settings, "billing_allow_unmetered_external_calls", True)
     config = {
         "enabled": True,
         "base_url": "https://embed.example/v1",

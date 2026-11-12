@@ -25,7 +25,7 @@ def run_bash(script: str, *, env: dict[str, str] | None = None, timeout: int = 3
     merged = {**os.environ, "PRISM_LOCK_POLL_SECONDS": "1", **(env or {})}
     return subprocess.run(
         ["bash", "-c", f'source "{COMMON}"; {script}'],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout, env=merged,
+        check=False, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout, env=merged,
     )
 
 
@@ -41,6 +41,31 @@ def stop_holder(holder: subprocess.Popen) -> None:
 def read_owner(lock_dir: Path) -> dict[str, str]:
     owner_file = Path(f"{lock_dir}.owner")
     return dict(line.split("=", 1) for line in owner_file.read_text(encoding="utf-8").splitlines() if "=" in line)
+
+
+def fake_proc_root(root: Path, *, pid: int, state: str = "S", start_ticks: int = 123,
+                   boot_id: str = "01234567-89ab-cdef-0123-456789abcdef", write_stat: bool = True) -> Path:
+    proc_root = root / "proc"
+    proc_dir = proc_root / str(pid)
+    proc_dir.mkdir(parents=True, exist_ok=True)
+    boot_id_path = proc_root / "sys/kernel/random/boot_id"
+    boot_id_path.parent.mkdir(parents=True, exist_ok=True)
+    boot_id_path.write_text(f"{boot_id}\n", encoding="utf-8")
+    if write_stat:
+        # Include `) ` inside comm to verify parsing strips through the real delimiter.
+        fields = [state, *("0" for _ in range(18)), str(start_ticks), *("0" for _ in range(10))]
+        (proc_dir / "stat").write_text(f"{pid} (fixture ) comm) {' '.join(fields)}\n", encoding="utf-8")
+    return proc_root
+
+
+def fake_owner(lock_dir: Path, *, pid: int, start_ticks: str = "123",
+               boot_id: str = "01234567-89ab-cdef-0123-456789abcdef") -> None:
+    lock_dir.mkdir()
+    Path(f"{lock_dir}.owner").write_text(
+        f"pid={pid}\nstarted_epoch={int(time.time())}\ncommand=holder\n"
+        f"process_start_ticks={start_ticks}\nboot_id={boot_id}\n",
+        encoding="utf-8",
+    )
 
 
 def test_acquire_records_owner_and_release_cleans_both(tmp_path: Path) -> None:
@@ -111,6 +136,89 @@ def test_live_holder_with_wait_times_out_with_waited_seconds(tmp_path: Path) -> 
         assert lock_dir.is_dir()
     finally:
         stop_holder(holder)
+
+
+def test_linux_identity_accepts_exec_stable_process_identity(tmp_path: Path) -> None:
+    lock_dir = tmp_path / "m.lock"
+    pid = 900001
+    proc_root = fake_proc_root(tmp_path, pid=pid, state="S", start_ticks=456)
+    fake_owner(lock_dir, pid=pid, start_ticks="456")
+    result = run_bash(f'describe_lock_owner "{lock_dir}"', env={"PRISM_PROC_ROOT": str(proc_root)})
+    assert result.returncode == 0, result.stderr
+    assert "仍在运行" in result.stdout
+
+
+def test_linux_identity_treats_zombie_as_stale(tmp_path: Path) -> None:
+    lock_dir = tmp_path / "m.lock"
+    pid = 900002
+    proc_root = fake_proc_root(tmp_path, pid=pid, state="Z", start_ticks=456)
+    fake_owner(lock_dir, pid=pid, start_ticks="456")
+    result = run_bash(f'describe_lock_owner "{lock_dir}"', env={"PRISM_PROC_ROOT": str(proc_root)})
+    assert result.returncode == 0, result.stderr
+    assert "已不存在，属遗留锁" in result.stdout
+
+
+def test_linux_identity_treats_reused_pid_as_stale(tmp_path: Path) -> None:
+    lock_dir = tmp_path / "m.lock"
+    pid = 900003
+    proc_root = fake_proc_root(tmp_path, pid=pid, state="S", start_ticks=789)
+    fake_owner(lock_dir, pid=pid, start_ticks="456")
+    result = run_bash(f'describe_lock_owner "{lock_dir}"', env={"PRISM_PROC_ROOT": str(proc_root)})
+    assert result.returncode == 0, result.stderr
+    assert "已不存在，属遗留锁" in result.stdout
+
+
+def test_linux_identity_treats_incomplete_proc_evidence_as_unknown(tmp_path: Path) -> None:
+    lock_dir = tmp_path / "m.lock"
+    pid = 900004
+    proc_root = fake_proc_root(tmp_path, pid=pid, write_stat=False)
+    fake_owner(lock_dir, pid=pid, start_ticks="456")
+    result = run_bash(f'describe_lock_owner "{lock_dir}"', env={"PRISM_PROC_ROOT": str(proc_root)})
+    assert result.returncode == 0, result.stderr
+    assert "状态无法判断" in result.stdout
+
+
+def test_linux_identity_treats_missing_boot_id_as_unknown(tmp_path: Path) -> None:
+    lock_dir = tmp_path / "m.lock"
+    pid = 900007
+    proc_root = fake_proc_root(tmp_path, pid=pid)
+    (proc_root / "sys/kernel/random/boot_id").unlink()
+    fake_owner(lock_dir, pid=pid, start_ticks="123")
+    result = run_bash(f'describe_lock_owner "{lock_dir}"', env={"PRISM_PROC_ROOT": str(proc_root)})
+    assert result.returncode == 0, result.stderr
+    assert "状态无法判断" in result.stdout
+
+
+def test_linux_identity_treats_malformed_proc_stat_as_unknown(tmp_path: Path) -> None:
+    lock_dir = tmp_path / "m.lock"
+    pid = 900008
+    proc_root = fake_proc_root(tmp_path, pid=pid)
+    (proc_root / str(pid) / "stat").write_text(f"{pid} (fixture) invalid\n", encoding="utf-8")
+    fake_owner(lock_dir, pid=pid, start_ticks="123")
+    result = run_bash(f'describe_lock_owner "{lock_dir}"', env={"PRISM_PROC_ROOT": str(proc_root)})
+    assert result.returncode == 0, result.stderr
+    assert "状态无法判断" in result.stdout
+
+
+def test_linux_identity_treats_corrupt_owner_identity_as_unknown(tmp_path: Path) -> None:
+    lock_dir = tmp_path / "m.lock"
+    pid = 900005
+    proc_root = fake_proc_root(tmp_path, pid=pid)
+    fake_owner(lock_dir, pid=pid, start_ticks="corrupt")
+    result = run_bash(f'describe_lock_owner "{lock_dir}"', env={"PRISM_PROC_ROOT": str(proc_root)})
+    assert result.returncode == 0, result.stderr
+    assert "状态无法判断" in result.stdout
+
+
+def test_linux_identity_detects_reboot_even_when_start_ticks_match(tmp_path: Path) -> None:
+    lock_dir = tmp_path / "m.lock"
+    pid = 900006
+    proc_root = fake_proc_root(tmp_path, pid=pid, start_ticks=456,
+                               boot_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+    fake_owner(lock_dir, pid=pid, start_ticks="456")
+    result = run_bash(f'describe_lock_owner "{lock_dir}"', env={"PRISM_PROC_ROOT": str(proc_root)})
+    assert result.returncode == 0, result.stderr
+    assert "已不存在，属遗留锁" in result.stdout
 
 
 def test_wait_succeeds_when_holder_releases(tmp_path: Path) -> None:
@@ -197,7 +305,7 @@ def test_messages_are_valid_utf8_under_any_locale(tmp_path: Path, locale_name: s
     merged = {**os.environ, "PRISM_LOCK_POLL_SECONDS": "1", "LC_ALL": locale_name, "LANG": locale_name}
     raw = subprocess.run(
         ["bash", "-c", f'source "{COMMON}"; acquire_directory_lock "{lock_dir}"'],
-        capture_output=True, timeout=30, env=merged,
+        check=False, capture_output=True, timeout=30, env=merged,
     )
     message = raw.stderr.decode("utf-8")  # 非法 UTF-8 会在这里直接抛错
     assert str(lock_dir) in message, "锁路径必须完整出现在消息里，而不是被吞掉"

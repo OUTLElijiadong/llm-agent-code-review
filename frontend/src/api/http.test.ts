@@ -26,6 +26,7 @@ const harness = vi.hoisted(() => {
       },
     },
     get: vi.fn(),
+    head: vi.fn(),
     post: vi.fn(),
     put: vi.fn(),
     delete: vi.fn(),
@@ -51,6 +52,7 @@ vi.mock('axios', () => ({
   default: {
     create: harness.create,
     isCancel: harness.isCancel,
+    CanceledError: class CanceledError extends Error {},
   },
 }))
 
@@ -81,6 +83,7 @@ function resetHttpHarness(): void {
   harness.getToken.mockReturnValue(null)
   harness.isCancel.mockReturnValue(false)
   harness.instance.get.mockReset()
+  harness.instance.head.mockReset()
   harness.instance.post.mockReset()
   harness.instance.put.mockReset()
   harness.instance.delete.mockReset()
@@ -106,6 +109,13 @@ describe('http interceptors', () => {
     expect(withoutToken.headers.Authorization).toBeUndefined()
   })
 
+  it('在真正发请求前拒绝不再匹配的认证快照', () => {
+    harness.getToken.mockReturnValue('new-session')
+    expect(() => harness.state.requestFulfilled!({ headers: {}, authTokenSnapshot: 'old-session' })).toThrow()
+    const matching = harness.state.requestFulfilled!({ headers: {}, authTokenSnapshot: 'new-session' })
+    expect(matching.headers.Authorization).toBe('Bearer new-session')
+  })
+
   it('accepts successful envelopes and blob downloads', () => {
     /** 验证业务成功与二进制响应均原样通过。 */
     const normal = { config: {}, data: { code: 0, message: 'ok', data: { id: 1 } } }
@@ -113,6 +123,13 @@ describe('http interceptors', () => {
 
     expect(harness.state.responseFulfilled!(normal)).toBe(normal)
     expect(harness.state.responseFulfilled!(blob)).toBe(blob)
+    expect(harness.messageError).not.toHaveBeenCalled()
+  })
+
+  it('accepts an empty 204 response from a HEAD authorization check', () => {
+    const response = { config: { method: 'head' }, status: 204, data: '' }
+
+    expect(harness.state.responseFulfilled!(response)).toBe(response)
     expect(harness.messageError).not.toHaveBeenCalled()
   })
 
@@ -167,6 +184,14 @@ describe('http interceptors', () => {
     expect(harness.messageError).toHaveBeenCalledWith('无权访问')
   })
 
+  it('lets a background HEAD check handle revoked-resource HTTP statuses without global toasts', async () => {
+    harness.messageError.mockClear()
+    const denied = { config: { silentStatuses: [403, 404] }, response: { status: 403 }, message: 'Forbidden' }
+
+    await expect(harness.state.responseRejected!(denied)).rejects.toBe(denied)
+    expect(harness.messageError).not.toHaveBeenCalled()
+  })
+
   it('解析 Blob 形式的领域导出错误并保留下一步操作', async () => {
     const data = { code: 40941, message: '领域报告不支持 PDF', next_action: '请导出真实领域 JSON', retryable: false }
     const blob = new Blob([JSON.stringify(data)], { type: 'application/json' })
@@ -189,6 +214,33 @@ describe('http interceptors', () => {
 })
 
 describe('http convenience functions', () => {
+  it('读取请求可单独传递超时与取消信号，不改变共享客户端默认超时', async () => {
+    harness.instance.get.mockResolvedValue({ data: { data: null } })
+    const controller = new AbortController()
+    await apiGet('/preview', undefined, undefined, true,
+      { authTokenSnapshot: 'session-a', timeout: 15000, signal: controller.signal })
+    expect(harness.instance.get).toHaveBeenCalledWith('/preview', expect.objectContaining({
+      timeout: 15000, signal: controller.signal, authTokenSnapshot: 'session-a',
+    }))
+    expect(harness.createConfigs[0].timeout).toBe(600_000)
+  })
+  it('传递操作发起时的认证快照到实际 POST 和 PUT 请求', async () => {
+    harness.instance.get.mockResolvedValue({ data: { data: 0 } })
+    harness.instance.post.mockResolvedValue({ data: { data: 1 } })
+    harness.instance.put.mockResolvedValue({ data: { data: 2 } })
+    harness.instance.delete.mockResolvedValue({ data: { data: 3 } })
+    await apiGet('/items', undefined, undefined, false, { authTokenSnapshot: 'session-a' })
+    await apiPost('/items', {}, undefined, undefined, false, { authTokenSnapshot: 'session-a' })
+    await apiPut('/items/1', {}, { authTokenSnapshot: 'session-a' })
+    await apiDelete('/items/1', { authTokenSnapshot: 'session-a' })
+    expect(harness.instance.post).toHaveBeenCalledWith('/items', {},
+      expect.objectContaining({ authTokenSnapshot: 'session-a' }))
+    expect(harness.instance.put).toHaveBeenCalledWith('/items/1', {}, { authTokenSnapshot: 'session-a' })
+    expect(harness.instance.delete).toHaveBeenCalledWith('/items/1', { authTokenSnapshot: 'session-a' })
+    expect(harness.instance.get).toHaveBeenCalledWith('/items',
+      expect.objectContaining({ authTokenSnapshot: 'session-a' }))
+  })
+
   it('cleans query params and unwraps get/post/put/delete envelopes', async () => {
     /** 验证四类 JSON helper 的参数清洗和 data 解包。 */
     harness.instance.get.mockResolvedValue({ data: { data: ['g'] } })

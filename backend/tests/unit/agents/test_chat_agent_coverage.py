@@ -153,6 +153,9 @@ class FakeHttpClient:
 @pytest.fixture
 def agent(monkeypatch: pytest.MonkeyPatch) -> ChatAssistantAgent:
     """创建不向全局 EventBus 发送事件的 ChatAssistantAgent。"""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "billing_allow_unmetered_external_calls", True)
     chat_agent = ChatAssistantAgent()
 
     def ignore_emit(*args: Any, **kwargs: Any) -> None:

@@ -109,7 +109,7 @@ async def send(monkeypatch, kind, payload, handler, base_url="https://api.deepse
     if kind == "native":
         monkeypatch.setattr(native.httpx, "AsyncClient", factory)
         client = native.NativeResponsesTransport(
-            ApiConfig(api_key="unit-test-key", base_url=base_url, model=payload["model"]),
+            ApiConfig(api_key="unit-test-key", base_url=base_url, model=payload["model"], source="user"),
         )
         return [event async for event in await client.create_response(payload)]
     gateway = DeepSeekResponsesService(
@@ -243,7 +243,7 @@ async def test_runtime_guard_keeps_required_and_replays_forced_non_thinking_turn
 
     runtime = DeepSeekResponsesRuntime(
         transport=native.NativeResponsesTransport(ApiConfig(
-            api_key="unit-test-key", base_url="https://api.deepseek.com/v1", model=model,
+            api_key="unit-test-key", base_url="https://api.deepseek.com/v1", model=model, source="user",
         )), tool_executor=executor, checkpoint_store=InMemoryCheckpointStore(), model=model,
         completion_guard=guard,
     )

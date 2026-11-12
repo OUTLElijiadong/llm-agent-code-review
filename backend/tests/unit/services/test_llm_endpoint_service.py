@@ -53,6 +53,9 @@ class FakeClient:
 def fake_public_http(monkeypatch):
     FakeClient.responses = []
     FakeClient.calls = []
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "billing_allow_unmetered_external_calls", True)
     monkeypatch.setattr(api_config_service.httpx, "Client", FakeClient)
     monkeypatch.setattr(
         api_config_service,
@@ -159,6 +162,93 @@ def test_test_connection_uses_configured_runtime_options(db, admin_user):
     assert result.attempts == 1
     payload = FakeClient.calls[0][2]["json"]
     assert payload["temperature"] == 1.2
+
+
+def test_user_byok_connection_test_uses_caller_payer_without_platform_opt_in(
+    db, admin_user, monkeypatch,
+):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "billing_commercial_metering_ready", False)
+    monkeypatch.setattr(settings, "billing_allow_unmetered_external_calls", False)
+    FakeClient.responses = [
+        FakeResponse(200, {"id": "chatcmpl", "model": "actual-model", "choices": [{}]})
+    ]
+
+    result = api_config_service.test_connection(
+        _test_payload(max_retries=0), db=db, user_id=admin_user.id, caller_pays_provider=True,
+    )
+
+    assert result.success is True
+    assert len(FakeClient.calls) == 1
+
+
+def test_platform_connection_test_validates_dns_then_returns_business_gate_result(
+    db, admin_user, monkeypatch,
+):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "billing_commercial_metering_ready", False)
+    monkeypatch.setattr(settings, "billing_allow_unmetered_external_calls", False)
+    dns_calls = []
+    def resolve_public_test_host(host):
+        dns_calls.append(host)
+        return {"8.8.8.8"}
+
+    monkeypatch.setattr("app.utils.api_resolver._resolve_host", resolve_public_test_host)
+
+    result = api_config_service.test_connection(_test_payload(max_retries=0), db=db, user_id=admin_user.id)
+
+    assert result.success is False
+    assert "未计量兼容调用默认关闭" in result.message
+    assert dns_calls == ["api.example.com"]
+    assert FakeClient.calls == []
+
+
+def test_platform_model_list_validates_dns_then_keeps_manual_model(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "billing_commercial_metering_ready", False)
+    monkeypatch.setattr(settings, "billing_allow_unmetered_external_calls", False)
+    dns_calls = []
+    def resolve_public_test_host(host):
+        dns_calls.append(host)
+        return {"8.8.8.8"}
+
+    monkeypatch.setattr("app.utils.api_resolver._resolve_host", resolve_public_test_host)
+
+    result = api_config_service.fetch_models(LlmModelsIn(
+        api_key="platform-key", base_url="https://api.example.com/v1", model="manual-model",
+    ))
+
+    assert result.success is False
+    assert result.models == ["manual-model"]
+    assert "未计量兼容调用默认关闭" in result.message
+    assert dns_calls == ["api.example.com"]
+    assert FakeClient.calls == []
+
+
+def test_ready_metering_blocks_byok_connection_test_after_dns_with_business_result(
+    db, admin_user, monkeypatch,
+):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "billing_commercial_metering_ready", True)
+    dns_calls = []
+    def resolve_public_test_host(host):
+        dns_calls.append(host)
+        return {"8.8.8.8"}
+
+    monkeypatch.setattr("app.utils.api_resolver._resolve_host", resolve_public_test_host)
+
+    result = api_config_service.test_connection(
+        _test_payload(max_retries=0), db=db, user_id=admin_user.id, caller_pays_provider=True,
+    )
+
+    assert result.success is False
+    assert "未进入可信计费作用域" in result.message
+    assert dns_calls == ["api.example.com"]
+    assert FakeClient.calls == []
 
 
 def test_test_connection_rejects_incompatible_success_body(db, admin_user):
@@ -268,13 +358,19 @@ def test_connection_accounting_failure_never_retries_an_executed_request(db, adm
     assert len(FakeClient.calls) == 1
 
 
-@pytest.mark.parametrize("endpoint", ["/api/api-config/test", "/api/admin/llm/test"])
-async def test_connection_api_uses_authenticated_owner_and_does_not_save_config(endpoint):
+@pytest.mark.parametrize(
+    ("endpoint", "expected_success"),
+    [("/api/api-config/test", True), ("/api/admin/llm/test", False)],
+)
+async def test_connection_api_uses_the_trusted_payer_and_does_not_save_config(
+    endpoint, expected_success, monkeypatch,
+):
     import httpx
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from sqlalchemy.pool import StaticPool
 
+    from app.core.config import settings
     from app.core.database import Base, get_db
     from app.core.security import create_access_token
     from app.main import app
@@ -300,6 +396,8 @@ async def test_connection_api_uses_authenticated_owner_and_does_not_save_config(
     app.dependency_overrides[get_db] = local_db
     payload = _test_payload(max_retries=0).model_dump()
     payload["user_id"] = 999  # 载荷不得决定账本所属用户。
+    monkeypatch.setattr(settings, "billing_commercial_metering_ready", False)
+    monkeypatch.setattr(settings, "billing_allow_unmetered_external_calls", False)
     FakeClient.responses = [FakeResponse(200, {"choices": [{}], "usage": {"total_tokens": 5}})]
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://unit") as client:
@@ -311,11 +409,15 @@ async def test_connection_api_uses_authenticated_owner_and_does_not_save_config(
                 headers={"Authorization": "Bearer " + create_access_token(7, "super_admin", 0)},
             )
         assert result.status_code == 200
-        assert result.json()["data"]["success"] is True
-        assert len(FakeClient.calls) == 1
-        log = db.query(AiCallLog).one()
-        assert (log.user_id, log.total_tokens, log.agent_label) == (7, 5, "api_connection_test")
-        assert "sk-private-ping" not in str(log.__dict__)
+        assert result.json()["data"]["success"] is expected_success
+        assert len(FakeClient.calls) == (1 if expected_success else 0)
+        logs = db.query(AiCallLog).all()
+        if expected_success:
+            log = logs[0]
+            assert (log.user_id, log.total_tokens, log.agent_label) == (7, 5, "api_connection_test")
+            assert "sk-private-ping" not in str(log.__dict__)
+        else:
+            assert logs == []
         assert db.query(UserApiConfig).count() == 0
     finally:
         app.dependency_overrides.clear()

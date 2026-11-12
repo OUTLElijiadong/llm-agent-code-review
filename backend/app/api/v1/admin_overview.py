@@ -284,7 +284,9 @@ def _agent_activity(db: Session) -> list[dict]:
     return sorted(result, key=lambda row: (row["status"] not in {"working", "thinking", "blocked"}, row["name"]))
 
 
-def _daily_token_usage(db: Session, days: int = 30, *, now: Optional[datetime] = None) -> dict:
+def _daily_token_usage(
+    db: Session, days: int = 30, *, now: Optional[datetime] = None, user_id: Optional[int] = None
+) -> dict:
     """按 UTC 自然日汇总真实模型调用日志，未知 Token 记录单独计数。"""
     observed_at = now or datetime.now(timezone.utc)
     if observed_at.tzinfo is None:
@@ -308,18 +310,23 @@ def _daily_token_usage(db: Session, days: int = 30, *, now: Optional[datetime] =
             AiCallLog.completion_tokens.isnot(None),
         ),
     )
-    rows = (
+    query = (
         db.query(
             func.date(AiCallLog.create_time).label("day"),
             func.count(AiCallLog.id).label("calls"),
             func.sum(case((has_usage, effective_total), else_=0)).label("tokens"),
             func.sum(case((has_usage, 1), else_=0)).label("known_calls"),
             func.sum(case((has_usage, 0), else_=1)).label("unknown_calls"),
+            func.sum(func.coalesce(AiCallLog.prompt_tokens, 0)).label("input_tokens"),
+            func.sum(func.coalesce(AiCallLog.completion_tokens, 0)).label("output_tokens"),
+            func.sum(case((or_(AiCallLog.prompt_tokens.is_(None),
+                               AiCallLog.completion_tokens.is_(None)), 1), else_=0)).label("component_unknown_calls"),
         )
         .filter(AiCallLog.create_time >= start_at, AiCallLog.create_time < end_at)
-        .group_by(func.date(AiCallLog.create_time))
-        .all()
     )
+    if user_id is not None:
+        query = query.filter(AiCallLog.user_id == user_id)
+    rows = query.group_by(func.date(AiCallLog.create_time)).all()
     by_day = {
         row.day.isoformat() if hasattr(row.day, "isoformat") else str(row.day): row
         for row in rows
@@ -342,7 +349,7 @@ def _daily_token_usage(db: Session, days: int = 30, *, now: Optional[datetime] =
             "unknown_calls": unknown_calls,
         })
     total_tokens = sum(item["tokens"] or 0 for item in daily)
-    return {
+    result = {
         "timezone": "UTC",
         "days": days,
         "start_date": start_day.isoformat(),
@@ -352,6 +359,13 @@ def _daily_token_usage(db: Session, days: int = 30, *, now: Optional[datetime] =
         "unknown_calls": sum(item["unknown_calls"] for item in daily),
         "daily": daily,
     }
+    if user_id is not None:
+        result.update({
+            "input_tokens": sum(int(row.input_tokens or 0) for row in rows),
+            "output_tokens": sum(int(row.output_tokens or 0) for row in rows),
+            "component_unknown_calls": sum(int(row.component_unknown_calls or 0) for row in rows),
+        })
+    return result
 
 
 def _login_geo(db: Session, days: int = 30) -> list[dict]:

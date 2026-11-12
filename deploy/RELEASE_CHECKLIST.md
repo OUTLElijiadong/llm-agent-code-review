@@ -28,11 +28,14 @@ cd /path/to/project/deploy
 ## 3. 同版本发布（T0）
 
 ```bash
-./deploy.sh all --revision <FULL_COMMIT_SHA>
+./deploy.sh all --revision <FULL_COMMIT_SHA> --confirm-no-external-chat-writers
 ```
 
 - [ ] 目标 revision 解析为计划中的完整 SHA。
 - [ ] 前后端使用同一提交发布；脚本拒绝单独发布 backend/frontend，避免接口版本漂移。
+- [ ] 目标 Alembic 链含 `119_chat_message_authority` 或其后继时，已核对 `code_review` 的所有 Compose 外 Backend、worker 和其他数据库写进程，确认已停止后再使用 `--confirm-no-external-chat-writers`。脚本只枚举/停止当前 Compose Backend，不能替代外部写入者盘点。
+- [ ] 首次迁移 119 前已确认 Compose 外所有写入者停止；脚本在读取到目标迁移链关系后停止并核实 Compose Backend，再复核 revision、实际列、与迁移定义完全匹配的三个触发器及目标镜像能力。未知额外触发器、119 门内数据库 revision/schema 无法核实、部分完成或不一致时，保持停写并按前向修复处理；候选版本图解析失败或与 119 已知不兼容时，在数据库迁移和应用切换前拒绝发布并保留当前 Backend。
+- [ ] 目标 head 早于 119 时也须通过 revision/schema 预检；数据库领先旧目标、revision/schema 查询失败、revision 不唯一、部分结构或旧 revision 下已出现 119 结构时不得切换旧镜像。该旧目标预检遇查询失败时拒绝本次发布并保留现运行版本；多 revision、可查询出的部分结构及 revision/schema 不一致会先尝试停止 Compose Backend。
 - [ ] 数据库迁移只执行 `alembic upgrade head`；发布脚本重新生成并验证本次备份。
 - [ ] Backend `/healthz`、`/readyz`、version、release 标识和日志通过后，脚本才切换前端。
 - [ ] 脚本自动调用 `sync-frontend-assets.sh` 同步 assets 卷；首页引用的新哈希资源均可读取。
@@ -49,6 +52,8 @@ cd /path/to/project/deploy
 - [ ] Agent 工具参数缺失、extra、错类型不会进入 handler；合法参数可正常执行。
 - [ ] API Key 新写入可解密，旧密钥记录可机会式重加密，坏记录失效且日志不含秘密。
 - [ ] Alembic `current` 与唯一 `head` 一致。
+- [ ] 若涉及 119，已记录迁移后列/触发器完整性与目标 Backend 权限快照能力 probe 结果。
+- [ ] 若 Alembic `current` 输出多行或状态结构异常，已确认发布/回滚脚本停止并核验 Compose Backend；不得手工清除 revision 或触发器绕过门禁。
 
 ## 5. 观察窗口
 
@@ -87,6 +92,7 @@ cd /path/to/project/deploy
 
 - [ ] 仅切回上一 Backend/Frontend 镜像，确认 release 标识正确。
 - [ ] **不自动执行 Alembic downgrade，不自动恢复生产数据库。**
+- [ ] 若数据库已含迁移 119 或其后继，只允许通过 119 结构及回滚目标镜像能力门的 Backend；若数据库仍在 119 之前，只允许不依赖 119 列的旧 reader。未知额外触发器、部分/未知结构、多 revision 或 revision/schema 不一致时脚本须先尝试停止并核验 Compose Backend，再前向修复。手动回滚目标镜像不兼容时，在替换容器前拒绝并保留当前 Backend；自动回滚已停止当前 Backend，旧镜像不兼容时保持停机。
 - [ ] 若数据库变更不向后兼容，保持停写并由负责人基于已验证备份制定独立恢复方案。
 - [ ] 回滚后重新执行健康、HTTPS、业务、ClamAV 和 Alembic 检查，并记录事故时间线。
 

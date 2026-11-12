@@ -30,6 +30,7 @@ _TOKEN_RE = re.compile(r"[a-zA-Z0-9_]+")
 _CJK_RE = re.compile(r"[一-鿿]")
 
 FALLBACK_TAG = "fallback:hash"
+LOCAL_HASH_TAG_PREFIX = "local:hash-v1"
 
 
 # ──────────────────────────────────────────────────────────
@@ -53,6 +54,16 @@ def _hash_embed(text: str, dim: int) -> List[float]:
         sign = 1.0 if (h >> 8) & 1 else -1.0
         vec[idx] += sign
     return _l2_normalize(vec)
+
+
+def embed_local_texts(texts: List[str]) -> Tuple[List[List[float]], str]:
+    """生成不访问网络、无需计费的确定性词项向量。
+
+    企业附件知识使用独立 tag，避免管理员修改全局嵌入模型后把本地向量
+    与远端向量混合比较；它是词项/字符片段相似度，不声称具备模型语义。
+    """
+    dimension = max(int(settings.embedding_dim), 16)
+    return [_hash_embed(text, dimension) for text in texts], f"{LOCAL_HASH_TAG_PREFIX}:{dimension}"
 
 
 def _l2_normalize(vec: List[float]) -> List[float]:
@@ -85,6 +96,8 @@ def _api_embed(
 ) -> List[List[float]]:
     import httpx
 
+    from app.services.billing_runtime_gate import reject_unpriced_call
+
     base_url = str(cfg["base_url"]).rstrip("/")
     if settings.embedding_allow_private_endpoint and _is_private_url(base_url):
         # 本地嵌入服务(如 compose 内 TEI)直连: 配置仅唯一超管可写且
@@ -102,6 +115,7 @@ def _api_embed(
         request_url = target.request_url
         extra_headers = {"Host": target.host_header}
         extensions = target.request_extensions
+    reject_unpriced_call("远端向量化")
     headers = {
         "Authorization": f"Bearer {cfg['api_key']}",
         "Content-Type": "application/json",
@@ -257,17 +271,168 @@ def _reembed_model(
     批同时受条数与字节预算约束: 大切片(如长代码段)按字节提前切批,
     避免一次请求超过嵌入端点负载上限(413);失败批保留原向量。
     """
+    from app.models.enterprise_project import EnterpriseProject
+    from app.models.project import Project
+
     last_id = 0
     while True:
-        query = db.query(model).filter(model.id > last_id)
+        scope_kind = None
+        scope_doc = None
+        if model.__tablename__ == "knowledge_chunk":
+            # The super-admin re-embedding task is a remote-data egress path.
+            # Keep it within personal sources still eligible for personal RAG.
+            from app.models.knowledge_doc import KnowledgeDoc
+            from app.services.knowledge_service import personal_source_access_clause
+
+            scope_kind = "personal"
+            scope_doc = KnowledgeDoc
+        elif model.__tablename__ == "agent_knowledge_chunk":
+            from app.models.agent_governance import AgentKnowledgeDoc
+
+            scope_kind = "agent"
+            scope_doc = AgentKnowledgeDoc
+
+        candidate_query = db.query(model.id)
+        if scope_doc is not None:
+            candidate_query = db.query(
+                model.id, scope_doc.source_type, scope_doc.source_ref,
+            ).join(scope_doc, scope_doc.id == model.doc_id).filter(
+                scope_doc.status == "active",
+            )
+            if scope_kind == "personal":
+                candidate_query = candidate_query.filter(
+                    scope_doc.user_id == model.user_id,
+                )
+                from app.services.knowledge_service import personal_source_access_clause
+
+                candidate_query = candidate_query.filter(personal_source_access_clause())
+            else:
+                from app.services.agent_knowledge_service import _document_access_clause
+
+                candidate_query = candidate_query.filter(_document_access_clause(None))
+        candidate_query = candidate_query.filter(model.id > last_id)
         # 个人偏好通过本地上下文注入，禁止批量重嵌入将兴趣发送外部。
-        query = query.filter((model.embed_model.is_(None)) | (model.embed_model != "local:profile-context"))
+        candidate_query = candidate_query.filter(
+            (model.embed_model.is_(None)) | (model.embed_model != "local:profile-context"),
+        )
         if expected_tag:
             # 增量模式: 只重建标签与当前配置不符的行(瞬态失败重跑快速收敛)
-            query = query.filter((model.embed_model.is_(None)) | (model.embed_model != expected_tag))
-        remaining = query.order_by(model.id.asc()).limit(batch_size).all()
-        if not remaining:
+            candidate_query = candidate_query.filter(
+                (model.embed_model.is_(None)) | (model.embed_model != expected_tag),
+            )
+        candidates = candidate_query.order_by(model.id.asc()).limit(batch_size).all()
+        if not candidates:
             break
+        candidate_ids = [int(row[0]) for row in candidates]
+
+        if scope_doc is not None:
+            # Resolve any project-derived source without reading chunk contents. Lock
+            # project rows before document/chunk rows, matching bind_owned_project;
+            # then read current enterprise bindings so REPEATABLE READ snapshots cannot
+            # export a source that was bound after this session's first query.
+            from app.models.code_file import CodeFile
+            from app.models.review_issue import ReviewIssue
+            from app.models.review_task import ReviewTask
+
+            needs_project: dict[int, int | None] = {}
+            for chunk_id, source_type, source_ref in candidates:
+                ref = str(source_ref or "")
+                project_derived = False
+                project_id = None
+                if scope_kind == "personal" and source_type in {"code", "issue"}:
+                    project_derived = True
+                    try:
+                        source_id = int(ref.partition(":")[2])
+                    except (TypeError, ValueError):
+                        source_id = 0
+                    if source_id > 0 and source_type == "code" and ref.startswith("file:"):
+                        project_id = db.query(CodeFile.project_id).filter_by(id=source_id).scalar()
+                    elif source_id > 0 and source_type == "issue" and ref.startswith("issue:"):
+                        project_id = (
+                            db.query(ReviewTask.project_id)
+                            .join(ReviewIssue, ReviewIssue.task_id == ReviewTask.id)
+                            .filter(ReviewIssue.id == source_id)
+                            .scalar()
+                        )
+                elif scope_kind == "agent" and (
+                    source_type == "project" or ref.startswith(("project:", "code_file:"))
+                ):
+                    project_derived = True
+                    from app.services.agent_knowledge_service import _project_id_from_source_ref
+
+                    project_id = _project_id_from_source_ref(db, ref)
+                if project_derived:
+                    needs_project[int(chunk_id)] = int(project_id) if project_id else None
+
+            project_ids = sorted({pid for pid in needs_project.values() if pid is not None})
+            existing_project_ids: set[int] = set()
+            bound_project_ids: set[int] = set()
+            if project_ids:
+                existing_project_ids = {
+                    int(row[0])
+                    for row in db.query(Project.id)
+                    .filter(Project.id.in_(project_ids))
+                    .order_by(Project.id.asc())
+                    .populate_existing()
+                    .with_for_update()
+                    .all()
+                }
+                bound_project_ids = {
+                    int(row[0])
+                    for row in db.query(EnterpriseProject.project_id)
+                    .filter(EnterpriseProject.project_id.in_(existing_project_ids))
+                    .order_by(EnterpriseProject.project_id.asc())
+                    .populate_existing()
+                    .with_for_update()
+                    .all()
+                }
+            denied_ids = {
+                chunk_id
+                for chunk_id, project_id in needs_project.items()
+                if project_id is None
+                or project_id not in existing_project_ids
+                or project_id in bound_project_ids
+            }
+            eligible_chunk_ids = [chunk_id for chunk_id in candidate_ids if chunk_id not in denied_ids]
+            if not eligible_chunk_ids:
+                last_id = candidate_ids[-1]
+                continue
+
+            remaining_query = db.query(model).filter(model.id.in_(eligible_chunk_ids))
+            if scope_kind == "personal":
+                from app.services.knowledge_service import personal_source_access_clause
+
+                remaining_query = (
+                    remaining_query.join(scope_doc, scope_doc.id == model.doc_id)
+                    .filter(
+                        scope_doc.status == "active",
+                        scope_doc.user_id == model.user_id,
+                        personal_source_access_clause(),
+                    )
+                )
+            else:
+                from app.services.agent_knowledge_service import _document_access_clause
+
+                remaining_query = (
+                    remaining_query.join(scope_doc, scope_doc.id == model.doc_id)
+                    .filter(
+                        scope_doc.status == "active",
+                        _document_access_clause(None),
+                    )
+                )
+            remaining = remaining_query.populate_existing().with_for_update().order_by(model.id.asc()).all()
+        else:
+            remaining = (
+                db.query(model)
+                .filter(model.id.in_(candidate_ids))
+                .populate_existing()
+                .with_for_update()
+                .order_by(model.id.asc())
+                .all()
+            )
+        if not remaining:
+            last_id = candidate_ids[-1]
+            continue
         batch_bytes = 0
         rows = []
         for row in remaining:
@@ -276,6 +441,8 @@ def _reembed_model(
                 break
             rows.append(row)
             batch_bytes += piece_bytes
+        # Advance only past rows that are actually submitted. Candidates after the
+        # byte-budget cutoff remain for the next query page instead of being skipped.
         last_id = int(rows[-1].id)
         pieces = []
         for row in rows:

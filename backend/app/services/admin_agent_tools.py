@@ -599,8 +599,16 @@ def admin_delete_users(
     if not reserved.success or (reserved.data or {}).get("duplicate"):
         return reserved
     try:
+        from app.services.billing_c4_reviewer_service import revoke_for_user
+
         serialized_targets = [_serialize_user_target(target) for target in targets]
         for target in targets:
+            from app.services.billing_rate_reviewer_service import revoke_for_user as rate_revoke_for_user
+            from app.services.billing_refund_reviewer_service import revoke_for_user as refund_revoke_for_user
+
+            revoke_for_user(db, target, actor_id=user.id, reason="账号批量删除，撤销 C4 委任")
+            rate_revoke_for_user(db, target, actor_id=user.id, reason="账号批量删除，撤销费率复核委任")
+            refund_revoke_for_user(db, target, actor_id=user.id, reason="账号批量删除，撤销退款复核委任")
             target.status = -1
             target.token_version = int(target.token_version or 0) + 1
             audit_service.log(

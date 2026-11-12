@@ -50,8 +50,9 @@ from app.ai.static_analyzer import Finding
 from app.ai.static_analyzer import scan_file as static_scan_file
 from app.core.config import settings
 from app.core.database import SessionLocal
-from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
+from app.core.exceptions import ForbiddenError, NotFoundError, PaymentRequiredError, ValidationError
 from app.core.pagination import Pagination
+from app.core.permission_codes import PermissionCode
 from app.models.code_file import CodeFile
 from app.models.custom_agent import CustomAgent, CustomAgentVersion, ReviewTaskAgentRelease
 from app.models.project import Project
@@ -66,12 +67,15 @@ from app.services.chunk_receipts import with_chunk_receipts
 from app.services.context_fidelity import extract_protected_facts
 from app.services.deepseek_responses_runtime import _split_compaction_source, estimate_tokens
 from app.services.issue_merger import finding_to_issue, merge_findings_and_issues
+from app.services.operation_write_fence import require_live_operation_permission, retryable_project_write
+from app.services.review_coverage import public_review_coverage
 from app.services.review_input_service import (
     freeze_task_inputs,
     load_task_inputs,
     validate_review_input,
     verified_task_input_ids,
 )
+from app.services.review_write_authority import lock_task_for_write
 from app.services.rule_service import get_enabled_rules
 
 # 多 Agent 审查画像 → 注册中心 BaseAgent name 的映射(v2.2 真实调用 Agent)
@@ -90,6 +94,98 @@ _COLLAB_PARALLEL_THREADS = 4
 _REVIEW_SEMAPHORE = threading.BoundedSemaphore(max(1, settings.review_max_concurrency))
 _RECOVERING_REVIEW_TASK_IDS: set[int] = set()
 _RECOVERY_LOCK = threading.Lock()
+_SUPPORTED_ENTERPRISE_REVIEW_SUBSCRIPTIONS = frozenset({"active", "grace"})
+
+
+def _review_billing_subject(db: Session, user_id: int, project_id: int) -> dict:
+    """Return the persisted payer boundary for a project review.
+
+    Unbound personal projects are paid by the authenticated actor. A project with
+    any enterprise binding stays enterprise-scoped; an inactive binding is never
+    treated as a personal project.
+    """
+    from app.models.enterprise_project import EnterpriseProject
+
+    binding = db.query(EnterpriseProject).filter_by(project_id=project_id).first()
+    if binding is None:
+        return {
+            "owner_type": "user",
+            "owner_id": int(user_id),
+            "enterprise_id": None,
+            "group_id": None,
+            "binding_status": "unbound",
+        }
+    return {
+        "owner_type": "enterprise",
+        "owner_id": int(binding.enterprise_id),
+        "enterprise_id": int(binding.enterprise_id),
+        "group_id": int(binding.group_id),
+        "binding_status": str(binding.status or ""),
+    }
+
+
+def _resolve_review_billing_context(
+    db: Session, user: User, project: Project, *, expected_subject: dict | None = None,
+) -> dict | None:
+    """Resolve a trusted payer from the live authenticated actor and project tenant.
+
+    The function is a no-op while commercial metering is disabled. Once enabled,
+    missing wallets, missing enterprise subscription/quota, or tenant drift block
+    the review before a model request can be sent.
+    """
+    if not settings.billing_commercial_metering_ready:
+        return None
+
+    from app.models.billing_ledger import BillingLimit, BillingWallet
+    from app.services.project_member_service import require_project_execution
+
+    if type(getattr(user, "id", None)) is not int or user.id <= 0:
+        raise PaymentRequiredError("审查缺少可信的发起账号，无法建立计费归属")
+    require_project_execution(db, int(project.id), user)
+    subject = _review_billing_subject(db, int(user.id), int(project.id))
+    if expected_subject is not None and subject != expected_subject:
+        raise ReviewAuthorizationRevokedError("审查项目计费主体已变化，停止模型调用")
+
+    wallet = db.query(BillingWallet).filter_by(
+        owner_type=subject["owner_type"], owner_id=subject["owner_id"],
+    ).first()
+    if wallet is None:
+        raise PaymentRequiredError("审查计费账户尚未开通，请先充值或联系企业管理员")
+
+    scope = {
+        "session_factory": SessionLocal,
+        "user_id": int(user.id),
+        "max_input_tokens": int(settings.deepseek_context_window_tokens),
+        "max_output_tokens": int(settings.deepseek_max_output_tokens),
+        "personal_wallet_id": int(wallet.id) if subject["owner_type"] == "user" else None,
+        "enterprise_wallet_id": int(wallet.id) if subject["owner_type"] == "enterprise" else None,
+        "enterprise_id": subject["enterprise_id"],
+        "group_id": subject["group_id"],
+        "allow_personal": False,
+        "usage_kind": "member",
+    }
+
+    if subject["owner_type"] == "enterprise":
+        from app.services import billing_checkout_service
+
+        if subject["binding_status"] != "active":
+            raise PaymentRequiredError("企业项目绑定已停用，不能建立企业计费归属")
+        status = billing_checkout_service.enterprise_subscription_status(db, subject["enterprise_id"])
+        if status not in _SUPPORTED_ENTERPRISE_REVIEW_SUBSCRIPTIONS:
+            raise PaymentRequiredError("企业订阅已到期或无有效记录，请续费后再发起审查")
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        has_active_limit = db.query(BillingLimit.id).filter(
+            BillingLimit.enterprise_id == subject["enterprise_id"],
+            BillingLimit.category == "normal",
+            BillingLimit.period_start <= now,
+            BillingLimit.period_end > now,
+            (BillingLimit.group_id.is_(None) | (BillingLimit.group_id == subject["group_id"])),
+            (BillingLimit.user_id.is_(None) | (BillingLimit.user_id == int(user.id))),
+        ).first()
+        if has_active_limit is None:
+            raise PaymentRequiredError("企业尚未为当前小组或成员配置本月积分额度")
+
+    return {"subject": subject, "scope": scope}
 
 
 def _review_coverage_snapshot(task: ReviewTask, *, stage: str | None = None, error: str | None = None) -> dict:
@@ -273,6 +369,7 @@ def start(
     # v2.4: 改用 project_member 关系校验(owner/admin/reviewer 都可启动审查)
     from app.services.project_member_service import require_project_execution
     require_project_execution(db, project.id, user)
+    billing_context = _resolve_review_billing_context(db, user, project)
     if not 1 <= len(payload.file_ids) <= 500 or len(set(payload.file_ids)) != len(payload.file_ids):
         raise ValidationError("file_ids 需为 1-500 个", code=40001)
 
@@ -314,6 +411,7 @@ def start(
         execution_token=uuid.uuid4().hex,
         coverage={"stage": "queued", "completed_files": 0, "total_files": len(files),
                   "requested_files": [str(code_file.file_name) for code_file in files],
+                  **({"_billing_subject": billing_context["subject"]} if billing_context else {}),
                   **({"excluded_files": input_exclusions, "input_selection": "reviewable_text"}
                      if input_exclusions else {})},
     )
@@ -555,6 +653,35 @@ def _run_review_task(task_id: int, user_id: int, execution_token: Optional[str] 
 
         project = db.get(Project, task.project_id)
         project_lang = (project.language or "").strip().lower() if project else ""
+        if project is None:
+            raise ReviewAuthorizationRevokedError("审查项目不存在，停止计费和模型调用")
+        stored_subject = (
+            task.coverage.get("_billing_subject")
+            if isinstance(task.coverage, dict)
+            else None
+        )
+        if settings.billing_commercial_metering_ready and not isinstance(stored_subject, dict):
+            raise PaymentRequiredError("旧审查任务缺少可信计费主体快照，无法安全恢复")
+        billing_context = _resolve_review_billing_context(
+            db,
+            user,
+            project,
+            expected_subject=stored_subject if isinstance(stored_subject, dict) else None,
+        )
+        if billing_context is not None:
+            from app.services.billing_runtime_gate import billing_scope
+
+            def billing_attempt_guard(_billing_db, _request_key):
+                try:
+                    authorization_check()
+                except (TaskCancelledError, AgentExecutionCancelled):
+                    raise
+                except Exception as exc:
+                    raise ReviewAuthorizationRevokedError("审查授权失效，未预占模型费用") from exc
+
+            scope.enter_context(
+                billing_scope(**billing_context["scope"], attempt_guard=billing_attempt_guard)
+            )
 
         rules = _rules_from_snapshot(getattr(task, "rules_snapshot", None))
         if rules is None:
@@ -708,7 +835,11 @@ def _assert_review_execution_authorized(
             raise ReviewAuthorizationRevokedError("项目成员资格已撤销，后续审查执行已阻断") from exc
         if not rbac_service.check_permission(auth_db, int(user.id), PermissionCode.REVIEW_START):
             raise ReviewAuthorizationRevokedError("review:start 权限已撤销，后续审查执行已阻断")
-        binding = (task.user_id, task.project_id, task.review_type)
+        subject = _review_billing_subject(auth_db, int(user.id), int(task.project_id))
+        tenant_binding = tuple(
+            subject[key] for key in ("owner_type", "owner_id", "enterprise_id", "group_id", "binding_status")
+        )
+        binding = (task.user_id, task.project_id, task.review_type, *tenant_binding)
         if task.agent_team_id is None and task.agent_team_task_id is None:
             return binding
         if task.agent_team_id is None or task.agent_team_task_id is None:
@@ -2794,7 +2925,7 @@ def list_tasks(db: Session, user: User, project_id: int = None, status: str = ""
             "duration_ms": row.duration_ms,
             "score_version": None if hide_report_metrics else row.score_version,
             "score_breakdown": None if hide_report_metrics else _display_task_score_breakdown(row, display_score),
-            "coverage": None if hide_report_metrics else row.coverage,
+            "coverage": None if hide_report_metrics else public_review_coverage(row.coverage),
             "error_message": None if hide_report_metrics else row.error_message,
             "create_time": row.create_time,
         })
@@ -2848,7 +2979,7 @@ def get_task_detail(db: Session, user: User, task_id: int) -> dict:
 
     display_score = display_report_score(task, task.score)
     report_issue_summary = None
-    report_coverage = task.coverage if isinstance(task.coverage, dict) else None
+    report_coverage = public_review_coverage(task.coverage)
     report_error_message = task.error_message
     if task.review_type == "sandbox_test" and can_view_report:
         from app.models.review_report import ReviewReport
@@ -3075,6 +3206,7 @@ def list_task_issues(db: Session, user: User, task_id: int, file_id: int = None,
     return pagination.to_dict(items)
 
 
+@retryable_project_write
 def delete_task(db: Session, user: User, task_id: int) -> None:
     """软删除审查任务(需 owner/admin 权限)
 
@@ -3087,13 +3219,8 @@ def delete_task(db: Session, user: User, task_id: int) -> None:
         NotFoundError: 任务不存在或无访问权限
         ForbiddenError: 仅 owner/admin 可删除
     """
-    from app.services.project_member_service import require_project_access
-    task = db.get(ReviewTask, task_id)
-    if not task:
-        raise NotFoundError("审查任务不存在", code=40400)
-    # v2.4: 删除任务视为写操作,仅 owner/admin 可执行
-    require_project_access(db, task.project_id, user, need_write=True)
-    task = db.query(ReviewTask).filter_by(id=task_id).with_for_update().populate_existing().one()
+    require_live_operation_permission(db, user, PermissionCode.REVIEW_CANCEL)
+    task = lock_task_for_write(db, user, task_id, allow_deleted=True)
     task.status = "deleted"
     task.execution_token = uuid.uuid4().hex
     task.end_time = task.end_time or datetime.now(timezone.utc)
@@ -3103,6 +3230,7 @@ def delete_task(db: Session, user: User, task_id: int) -> None:
     db.commit()
 
 
+@retryable_project_write
 def cancel_task(db: Session, user: User, task_id: int) -> None:
     """取消正在运行的审查任务(需 owner/admin 权限)
 
@@ -3116,13 +3244,8 @@ def cancel_task(db: Session, user: User, task_id: int) -> None:
         ForbiddenError: 仅 owner/admin 可取消
         ValidationError: 任务不在运行中
     """
-    from app.services.project_member_service import require_project_access
-    task = db.get(ReviewTask, task_id)
-    if not task:
-        raise NotFoundError("审查任务不存在", code=40400)
-    # v2.4: 取消任务视为写操作,仅 owner/admin 可执行
-    require_project_access(db, task.project_id, user, need_write=True)
-    task = db.query(ReviewTask).filter_by(id=task_id).with_for_update().populate_existing().one()
+    require_live_operation_permission(db, user, PermissionCode.REVIEW_CANCEL)
+    task = lock_task_for_write(db, user, task_id, allow_deleted=True)
     if task.status != "running":
         raise ValidationError("只能取消运行中的任务", code=40001)
     coverage = task.coverage if isinstance(task.coverage, dict) else {}

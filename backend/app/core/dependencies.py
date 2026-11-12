@@ -19,6 +19,7 @@ def authenticate_access_token(token: str, db: Session) -> User:
         payload = decode_token(token)
         user_id = int(payload["sub"])
         token_version = int(payload.get("ver", 0))
+        token_expires_at = int(payload["exp"])
     except (KeyError, ValueError, TypeError):
         raise AuthError("token非法或已过期", code=40101)
     except Exception:
@@ -29,6 +30,11 @@ def authenticate_access_token(token: str, db: Session) -> User:
         raise ForbiddenError("账号不存在或已禁用", code=40301)
     if token_version != (user.token_version or 0):
         raise AuthError("账号已在另一台设备登录，当前设备已下线", code=40102)
+    # Keep the version authenticated from the JWT separate from ORM columns:
+    # a later SELECT ... FOR UPDATE may refresh ``user.token_version`` after a
+    # concurrent logout, while this request still carries the old credential.
+    setattr(user, "_authenticated_token_version", token_version)
+    setattr(user, "_authenticated_token_expires_at", token_expires_at)
     return user
 
 

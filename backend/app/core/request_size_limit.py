@@ -11,17 +11,26 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from app.core.exceptions import PayloadTooLargeError
 
 MULTIPART_OVERHEAD_BYTES: Final = 1024 * 1024
+ENTERPRISE_KNOWLEDGE_ATTACHMENT_MAX_BYTES: Final = 8 * 1024 * 1024
+STATEMENT_FILE_MAX_BYTES: Final = 12 * 1024 * 1024
+STATEMENT_IMPORT_REQUEST_MAX_BYTES: Final = STATEMENT_FILE_MAX_BYTES + MULTIPART_OVERHEAD_BYTES
 _SOURCE_UPLOAD_PATH: Final = "/api/code-files/upload"
 _FOLDER_UPLOAD_PATH: Final = "/api/code-files/upload-folder"
 _AVATAR_UPLOAD_PATH: Final = "/api/me/avatar/image"
+_STATEMENT_IMPORT_PATH: Final = "/api/billing/admin/statements/import"
+_FUND_STATEMENT_IMPORT_PATH: Final = "/api/billing/admin/fund-statements/import"
 _AUDIT_ARCHIVE_PATH: Final = re.compile(r"^/api/projects/[1-9][0-9]*/audit-source-archive$")
+_ENTERPRISE_KNOWLEDGE_ATTACHMENT_PATH: Final = re.compile(
+    r"^/api/enterprises/[1-9][0-9]*/knowledge/attachments$"
+)
 JSON_REQUEST_METHODS: Final = frozenset({"POST", "PUT", "PATCH"})
 
 
 def is_limited_upload_path(path: str) -> bool:
     """返回路径是否属于必须在 multipart 解析前限流的源码上传入口。"""
-    return path in {_SOURCE_UPLOAD_PATH, _FOLDER_UPLOAD_PATH, _AVATAR_UPLOAD_PATH} or bool(
-        _AUDIT_ARCHIVE_PATH.fullmatch(path)
+    return path in {_SOURCE_UPLOAD_PATH, _FOLDER_UPLOAD_PATH, _AVATAR_UPLOAD_PATH, _STATEMENT_IMPORT_PATH,
+                    _FUND_STATEMENT_IMPORT_PATH} or bool(
+        _AUDIT_ARCHIVE_PATH.fullmatch(path) or _ENTERPRISE_KNOWLEDGE_ATTACHMENT_PATH.fullmatch(path)
     )
 
 
@@ -35,21 +44,35 @@ class UploadRequestSizeLimitMiddleware:
         max_source_bytes: int,
         max_folder_bytes: int,
         max_avatar_bytes: int,
+        max_knowledge_attachment_bytes: int | None = None,
+        max_statement_bytes: int = STATEMENT_IMPORT_REQUEST_MAX_BYTES,
         max_json_bytes: int = 4 * 1024 * 1024,
     ) -> None:
+        if max_knowledge_attachment_bytes is None:
+            max_knowledge_attachment_bytes = max_source_bytes
         if min(max_source_bytes, max_folder_bytes, max_avatar_bytes, max_json_bytes) <= 0:
             raise ValueError("请求体上限必须大于 0")
+        if max_knowledge_attachment_bytes <= 0:
+            raise ValueError("企业知识附件请求体上限必须大于 0")
+        if max_statement_bytes <= 0:
+            raise ValueError("渠道账单请求体上限必须大于 0")
         self.app = app
         self.max_source_bytes = max_source_bytes
         self.max_folder_bytes = max_folder_bytes
         self.max_avatar_bytes = max_avatar_bytes
+        self.max_knowledge_attachment_bytes = max_knowledge_attachment_bytes
+        self.max_statement_bytes = max_statement_bytes
         self.max_json_bytes = max_json_bytes
 
     def _limit_for_path(self, path: str) -> int:
+        if path in {_STATEMENT_IMPORT_PATH, _FUND_STATEMENT_IMPORT_PATH}:
+            return self.max_statement_bytes
         if path == _FOLDER_UPLOAD_PATH:
             return self.max_folder_bytes
         if path == _AVATAR_UPLOAD_PATH:
             return self.max_avatar_bytes
+        if _ENTERPRISE_KNOWLEDGE_ATTACHMENT_PATH.fullmatch(path):
+            return self.max_knowledge_attachment_bytes
         return self.max_source_bytes
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:

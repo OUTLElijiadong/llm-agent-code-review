@@ -71,6 +71,8 @@ class BaseAgent:
         self._model = model or settings.deepseek_model
         self._base_url = settings.deepseek_base_url
         self._api_key = settings.deepseek_api_key
+        self._billing_provider = "deepseek"
+        self._billing_credential_source = "system"
         self._max_retries = settings.deepseek_max_retries
         self._timeout = settings.deepseek_timeout
         # AgentSkill 自进化与总调度升级:Skill 实例列表,由 _init_skills() 填充
@@ -289,41 +291,55 @@ class BaseAgent:
                     )
                 url = f"{base_url}/chat/completions"
                 headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-                if has_agent_execution_scope():
-                    from app.ai.deepseek_agent import _CancellationSafeStream, _finish_http_cleanup
+                from app.services.billing_runtime_gate import metered_response_request
 
-                    async def request():
-                        nonlocal request_sent, http_attempts, resp
-                        target = await asyncio.to_thread(pin_public_http_url, url)
-                        # 同步桥每次创建独立事件循环，不能跨循环复用 AsyncClient。
-                        resources = AsyncExitStack()
-                        try:
-                            client = await resources.enter_async_context(httpx.AsyncClient(
-                                timeout=request_timeout, trust_env=False,
-                            ))
-                            await asyncio.to_thread(check_agent_execution)
+                def send_request():
+                    nonlocal request_sent, http_attempts, resp
+                    if has_agent_execution_scope():
+                        from app.ai.deepseek_agent import _CancellationSafeStream, _finish_http_cleanup
+
+                        async def request():
+                            nonlocal request_sent, http_attempts, resp
+                            target = await asyncio.to_thread(pin_public_http_url, url)
+                            resources = AsyncExitStack()
+                            try:
+                                client = await resources.enter_async_context(httpx.AsyncClient(
+                                    timeout=request_timeout, trust_env=False,
+                                ))
+                                await asyncio.to_thread(check_agent_execution)
+                                request_sent = True
+                                http_attempts += 1
+                                resp = await resources.enter_async_context(client.stream(
+                                    "POST", target.request_url, headers={**headers, "Host": target.host_header},
+                                    json=payload, extensions=target.request_extensions,
+                                ))
+                                resp.stream = _CancellationSafeStream(resp.stream)
+                                await resp.aread()
+                            finally:
+                                await _finish_http_cleanup(resources.aclose())
+
+                        run_agent_coroutine(request())
+                    else:
+                        target = pin_public_http_url(url)
+                        with httpx.Client(timeout=request_timeout, trust_env=False) as client:
                             request_sent = True
                             http_attempts += 1
-                            resp = await resources.enter_async_context(client.stream(
-                                "POST", target.request_url, headers={**headers, "Host": target.host_header},
+                            resp = client.post(
+                                target.request_url, headers={**headers, "Host": target.host_header},
                                 json=payload, extensions=target.request_extensions,
-                            ))
-                            resp.stream = _CancellationSafeStream(resp.stream)
-                            await resp.aread()
-                        finally:
-                            # EOF 关闭期间或父任务重复取消，仍等流/连接关闭完再独立记账。
-                            await _finish_http_cleanup(resources.aclose())
+                            )
+                    return resp, int((time.time() - t0) * 1000)
 
-                    run_agent_coroutine(request())
-                else:
-                    target = pin_public_http_url(url)
-                    with httpx.Client(timeout=request_timeout, trust_env=False) as client:
-                        request_sent = True
-                        http_attempts += 1
-                        resp = client.post(
-                            target.request_url, headers={**headers, "Host": target.host_header},
-                            json=payload, extensions=target.request_extensions,
-                        )
+                resp, _ = metered_response_request(
+                    model_name=model,
+                    payload=payload,
+                    send=send_request,
+                    provider_name=(api_config.provider if api_config else self._billing_provider),
+                    base_url=base_url,
+                    credential_source=(getattr(
+                        api_config, "billing_credential_source", getattr(api_config, "source", "system"),
+                    ) if api_config else self._billing_credential_source),
+                )
                 duration_ms = int((time.time() - t0) * 1000)
 
                 try:
@@ -482,8 +498,28 @@ class BaseAgent:
                 last_failure_kind = "transport_error"
                 duration_ms = int((time.time() - t0) * 1000)
             except Exception as e:
-                last_error = f"模型响应处理异常（类型：{type(e).__name__}）"
-                last_failure_kind = "invalid_response"
+                from app.core.exceptions import PaymentRequiredError
+                from app.services import billing_ledger_service as ledger
+
+                if isinstance(e, PaymentRequiredError) or isinstance(e, ledger.InsufficientCredits):
+                    if request_sent:
+                        # Post-send settlement hooks may recheck subscription/limits.
+                        # A refusal here cannot be described as an unsent request.
+                        last_error = "模型请求已发送，但计费结算校验未完成，账单待核对"
+                        last_failure_kind = "billing_error"
+                    else:
+                        # Pre-send limits are deterministic and cannot recover by
+                        # response parsing, splitting or resending the same call.
+                        last_error = "模型调用额度或预算不足，已在请求发送前停止"
+                        last_failure_kind = "budget_exhausted"
+                elif isinstance(e, ledger.BillingError):
+                    # A billing error may occur before send or while validating usage;
+                    # the metering gate keeps any issued reservation frozen for review.
+                    last_error = "模型计费校验失败，调用已停止"
+                    last_failure_kind = "billing_error"
+                else:
+                    last_error = f"模型响应处理异常（类型：{type(e).__name__}）"
+                    last_failure_kind = "invalid_response"
                 duration_ms = int((time.time() - t0) * 1000)
                 retryable = False
 

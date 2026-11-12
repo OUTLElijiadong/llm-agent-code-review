@@ -2,8 +2,9 @@ import { get, post, del } from './http'
 import type { Page } from '@/types/common'
 import type { UserListItem } from '@/types/user'
 
-export function getUsers(params?: Record<string, unknown>) {
-  return get<Page<UserListItem>>('/users', params)
+export function getUsers(params?: Record<string, unknown>, token?: string | null) {
+  return get<Page<UserListItem>>('/users', params, undefined, false,
+    token === undefined ? undefined : { authTokenSnapshot: token })
 }
 
 export function resetPassword(userId: number) {

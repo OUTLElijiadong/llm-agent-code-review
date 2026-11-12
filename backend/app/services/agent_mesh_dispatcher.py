@@ -230,23 +230,24 @@ def _ctx(message: dict[str, Any]) -> AgentContext:
     data = _payload(message)
     strategy = data.get("_execution_strategy")
     strategy = strategy if isinstance(strategy, dict) else {}
+    extra = {
+        "trace_id": message.get("trace_id", ""),
+        "mesh_message_id": message.get("message_id", ""),
+        "execution_strategy": strategy,
+        "strategy_instruction": str(strategy.get("instruction") or data.get("instructions") or ""),
+        "agent_team": {
+            "team_id": context.get("team_id"),
+            "task_id": context.get("agent_team_task_id"),
+            "lease_token": context.get("lease_token"),
+            "attempt": context.get("attempt"),
+        },
+    }
     return AgentContext(
         user_id=int(message["user_id"]),
         task_id=context.get("task_id"),
         project_id=context.get("project_id"),
         file_id=context.get("file_id"),
-        extra={
-            "trace_id": message.get("trace_id", ""),
-            "mesh_message_id": message.get("message_id", ""),
-            "execution_strategy": strategy,
-            "strategy_instruction": str(strategy.get("instruction") or data.get("instructions") or ""),
-            "agent_team": {
-                "team_id": context.get("team_id"),
-                "task_id": context.get("agent_team_task_id"),
-                "lease_token": context.get("lease_token"),
-                "attempt": context.get("attempt"),
-            },
-        },
+        extra=extra,
     )
 
 
@@ -678,6 +679,14 @@ def _runtime_handler(
     from app.agents.orchestrator import get_request_orchestrator
 
     ctx = _ctx({**message, "user_id": user.id})
+    if trusted_team_execution and type(context.get("enterprise_id")) is int:
+        ctx.extra["enterprise_agent_team"] = {
+            "enterprise_id": context["enterprise_id"],
+            "team_id": context.get("team_id"),
+            "task_id": context.get("agent_team_task_id"),
+            "project_id": context.get("project_id"),
+            "max_calls_per_task": context.get("max_calls_per_task"),
+        }
     orch = get_request_orchestrator(db, user=user)
 
     if code == "language_detector":
@@ -1063,7 +1072,55 @@ def _runtime_handler(
             return _missing("issue_id|task_id|project_id")
         return _as_mesh_result(result, action="修复提示词生成")
     if code == "security_sentinel":
-        if file_id := (data.get("file_id") or context.get("file_id")):
+        if trusted_team_execution:
+            if any(key in data for key in ("file_id", "task_id", "project_id")):
+                blocked = _result(
+                    "blocked",
+                    "企业安全审计只能使用团队服务端绑定的项目范围",
+                    errors=[{"code": "untrusted_project_scope"}],
+                )
+                blocked["retryable"] = False
+                return blocked
+            project_id = context.get("project_id")
+            scan_mode = data.get("scan_mode", "full")
+            top_n = data.get("top_n", 50)
+            trace_dataflow = data.get("trace_dataflow", True)
+            if (
+                type(project_id) is not int or project_id <= 0
+                or type(context.get("enterprise_id")) is not int
+                or context.get("enterprise_id") <= 0
+            ):
+                blocked = _result(
+                    "blocked",
+                    "企业安全审计缺少服务端项目或企业范围",
+                    errors=[{"code": "missing_enterprise_project_scope"}],
+                )
+                blocked["retryable"] = False
+                return blocked
+            if (
+                not isinstance(scan_mode, str)
+                or scan_mode not in {"full", "static_full", "triage"}
+                or type(top_n) is not int or not 1 <= top_n <= 200
+                or type(trace_dataflow) is not bool
+            ):
+                invalid = _result(
+                    "blocked",
+                    "企业安全审计参数不符合受限扫描合同",
+                    errors=[{"code": "invalid_security_scan_options"}],
+                )
+                invalid["retryable"] = False
+                return invalid
+            audit_scope = "project"
+            result = orch.audit_security_for_project(
+                project_id,
+                top_n=top_n,
+                trace_dataflow=trace_dataflow,
+                scan_mode=scan_mode,
+                ctx=ctx,
+            )
+            if isinstance(result.data, dict):
+                result.data = {**result.data, "project_id": int(project_id)}
+        elif file_id := (data.get("file_id") or context.get("file_id")):
             audit_scope = "file"
             result = orch.audit_security_for_file(
                 int(file_id),

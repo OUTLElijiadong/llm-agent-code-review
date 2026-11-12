@@ -12,6 +12,7 @@ import pytest
 
 from app.core.exceptions import ForbiddenError, NotFoundError, PayloadTooLargeError
 from app.models.code_file import CodeFile
+from app.models.enterprise_project import EnterpriseProject
 from app.models.forum_post import ForumPost
 from app.models.knowledge_chunk import KnowledgeChunk
 from app.models.knowledge_doc import KnowledgeDoc
@@ -384,13 +385,29 @@ def test_add_document_persists_embeddings_and_replaces_existing_source(db, monke
         return [[1.0, float(index)] for index, _ in enumerate(texts)], "fake:embedding"
 
     monkeypatch.setattr(knowledge_service.embedding_service, "embed_texts", fake_embed_texts)
+    project = Project(user_id=1, project_name="source project", status="active")
+    db.add(project)
+    db.flush()
+    source_file = CodeFile(
+        project_id=project.id,
+        file_name="source.py",
+        file_path="source.py",
+        language="python",
+        size_bytes=1,
+        line_count=1,
+        content="source",
+        status="active",
+    )
+    db.add(source_file)
+    db.flush()
+    source_ref = f"file:{source_file.id}"
     first = knowledge_service.add_document(
         db,
         user_id=1,
         title="首版文档",
         content="甲" * 800,
         source_type="code",
-        source_ref="file:1",
+        source_ref=source_ref,
     )
     first_chunks = db.query(KnowledgeChunk).filter(KnowledgeChunk.doc_id == first.id).all()
     assert first.chunk_count == 2
@@ -404,7 +421,7 @@ def test_add_document_persists_embeddings_and_replaces_existing_source(db, monke
         title="新" * 220,
         content="替换后的短内容",
         source_type="code",
-        source_ref="file:1",
+        source_ref=source_ref,
     )
     db.refresh(first)
     assert first.status == "deleted"
@@ -714,6 +731,253 @@ def test_sync_from_platform_aggregates_only_owner_data_and_survives_source_failu
     monkeypatch.setattr(knowledge_service, "add_document", flaky_add_document)
     degraded = knowledge_service.sync_from_platform(db, owner.id)
     assert degraded == {"code": 0, "issue": 1, "forum": 1, "feedback": 1, "ticket": 1, "total": 4}
+
+
+def test_sync_from_platform_excludes_enterprise_bound_project_code_and_issues(db, monkeypatch):
+    """个人知识同步不得把已归属企业的项目源码或审查问题复制到个人空间。"""
+    owner = _make_user(db, "sync-enterprise-owner")
+    project = _make_project(db, owner, "enterprise-project", "Python")
+    task = _make_task(db, owner, project, "enterprise-task")
+    issue = _make_issue(db, task, issue_type="secret", status="fixed", title="企业问题")
+    code_file = CodeFile(
+        project_id=project.id,
+        file_name="secret.py",
+        file_path="src/secret.py",
+        language="python",
+        size_bytes=20,
+        line_count=1,
+        content="enterprise secret",
+        status="active",
+    )
+    db.add(code_file)
+    db.flush()
+    db.add(EnterpriseProject(
+        enterprise_id=9001,
+        project_id=project.id,
+        group_id=9001,
+        status="active",
+    ))
+    db.commit()
+
+    calls = []
+    monkeypatch.setattr(
+        knowledge_service,
+        "add_document",
+        lambda _db, user_id, title, content, source_type="upload", source_ref=None, **_kwargs: calls.append(
+            (user_id, title, content, source_type, source_ref)
+        ),
+    )
+
+    counts = knowledge_service.sync_from_platform(db, owner.id)
+
+    assert counts["code"] == 0
+    assert counts["issue"] == 0
+    assert counts["total"] == 0
+    assert calls == []
+    assert issue.id is not None
+    assert code_file.id is not None
+
+
+def test_personal_knowledge_hides_legacy_sources_after_project_becomes_enterprise_bound(db, monkeypatch):
+    """旧同步副本在项目绑定后也必须从个人列表、统计和 RAG 检索中消失。"""
+    owner = _make_user(db, "knowledge-enterprise-owner")
+    project = _make_project(db, owner, "enterprise-project", "Python")
+    task = _make_task(db, owner, project, "enterprise-task")
+    issue = _make_issue(db, task, issue_type="secret", status="fixed", title="企业问题")
+    code_file = CodeFile(
+        project_id=project.id,
+        file_name="secret.py",
+        file_path="src/secret.py",
+        language="python",
+        size_bytes=20,
+        line_count=1,
+        content="enterprise secret",
+        status="active",
+    )
+    code_doc = KnowledgeDoc(
+        user_id=owner.id,
+        source_type="code",
+        source_ref=f"file:{code_file.id}",
+        title="企业源码副本",
+        char_count=20,
+        chunk_count=1,
+        status="active",
+    )
+    issue_doc = KnowledgeDoc(
+        user_id=owner.id,
+        source_type="issue",
+        source_ref=f"issue:{issue.id}",
+        title="企业问题副本",
+        char_count=20,
+        chunk_count=1,
+        status="active",
+    )
+    db.add(code_file)
+    db.flush()
+    code_doc.source_ref = f"file:{code_file.id}"
+    db.add_all([code_doc, issue_doc])
+    db.flush()
+    for doc in (code_doc, issue_doc):
+        db.add(KnowledgeChunk(
+            doc_id=doc.id,
+            user_id=owner.id,
+            seq=0,
+            content="enterprise secret project knowledge",
+            embedding="[1.0, 0.0]",
+            embed_model="test:model",
+        ))
+    db.add(EnterpriseProject(
+        enterprise_id=9002,
+        project_id=project.id,
+        group_id=9002,
+        status="active",
+    ))
+    db.commit()
+    monkeypatch.setattr(knowledge_service.embedding_service, "embed_one", lambda *_a, **_k: ([1.0, 0.0], "test:model"))
+    monkeypatch.setattr(knowledge_service.embedding_service, "cosine", lambda *_a, **_k: 1.0)
+
+    assert knowledge_service.list_docs(db, owner.id)["items"] == []
+    assert knowledge_service.get_stats(db, owner.id)["doc_total"] == 0
+    assert knowledge_service.get_stats(db, owner.id)["chunk_total"] == 0
+    assert knowledge_service.retrieve(db, owner.id, "enterprise secret") == []
+
+
+def test_add_document_rechecks_bound_project_before_personal_commit(db, monkeypatch):
+    """队列中早已取出的项目来源也不能在绑定提交后落入个人知识库。"""
+    owner = _make_user(db, "knowledge-enterprise-race")
+    other = _make_user(db, "knowledge-enterprise-other")
+    project = _make_project(db, owner, "enterprise-project", "Python")
+    code_file = CodeFile(
+        project_id=project.id,
+        file_name="secret.py",
+        file_path="src/secret.py",
+        language="python",
+        size_bytes=20,
+        line_count=1,
+        content="enterprise secret",
+        status="active",
+    )
+    db.add(code_file)
+    db.flush()
+    db.add(EnterpriseProject(
+        enterprise_id=9003,
+        project_id=project.id,
+        group_id=9003,
+        status="active",
+    ))
+    db.commit()
+    embedding_calls = []
+    monkeypatch.setattr(
+        knowledge_service.embedding_service,
+        "embed_texts",
+        lambda _db, texts, **_kwargs: embedding_calls.append(list(texts)),
+    )
+
+    with pytest.raises(ForbiddenError, match="项目知识来源已失效"):
+        knowledge_service.add_document(
+            db,
+            other.id,
+            "他人源码",
+            "enterprise secret",
+            source_type="code",
+            source_ref=f"file:{code_file.id}",
+        )
+
+    with pytest.raises(ForbiddenError, match="企业项目来源"):
+        knowledge_service.add_document(
+            db,
+            owner.id,
+            "企业源码",
+            "enterprise secret",
+            source_type="code",
+            source_ref=f"file:{code_file.id}",
+        )
+    assert embedding_calls == []
+    assert db.query(KnowledgeDoc).filter_by(user_id=owner.id, source_ref=f"file:{code_file.id}").count() == 0
+
+
+def test_personal_project_document_rejects_mismatched_source_ref_prefix(db, monkeypatch):
+    """个人知识来源类型与来源引用前缀不一致时，在嵌入前失败关闭。"""
+    owner = _make_user(db, "knowledge-invalid-project-ref")
+    project = _make_project(db, owner, "invalid-ref-project", "Python")
+    code_file = CodeFile(
+        project_id=project.id,
+        file_name="source.py",
+        file_path="source.py",
+        language="python",
+        size_bytes=10,
+        content="personal code",
+        status="active",
+    )
+    task = _make_task(db, owner, project, "invalid-ref-task")
+    issue = _make_issue(db, task, issue_type="security", status="fixed", title="same table-local id")
+    db.add(code_file)
+    db.commit()
+    assert code_file.id == issue.id
+
+    embedding_calls = []
+    monkeypatch.setattr(
+        knowledge_service.embedding_service,
+        "embed_texts",
+        lambda _db, texts, **_kwargs: (embedding_calls.append(list(texts)) or [[1.0] for _ in texts], "fixture"),
+    )
+
+    with pytest.raises(ForbiddenError, match="项目知识来源无法验证"):
+        knowledge_service.add_document(
+            db,
+            owner.id,
+            "来源类型与引用不匹配",
+            "must not be embedded",
+            source_type="code",
+            source_ref=f"issue:{issue.id}",
+        )
+
+    assert embedding_calls == []
+
+
+def test_personal_project_document_rejects_noncanonical_source_ids(db, monkeypatch):
+    """前导零与 Unicode 数字不得生成后续清理无法精确命中的来源引用。"""
+    owner = _make_user(db, "knowledge-noncanonical-project-ref")
+    project = _make_project(db, owner, "noncanonical-ref-project", "Python")
+    code_file = CodeFile(
+        project_id=project.id,
+        file_name="source.py",
+        file_path="source.py",
+        language="python",
+        size_bytes=10,
+        content="personal code",
+        status="active",
+    )
+    task = _make_task(db, owner, project, "noncanonical-ref-task")
+    issue = _make_issue(db, task, issue_type="security", status="fixed", title="noncanonical issue")
+    db.add(code_file)
+    db.commit()
+    unicode_file_id = str(code_file.id).translate(str.maketrans("0123456789", "٠١٢٣٤٥٦٧٨٩"))
+    unicode_issue_id = str(issue.id).translate(str.maketrans("0123456789", "٠١٢٣٤٥٦٧٨٩"))
+    invalid_sources = (
+        ("code", f"file:0{code_file.id}"),
+        ("code", f"file:{unicode_file_id}"),
+        ("issue", f"issue:0{issue.id}"),
+        ("issue", f"issue:{unicode_issue_id}"),
+    )
+    embedding_calls = []
+    monkeypatch.setattr(
+        knowledge_service.embedding_service,
+        "embed_texts",
+        lambda _db, texts, **_kwargs: (embedding_calls.append(list(texts)) or [[1.0] for _ in texts], "fixture"),
+    )
+
+    for source_type, source_ref in invalid_sources:
+        with pytest.raises(ForbiddenError, match="项目知识来源无法验证"):
+            knowledge_service.add_document(
+                db,
+                owner.id,
+                "非规范来源",
+                "must not be embedded",
+                source_type=source_type,
+                source_ref=source_ref,
+            )
+    assert embedding_calls == []
 
 
 def test_personalization_context_builders_cover_empty_and_profile_branches(db, monkeypatch):

@@ -137,7 +137,7 @@ def _frontend_http_calls() -> set[tuple[str, str, str]]:
                 method = HELPER_METHOD_MAP[match.group(1)]
                 raw_path = match.group(2)[1:-1]
                 # 先把 ${BASE} 等变量替换为实际字符串值,再归一化动态参数
-                resolved_path = _resolve_template_variables(raw_path, constants)
+                resolved_path = _resolve_template_variables(raw_path.split("?", 1)[0], constants)
                 path = _normalize_path(resolved_path)
                 source_file = str(file_path.relative_to(src_root))
                 calls.add((method, path, source_file))

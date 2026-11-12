@@ -30,6 +30,49 @@ def test_project_security_member_preserves_explicit_scan_mode(monkeypatch):
     assert result["evidence"][0]["data"]["project_id"] == 8
 
 
+def test_trusted_enterprise_security_scan_uses_only_server_bound_project(monkeypatch):
+    sentinel = Mock(return_value=AgentResult(success=True, data={
+        "findings": [],
+        "summary": "绑定项目扫描完成",
+        "compliance": {"scan_mode": "static_full"},
+    }))
+    _orch(monkeypatch, audit_security_for_project=sentinel)
+    result = dispatcher._runtime_handler(
+        None,
+        SimpleNamespace(id=3),
+        "security_sentinel",
+        {
+            "payload": {"scan_mode": "static_full", "top_n": 40, "trace_dataflow": False},
+            "context": {"enterprise_id": 22, "project_id": 8},
+        },
+        trusted_team_execution=True,
+    )
+
+    assert result["status"] == "completed"
+    assert sentinel.call_args.args[0] == 8
+    assert sentinel.call_args.kwargs["scan_mode"] == "static_full"
+    assert sentinel.call_args.kwargs["trace_dataflow"] is False
+
+
+def test_trusted_enterprise_security_scan_rejects_payload_project_override(monkeypatch):
+    sentinel = Mock()
+    _orch(monkeypatch, audit_security_for_project=sentinel)
+    result = dispatcher._runtime_handler(
+        None,
+        SimpleNamespace(id=3),
+        "security_sentinel",
+        {
+            "payload": {"project_id": 999},
+            "context": {"enterprise_id": 22, "project_id": 8},
+        },
+        trusted_team_execution=True,
+    )
+
+    assert result["status"] == "blocked"
+    assert result["errors"][0]["code"] == "untrusted_project_scope"
+    sentinel.assert_not_called()
+
+
 def test_partial_security_result_keeps_coverage_and_findings(monkeypatch):
     partial = {"findings": [{"title": "输入未经验证"}], "compliance": {"semantic_failed_batch_count": 1}}
     sentinel = SimpleNamespace(scan_project=Mock(return_value=AgentResult(
