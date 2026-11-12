@@ -9,6 +9,7 @@
 - [ ] CI 的后端测试/覆盖率/Ruff/compileall、前端 lint/test/build、依赖审计、Alembic、Compose、Shell 与契约门禁全部通过。
 - [ ] 已确认变更范围、维护窗口、负责人、观察人和回滚决策人。
 - [ ] 当前 `current.env`、`previous.env` 与运行容器镜像可读，上一版本镜像仍存在。
+- [ ] 若前一轮发布在数据库前向迁移后按安全策略停下 Backend，只允许部署脚本核验账本绑定的唯一 exited 常驻容器后续发；不得手工启动旧 Backend，也不得把 Compose 一次性容器当作当前发布容器。
 - [ ] 磁盘、内存、Swap 和 Docker 空间有安全余量；`deploy.sh` 的容量门禁（默认低于 95% 使用率且至少 12 GiB 可用）可通过，不在发布过程中执行未评估的系统级 prune。
 - [ ] 未在命令行、工单或日志中粘贴密码、JWT、API Key、证书私钥。
 

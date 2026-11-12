@@ -182,6 +182,45 @@ service_container_id() {
   printf '%s\n' "$container_id"
 }
 
+# 读取账本对应的常驻服务容器；允许发布前一轮安全停机留下的 exited 容器。
+# Compose 的 `ps --all` 也可能列出 `run` 一次性容器，因此只接受服务标签匹配且
+# oneoff=False 的唯一容器。不能仅凭容器名或最近创建时间猜测当前发布身份。
+# 参数: $1 为服务名。
+# 返回: stdout 输出唯一运行/已退出的常驻容器 ID；状态未知或容器不唯一时返回 1。
+release_service_container_id() {
+  local service="$1" container_id candidates candidate service_label oneoff_label
+
+  container_id="$(service_container_id "$service" || true)"
+  if [[ -z "$container_id" ]]; then
+    candidates="$(compose ps --all --quiet --status exited "$service" 2>/dev/null)" || return 1
+    container_id=""
+    while IFS= read -r candidate; do
+      [[ -n "$candidate" ]] || continue
+      service_label="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.service" }}' "$candidate" 2>/dev/null)" \
+        || return 1
+      oneoff_label="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.oneoff" }}' "$candidate" 2>/dev/null)" \
+        || return 1
+      case "$service_label:$oneoff_label" in
+        "$service:False"|"$service:false"|"$service:FALSE")
+          [[ -z "$container_id" ]] || return 1
+          container_id="$candidate"
+          ;;
+      esac
+    done <<< "$candidates"
+  fi
+
+  [[ -n "$container_id" ]] || return 1
+  service_label="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.service" }}' "$container_id" 2>/dev/null)" \
+    || return 1
+  oneoff_label="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.oneoff" }}' "$container_id" 2>/dev/null)" \
+    || return 1
+  case "$service_label:$oneoff_label" in
+    "$service:False"|"$service:false"|"$service:FALSE") ;;
+    *) return 1 ;;
+  esac
+  printf '%s\n' "$container_id"
+}
+
 # 等待 Compose 服务达到 healthy；若未定义 healthcheck，则要求 running。
 # 参数: $1 服务名；$2 超时秒数（默认 120）。
 # 返回: 健康时 0；超时或退出时 1。
@@ -983,15 +1022,17 @@ assert_compose_release_environment() (
   printf '%s\n' "$images" | grep -Fxq "prism-frontend:$expected_frontend" || fatal "Compose $mode Frontend 镜像漂移"
 )
 
-assert_running_release_environment() {
-  local service container_id expected_id actual_id environment runtime_release runtime_version
+assert_recorded_release_environment() {
+  local service container_id expected_id actual_id environment runtime_release runtime_version runtime_status
   for service in backend frontend; do
-    # 只选择常驻服务容器。`compose run` 产生的一次性容器可能仍处于
-    # ps --all 结果中，不能让并行的迁移/巡检把多个 ID 传给 docker inspect。
-    container_id="$(service_container_id "$service")"
-    [[ -n "$container_id" ]] || fatal "无法识别发布容器: $service"
+    # 支持从前一轮 119 安全停机继续前向发布；绝不启动数据库不兼容的旧 Backend。
+    container_id="$(release_service_container_id "$service")" \
+      || fatal "无法识别唯一的运行或已停止发布容器: $service"
     expected_id="$BOUND_BACKEND_IMAGE_ID"
     [[ "$service" != frontend ]] || expected_id="$BOUND_FRONTEND_IMAGE_ID"
+    runtime_status="$(docker inspect --format '{{.State.Status}}' "$container_id")"
+    [[ "$runtime_status" == running || "$runtime_status" == exited ]] \
+      || fatal "发布容器状态不可安全续发: $service ($runtime_status)"
     actual_id="$(docker inspect --format '{{.Image}}' "$container_id")"
     [[ "$actual_id" == "$expected_id" ]] || fatal "运行容器镜像与发布账本不一致: $service"
     if [[ "$service" == backend ]]; then
@@ -1001,6 +1042,19 @@ assert_running_release_environment() {
       [[ "$runtime_release" == "$APP_RELEASE" && "$runtime_version" == "$APP_VERSION" ]] \
         || fatal "运行容器版本与发布账本不一致"
     fi
+  done
+}
+
+# 运维巡检只能将实际运行的服务判定为发布一致；部署预检单独使用上述函数，
+# 才能安全续发账本匹配的 exited 容器。
+assert_running_release_environment() {
+  assert_recorded_release_environment
+  local service container_id runtime_status
+  for service in backend frontend; do
+    container_id="$(service_container_id "$service")" \
+      || fatal "巡检时发布容器未运行: $service"
+    runtime_status="$(docker inspect --format '{{.State.Status}}' "$container_id")"
+    [[ "$runtime_status" == running ]] || fatal "巡检时发布容器状态异常: $service ($runtime_status)"
   done
 }
 
