@@ -2273,12 +2273,19 @@ def test_enterprise_team_calls_allow_parallelism_while_revocation_cancel_and_lif
     directive_outcome: dict[str, object] = {}
     real_company_lookup = enterprise_org_service._company
 
-    def _pause_finalizer_before_company_lock(db, requested_enterprise_id, *, lock=False):
+    def _pause_finalizer_before_company_lock(
+        db, requested_enterprise_id, *, lock=False, shared_lock=False,
+    ):
         if lock and current_thread().name == "assistant-answer-finalizer":
             finalizer_waiting_for_company.set()
             if not release_finalizer_company.wait(timeout=10):
                 raise TimeoutError("测试未释放企业小菱最终发布事务")
-        return real_company_lookup(db, requested_enterprise_id, lock=lock)
+        return real_company_lookup(
+            db,
+            requested_enterprise_id,
+            lock=lock,
+            shared_lock=shared_lock,
+        )
 
     def _finalize_old_answer() -> None:
         try:

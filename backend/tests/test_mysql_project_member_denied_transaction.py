@@ -21,6 +21,13 @@ fresh_chain = chain.fresh_chain
 fresh_chain_url = chain.fresh_chain_url
 
 
+@pytest.fixture(autouse=True)
+def _running_project_denial_audit_worker():
+    # Other API lifespan tests stop this process-wide worker. These direct
+    # service tests run outside an app lifespan and need the normal live state.
+    project_access_audit.start_project_denial_audit()
+
+
 @pytest.mark.parametrize("operation", ["add", "remove", "role"])
 @pytest.mark.parametrize("denial", ["no_access", "read_only"])
 def test_denied_member_write_does_not_commit_unrelated_pending_project(fresh_chain, operation, denial):

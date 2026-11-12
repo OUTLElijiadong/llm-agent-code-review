@@ -1,5 +1,12 @@
 # 待办：企业与计费体系
 
+## 2026-11-12 最新续验：MySQL 全量回归与提交前状态
+
+- 在一次性 MySQL 8.0.45 数据库运行全部 `tests/test_mysql_*.py`：**633 passed、5 xfailed、0 failed**，377 条警告，用时 366.77 秒；全新数据库迁移链 **94 passed**。这轮补齐了前一条记录中未完成的 MySQL 验收。
+- 已调整 CI：PR 分支不再重复触发 push 与 pull request 两套工作流，后端超时提高到 120 分钟，MySQL 打开 `performance_schema` 以支持锁等待测试。Ruff、Python 编译、工作流 YAML 解析和 `git diff --check` 均通过。
+- 上述改动尚待提交、推送并等待新 SHA 的 GitHub CI。既往 SHA 的 aggregate CodeQL 失败仍需在新 SHA 观察和正式 triage；不得据本地结果写成云端检查通过。
+- 生产仍为最近核实的 **4.1.42 / `a165f94ed4c208fb05251e4c7d12accb427c8ba3`**，本轮未部署。Compose 外数据库写入者盘点与停写、生产备份隔离恢复、迁移 119 兼容回滚/前向恢复、维护窗口及生产业务冒烟仍无核验证据；这些门未满足前不能宣称完成生产发布。
+
 ## 2026-11-12 提交及生产发布状态
 
 - 本地候选 `4.1.43` 提交前回归：后端 11,097 通过、736 跳过、0 失败；前端 210 个测试文件/2,978 项通过，ESLint 和生产构建通过；部署绑定 41 项与故障注入 40 场景通过。MySQL 专项因缺少可用 Docker/`PRISM_FRESH_CHAIN_MYSQL_URL` 未进入本轮全量结果。

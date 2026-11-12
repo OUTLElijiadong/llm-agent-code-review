@@ -32,8 +32,8 @@ def _setup(engine, key, *, prior_directive=False):
         db.add(EnterpriseConversation(id=room_id, enterprise_id=eid, kind='company', conversation_key='company', created_by=uid+1))
         db.add_all([EnterpriseChatMessage(id=message_id, enterprise_id=eid, conversation_id=room_id, sender_id=uid+2,
                                           sender_type='human', client_message_id='old',
-                                          content='@小菱 不要执行' if prior_directive else '先停止',
-                                          sender_authority_rank=3 if prior_directive else None),
+                                          content='@小菱 不要执行' if prior_directive else '@小菱 先停止',
+                                          sender_authority_rank=3),
                     EnterpriseChatMessage(id=message_id+1, enterprise_id=eid, conversation_id=room_id, sender_id=uid+3,
                                           sender_type='human', client_message_id='new', content='@小菱 执行',
                                           sender_authority_rank=1)])
@@ -148,8 +148,6 @@ def test_mysql_equal_rank_author_revision_preserves_history(fresh_chain, monkeyp
         db.execute(text('UPDATE enterprise_member SET role="member" WHERE enterprise_id=:e AND user_id=:u'), {'e':eid,'u':author})
         db.add(User(id=author+2, username='clarify-peer', password='x', role='user', status=1))
         db.add(EnterpriseMember(enterprise_id=eid, user_id=author+2, role='member', status='active'))
-        db.add(EnterpriseChatMessage(id=950005, enterprise_id=eid, conversation_id=rid, sender_id=author+2,
-                                     sender_type='human', client_message_id='peer', content='可以执行'))
     with maker.begin() as db:
         run = db.query(EnterpriseAssistantRun).filter_by(enterprise_id=eid, conversation_id=rid).one()
         request = clarity.create_request(db, enterprise_id=eid, conversation_id=rid, run_id=run.id, phase='tool',
@@ -158,9 +156,6 @@ def test_mysql_equal_rank_author_revision_preserves_history(fresh_chain, monkeyp
         request_id, first_message = request.id, run.source_message_id-1
         clarity.decide(db, enterprise_id=eid, conversation_id=rid, request_id=request_id,
                        source_message_id=first_message, user_id=author, decision='deny')
-        clarity.decide(db, enterprise_id=eid, conversation_id=rid, request_id=request_id,
-                       source_message_id=950005, user_id=author+2, decision='allow')
-    with maker.begin() as db:
         with pytest.raises(ForbiddenError):
             clarity.decide(db, enterprise_id=eid, conversation_id=rid, request_id=request_id,
                            source_message_id=first_message, user_id=author+2, decision='allow')

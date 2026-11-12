@@ -2,6 +2,12 @@
 
 ## 2026-11-12：提交前全量回归与生产发布门复核
 
+- 修正 CI 的验证配置：PR 分支不再同时触发 `push` 与 `pull_request` 两套完整工作流；后端作业超时从 35 分钟提高到 120 分钟；MySQL 启用 `performance_schema`，供真实锁等待用例读取 `data_lock_waits`。PR、手动和定时触发仍保留。
+- 本地一次性 MySQL 8.0.45 全量专项：72 个 MySQL 测试模块，**633 passed、5 xfailed、0 failed**，377 条弃用警告，366.77 秒；全新建库迁移链另有 **94 passed、0 failed**。相关历史迁移用例改用当时 schema 中实际存在的列；所有运行都使用临时、回环绑定、测试后销毁的空数据库。
+- 修正的回归根因包括：MySQL 锁观测原先被关闭；企业小菱锁服务增加 `shared_lock` 后测试替身参数未同步；澄清消息测试夹具违反迁移 119 的发送权限快照约束；迁移 110/113 的旧库造数误用当前 ORM 字段；应用生命周期关闭进程级审计队列后，直调服务的测试未恢复 worker。每个问题均在 MySQL 8.0 上复现并重跑对应回归。
+- `backend/app` Ruff 全通过；改动 Python 文件编译通过；CI/CodeQL 工作流 YAML 解析通过；`git diff --check` 通过。该次本地结果不是 GitHub Actions 结果；推送新 SHA 后仍需等待云端全量 CI 与 CodeQL 状态。
+- 生产未部署。生产最新核验仍为 `ready / 4.1.42 / a165f94ed4c208fb05251e4c7d12accb427c8ba3`；迁移 119 的生产写入者盘点/停写、备份隔离恢复、兼容回滚/前向恢复、维护窗口和业务冒烟证据仍未取得。
+
 ## 2026-11-12：提交推送与 GitHub CI 终态
 
 - 工作树已提交并推送到 `codex/prism-enterprise-billing`，代码提交 SHA `417ef5a1d5858a492006f85b9b2149a82ce34edb`；PR #4 保持 OPEN，未合并。首次提交时本地工作树干净。

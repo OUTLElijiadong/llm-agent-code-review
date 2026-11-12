@@ -2,7 +2,7 @@ name: CodeQL 权威安全规则扫描
 
 on:
   push:
-    branches: [main, 'claude/**', 'codex/**']
+    branches: [main]
   pull_request:
   workflow_dispatch:
   schedule:
