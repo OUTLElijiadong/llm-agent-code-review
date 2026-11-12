@@ -1,5 +1,12 @@
 # 验收记录：企业与计费体系
 
+## 2026-11-12：d9a692d8 云端 CI 终态与生产发布阻塞
+
+- PR #4 SHA `d9a692d8a561d0e08f0bdfc422d271fdee137d42` 的 GitHub 后端全量回归通过：**11,828 passed、5 xfailed、0 errors**，13 条警告，用时 3,205.82 秒；覆盖率 **85%**（82,681 statements、12,221 missed）。Ruff、字节码编译通过；`pip-audit` 报告无已知漏洞。上个 SHA 的 21 个 fixture setup errors 未再出现。
+- 同 SHA 的前端测试/构建、部署回归、Python 与 JavaScript/TypeScript CodeQL jobs 均通过。GitHub Advanced Security 聚合 CodeQL 仍失败：18 条注解（2 critical、16 high），均位于 `deploy/prism_sandbox_executor.py`；和 `main` 现存告警相符的只读对照已记录，正式 triage 尚未完成，未关闭或规避告警。
+- PR #4 仍 OPEN；SHA/分支无冲突，但因 aggregate CodeQL 失败显示 `UNSTABLE`，不得视为可安全合并或生产发布。
+- 生产未部署，最新公开 `/readyz` 为 `ready / 4.1.42 / a165f94ed4c208fb05251e4c7d12accb427c8ba3`。生产迁移 119 前的 Compose 外写入者清单与停写、生产备份隔离恢复、兼容回滚/前向恢复、维护窗口、责任人和生产业务冒烟证据均未取得；即使 CI 通过，这些发布门也必须先完成。
+
 ## 2026-11-12：f558f301 云端全量回归与 fixture 修复
 
 - PR #4 的 SHA `f558f301d6cf2b07039f073005a6752145e2c02a` 云端后端任务运行 2,594.72 秒后以失败结束：**11,807 passed、5 xfailed、21 errors**，13 条警告，覆盖率 **85%**（82,681 statements、12,225 missed）。21 项均为测试 setup 错误，不是业务断言失败：一个 MySQL schema probe 缺 `fresh_chain_url` fixture，渗透证据能力测试的 20 个参数化用例缺 `scenario` fixture；失败后 Ruff/compile 与 pip-audit 步骤未运行。

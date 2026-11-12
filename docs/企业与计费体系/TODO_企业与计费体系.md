@@ -1,5 +1,11 @@
 # 待办：企业与计费体系
 
+## 2026-11-12 最新续验：d9a692d8 后端/前端/部署通过，安全门待处理
+
+- GitHub 后端全量 **11,828 passed、5 xfailed、0 errors**，85% 覆盖率；Ruff/编译通过，`pip-audit` 无已知漏洞。前端、部署及 Python/JS CodeQL jobs 通过。
+- 聚合 CodeQL 仍失败（`deploy/prism_sandbox_executor.py` 有 18 条注解，2 critical/16 high），需要正式告警 triage。PR #4 当前 OPEN、mergeStateStatus 为 UNSTABLE，未合并。
+- 生产仍是 `4.1.42 / a165f94ed4c208fb05251e4c7d12accb427c8ba3`，未部署。迁移 119 Compose 外写入者盘点/停写、生产备份隔离恢复、兼容回滚/前向恢复方案、维护窗口/责任人、发布后业务冒烟及观察尚待真实环境完成。
+
 ## 2026-11-12 最新状态：云端 fixture 错误修复待提交
 
 - PR #4 SHA `f558f301d6cf2b07039f073005a6752145e2c02a` 的 GitHub 后端回归：**11,807 passed、5 xfailed、21 setup errors**，85% 覆盖率；1 个 MySQL schema probe 缺少 `fresh_chain_url`，20 个渗透证据能力用例缺少 `scenario`。云端日志证明为 pytest fixture 注册问题，非业务断言失败。
