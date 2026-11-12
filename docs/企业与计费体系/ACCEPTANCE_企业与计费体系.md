@@ -2,6 +2,15 @@
 
 ## 2026-11-12：提交前全量回归与生产发布门复核
 
+## 2026-11-12：提交推送与 GitHub CI 终态
+
+- 工作树已提交并推送到 `codex/prism-enterprise-billing`，代码提交 SHA `417ef5a1d5858a492006f85b9b2149a82ce34edb`；PR #4 保持 OPEN，未合并。首次提交时本地工作树干净。
+- 针对该 SHA 的 GitHub 前端完整测试/ESLint/构建、部署执行器/发布脚本回归、JavaScript/TypeScript 与 Python 单语言 CodeQL 均通过。
+- GitHub Advanced Security 聚合 CodeQL 检查失败，报告 18 条注解（2 critical、16 high），均映射到 `deploy/prism_sandbox_executor.py`。独立对照确认 `main` 对同一文件已有对应的 18 条告警，规则类别和数量一致；CodeQL 提示大改动可能把 PR 未引入的告警纳入；两条 Critical 命令调用经数据流审阅未发现可利用命令注入，但仍需完成正式告警 triage 并使必需检查通过。不能将 aggregate check 写作通过。
+- GitHub 后端全量测试使用隔离 Redis/MySQL 夹具；两个同 SHA 工作流在运行约 35 分钟后均被取消，测试步骤约运行 34 分 25 秒，未返回通过/失败摘要（job 配置上限为 35 分钟）。本机后端结果仍为 11,097 passed / 736 skipped / 0 failed，不能替代这次云端 MySQL 回归。
+- 生产未部署。生产健康接口最新仍为 `ready / 4.1.42 / a165f94ed4c208fb05251e4c7d12accb427c8ba3`。生产迁移 119 仍缺外部数据库写入者盘点及停写、生产备份隔离恢复、兼容回滚/前向恢复方案、维护窗口与业务冒烟证据；本地 SSH 盘点连接失败。
+
+
 - 后端全量：`backend/.venv/bin/python -m pytest -q`，**11,097 passed、736 skipped、0 failed**，85% 覆盖率，2,501 条警告，耗时 993.96 秒。MySQL 新库全链环境变量 `PRISM_FRESH_CHAIN_MYSQL_URL` 未配置且本机无可用 Docker daemon，因此跳过的数据库专项不算本轮全链验收。
 - 前端：**210 个测试文件、2,978 项通过**；ESLint 与 Vite 生产构建通过。部署回归：发布绑定 **41 项通过**，故障注入 **40 个场景通过**；`git diff --check` 通过。
 - 候选版本 `4.1.43`，当前代码仍为未提交工作树；GitHub PR #4 上可见的检查属于旧 SHA `2a429d45`，不是本轮最终内容，需提交推送后等待新 SHA 的 CI。
