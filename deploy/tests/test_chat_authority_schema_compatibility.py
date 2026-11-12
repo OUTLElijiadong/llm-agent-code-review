@@ -9,6 +9,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "lib"))
 from chat_authority_schema_compatibility import classify_schema, expected_triggers  # noqa: E402
 
 MIGRATION = pathlib.Path(__file__).resolve().parents[2] / "backend/alembic/versions/119_chat_message_authority.py"
+COMMON_SH = pathlib.Path(__file__).resolve().parents[1] / "lib/common.sh"
 
 
 def _snapshot(expected):
@@ -28,6 +29,11 @@ class ChatAuthoritySchemaCompatibilityTests(unittest.TestCase):
 
     def test_exact_mysql_trigger_bodies_match_migration(self):
         self.assertEqual(classify_schema(_snapshot(self.expected), self.expected), "complete")
+
+    def test_mysql_schema_probe_requests_utf8mb4_results(self):
+        common = COMMON_SH.read_text(encoding="utf-8")
+        query = common.split("checkpoint_database_query() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("--default-character-set=utf8mb4", query)
 
     def test_trigger_with_migration_keywords_inside_dead_branch_is_partial(self):
         snapshot = _snapshot(self.expected)

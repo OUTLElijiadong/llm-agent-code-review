@@ -272,7 +272,8 @@ checkpoint_database_query() {
   compose exec -T mysql sh -ec '
     MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql \
       --protocol=TCP -h 127.0.0.1 -uroot "$MYSQL_DATABASE" \
-      --connect-timeout=10 --batch --raw --skip-column-names -e "$1"
+      --default-character-set=utf8mb4 --connect-timeout=10 \
+      --batch --raw --skip-column-names -e "$1"
   ' _ "$1" 2>/dev/null
 }
 
