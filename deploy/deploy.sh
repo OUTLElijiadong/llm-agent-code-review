@@ -12,6 +12,7 @@ source "lib/common.sh"
 usage() {
   cat <<'USAGE'
 用法: ./deploy.sh [all] --revision <commit-ish>
+      ./deploy.sh all --revision <commit-ish> --confirm-no-external-chat-writers
 
 说明:
   - revision 会解析为完整 SHA，并且必须等于当前干净工作区 HEAD；脚本不 pull/reset。
@@ -19,12 +20,14 @@ usage() {
   - 发布前自动备份并验证恢复，随后由目标 Backend 镜像执行 Alembic。
   - 前端切换前自动同步 assets 卷，切换后检查同源 HTTPS。
   - 健康或冒烟失败时尝试切回 previous.env 记录的应用镜像，不自动降级数据库。
+  - 目标 head 为 119_chat_message_authority 时，须确认 Compose 外所有数据库写进程已停。
 USAGE
 }
 
 target="all"
 revision="HEAD"
 target_seen=0
+confirm_no_external_chat_writers=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     all|backend|frontend)
@@ -37,6 +40,10 @@ while [[ $# -gt 0 ]]; do
       [[ $# -ge 2 ]] || fatal "--revision 缺少值"
       revision="$2"
       shift 2
+      ;;
+    --confirm-no-external-chat-writers)
+      confirm_no_external_chat_writers=1
+      shift
       ;;
     -h|--help)
       usage
@@ -76,6 +83,10 @@ acquire_directory_lock "$lock_dir"
 rollback_ready=0
 deployment_mutated=0
 migration_attempted=0
+chat_authority_gate_active=0
+chat_authority_stop_attempted=0
+chat_authority_pre_migration_state="unknown"
+chat_authority_migration_verified=0
 failure_handled=0
 lock_released=0
 deploy_stage="preflight"
@@ -104,6 +115,7 @@ trap on_deploy_exit EXIT
 finish_deploy_failure() {
   local rc="$1"
   local reason="$2"
+  local chat_rollback_allowed=0 chat_running=""
   trap - ERR
   # -E 会把 ERR 传播进 $(...)。子 Shell 只把错误码交回主事务，
   # 不得提前释放共用维护锁或重复执行回滚。
@@ -115,7 +127,39 @@ finish_deploy_failure() {
   if [[ "$migration_attempted" == "1" ]]; then
     log_warn "数据库迁移已尝试，当前结构需核验；应用回滚不代表数据库已还原。备份: ${backup_file:-none}"
   fi
-  if [[ "$deployment_mutated" == "1" && "$rollback_ready" == "1" && -f "$previous_state" ]]; then
+  if [[ "$chat_authority_gate_active" == "1" ]]; then
+    if [[ "$migration_attempted" == "1" && "$chat_authority_migration_verified" != "1" ]]; then
+      log_warn "119 迁移结果未能证明完整；保持 Backend 停止，不自动启动旧/未知写入者，不降级数据库"
+    elif [[ "$migration_attempted" != "1" && "$chat_authority_stop_attempted" == "1" \
+      && "$chat_authority_pre_migration_state" == "absent" ]]; then
+      chat_rollback_allowed=1
+      log_warn "迁移尚未开始且数据库结构已确认未变化；可安全恢复上一应用镜像"
+    elif [[ "$chat_authority_migration_verified" == "1" && "$deployment_mutated" == "1" ]]; then
+      chat_authority_stop_attempted=1
+      if compose stop backend \
+        && chat_running="$(compose ps --status running --quiet backend 2>/dev/null)" \
+        && [[ -z "$(printf '%s' "$chat_running" | tr -d '[:space:]')" ]]; then
+        log_warn "119 数据库已验证；回滚前 Backend 写入者已全部停止，旧镜像仍须通过数据库兼容门"
+        chat_rollback_allowed=1
+      else
+        log_warn "无法确认 Backend 写入者已停止；禁止自动回滚并保持维护窗口"
+      fi
+    else
+      log_warn "小菱权限快照发布门未达到安全恢复条件；不启动回退镜像"
+    fi
+  fi
+  if [[ "$chat_authority_gate_active" == "1" ]]; then
+    if [[ "$chat_rollback_allowed" == "1" && "$rollback_ready" == "1" && -f "$previous_state" ]]; then
+      log_warn "开始受 119 兼容门保护的应用层自动回滚；数据库不会自动 downgrade/restore"
+      if ! ./rollback.sh "$target" --confirm ROLLBACK_APPLICATION --from-deploy-failure; then
+        log_warn "应用自动回滚失败；Backend 保持停止，请核验当前结构并前向修复"
+      else
+        log_info "兼容门允许的应用层回滚完成；仍需核对公网业务冒烟"
+      fi
+    elif [[ "$chat_rollback_allowed" == "1" ]]; then
+      log_warn "没有可验证的上一镜像；Backend 保持停止，pending 状态保留"
+    fi
+  elif [[ "$deployment_mutated" == "1" && "$rollback_ready" == "1" && -f "$previous_state" ]]; then
     log_warn "开始应用层自动回滚；数据库不会自动 downgrade/restore"
     if ! ./rollback.sh "$target" --confirm ROLLBACK_APPLICATION --from-deploy-failure; then
       log_warn "应用自动回滚失败，请保持维护窗口并人工检查 current/previous/pending 状态"
@@ -250,11 +294,125 @@ if [[ "$target" == "all" || "$target" == "backend" ]]; then
   compose build backend
   deploy_stage="migration_preflight"
   prepare_admin_alembic
+  chat_target_119_relation="$(python3 "$repo_dir/deploy/lib/alembic_revision_compatibility.py" \
+    "$repo_dir/backend/alembic/versions" "$MIGRATION_ALEMBIC_HEAD" "119_chat_message_authority")" \
+    || fatal "无法确认目标 Alembic head 与 119 聊天权限迁移的关系"
+  case "$chat_target_119_relation" in
+    compatible)
+    deploy_stage="chat_authority_preflight"
+    chat_authority_gate_active=1
+    chat_db_revision="$(current_alembic_revision)"
+    if [[ "$chat_db_revision" == ambiguous ]]; then
+      chat_authority_pre_migration_state="ambiguous_revision"
+      stop_chat_authority_writers
+      fatal "alembic_version 包含多个 current revision；Backend 保持停止，拒绝迁移"
+    fi
+    if [[ "$chat_db_revision" == unknown ]]; then
+      chat_authority_pre_migration_state="unreadable_revision"
+      stop_chat_authority_writers
+      fatal "无法读取当前 Alembic revision；Backend 保持停止，拒绝处理 119 聊天权限迁移"
+    fi
+    if ! chat_schema_state="$(chat_authority_database_state)"; then
+      chat_authority_pre_migration_state="unreadable_schema"
+      stop_chat_authority_writers
+      fatal "无法读取 119 聊天权限结构；Backend 保持停止，拒绝切换应用"
+    fi
+    if ! chat_revision_relation="$(python3 "$repo_dir/deploy/lib/alembic_revision_compatibility.py" \
+      "$repo_dir/backend/alembic/versions" "$MIGRATION_ALEMBIC_HEAD" "$chat_db_revision")"; then
+      chat_authority_pre_migration_state="unknown_revision_chain"
+      stop_chat_authority_writers
+      fatal "无法确认数据库 revision 与目标迁移链关系；Backend 保持停止，拒绝切换应用"
+    fi
+    if [[ "$chat_schema_state" == partial ]]; then
+      stop_chat_authority_writers
+      fatal "检测到 119 聊天权限结构部分存在；Backend 保持停止，需核验后前向修复"
+    fi
+    if [[ "$chat_revision_relation" != compatible ]]; then
+      fatal "当前数据库 revision 不在目标迁移 head 的祖先链上；拒绝使用旧/分叉迁移目标"
+    fi
+    chat_database_119_relation="$(python3 "$repo_dir/deploy/lib/alembic_revision_compatibility.py" \
+      "$repo_dir/backend/alembic/versions" "$chat_db_revision" "119_chat_message_authority")" \
+      || fatal "无法确认数据库是否已经跨过迁移 119"
+    if { [[ "$chat_database_119_relation" == compatible && "$chat_schema_state" != complete ]] \
+      || [[ "$chat_database_119_relation" == descendant && "$chat_schema_state" != absent ]] \
+      || [[ "$chat_database_119_relation" == incompatible ]]; }; then
+      stop_chat_authority_writers
+      fatal "Alembic revision 与 119 列/触发器结构不一致；Backend 保持停止，需前向核验"
+    fi
+    [[ "$confirm_no_external_chat_writers" == "1" ]] \
+      || fatal "目标 head 为 119；确认 Compose 外所有数据库写进程已停后，显式传入 --confirm-no-external-chat-writers"
+    assert_chat_authority_image_compatible "$MIGRATION_BACKEND_IMAGE_ID"
+    stop_chat_authority_writers
+    chat_db_revision="$(current_alembic_revision)"
+    [[ "$chat_db_revision" != unknown ]] \
+      || fatal "Compose 写入者停止后仍无法读取 Alembic revision；Backend 保持停止"
+    chat_schema_state="$(chat_authority_database_state)" \
+      || fatal "Compose 写入者停止后无法读取 119 聊天权限结构；Backend 保持停止"
+    chat_revision_relation="$(python3 "$repo_dir/deploy/lib/alembic_revision_compatibility.py" \
+      "$repo_dir/backend/alembic/versions" "$MIGRATION_ALEMBIC_HEAD" "$chat_db_revision")" \
+      || fatal "停写后无法确认数据库 revision 与目标迁移链关系；Backend 保持停止"
+    [[ "$chat_revision_relation" == compatible ]] \
+      || fatal "停写后数据库已前进到目标 head 之外；Backend 保持停止并拒绝降级应用"
+    chat_database_119_relation="$(python3 "$repo_dir/deploy/lib/alembic_revision_compatibility.py" \
+      "$repo_dir/backend/alembic/versions" "$chat_db_revision" "119_chat_message_authority")" \
+      || fatal "停写后无法确认数据库是否已经跨过迁移 119；Backend 保持停止"
+    if [[ "$chat_database_119_relation" == compatible && "$chat_schema_state" == complete ]]; then
+      chat_authority_pre_migration_state="complete"
+      chat_authority_migration_verified=1
+    elif [[ "$chat_database_119_relation" == descendant && "$chat_schema_state" == absent ]]; then
+      chat_authority_pre_migration_state="absent"
+    else
+      fatal "Alembic revision 与 119 列/触发器状态不一致或迁移部分完成；Backend 保持停止，需前向核验"
+    fi
+    ;;
+    descendant)
+    deploy_stage="pre_119_compatibility_preflight"
+    chat_db_revision="$(current_alembic_revision)"
+    if [[ "$chat_db_revision" == ambiguous ]]; then
+      chat_authority_gate_active=1
+      chat_authority_pre_migration_state="ambiguous_revision"
+      stop_chat_authority_writers
+      fatal "alembic_version 包含多个 current revision；Backend 保持停止，拒绝部署旧迁移目标"
+    fi
+    [[ "$chat_db_revision" != unknown ]] \
+      || fatal "无法读取当前 Alembic revision，拒绝向旧迁移目标发布"
+    chat_schema_state="$(chat_authority_database_state)" \
+      || fatal "无法读取 119 聊天权限结构，拒绝向旧迁移目标发布"
+    if [[ "$chat_schema_state" == partial ]]; then
+      chat_authority_gate_active=1
+      chat_authority_pre_migration_state="partial"
+      stop_chat_authority_writers
+      fatal "旧迁移目标发现 119 物理结构部分存在；Backend 保持停止，需前向核验"
+    fi
+    chat_revision_relation="$(python3 "$repo_dir/deploy/lib/alembic_revision_compatibility.py" \
+      "$repo_dir/backend/alembic/versions" "$MIGRATION_ALEMBIC_HEAD" "$chat_db_revision")" \
+      || fatal "无法核对数据库 revision 与旧迁移目标的先后关系"
+    [[ "$chat_revision_relation" == compatible ]] \
+      || fatal "数据库 revision 已领先或偏离旧迁移目标；拒绝启动不兼容 Backend"
+    if [[ "$chat_schema_state" != absent ]]; then
+      chat_authority_gate_active=1
+      chat_authority_pre_migration_state="$chat_schema_state"
+      stop_chat_authority_writers
+      fatal "旧迁移目标与 119 物理结构不一致；Backend 保持停止，需前向核验"
+    fi
+    ;;
+    *)
+      fatal "目标 Alembic head 与迁移 119 不在同一已知链上，拒绝绕过写入保护"
+      ;;
+  esac
   deploy_stage="migration"
   migration_attempted=1
   run_admin_alembic upgrade head
   deploy_stage="migration_verify"
   assert_alembic_at_head || fatal "Alembic 未位于唯一 head"
+  if [[ "$chat_authority_gate_active" == "1" ]]; then
+    chat_schema_state="$(chat_authority_database_state)" \
+      || fatal "迁移后无法确认 119 聊天权限结构；Backend 保持停止"
+    [[ "$chat_schema_state" == complete ]] \
+      || fatal "迁移后 119 聊天权限列/触发器不完整；Backend 保持停止并前向修复"
+    assert_chat_authority_image_compatible "$MIGRATION_BACKEND_IMAGE_ID"
+    chat_authority_migration_verified=1
+  fi
   # GeoLite2 以只读 bind 挂载进容器，而后端以非 root(prism, uid 10001)运行；
   # 宿主机文件若属主 501 且权限 640，容器内将 Permission denied，导致
   # /overview/geo 登录来源地图全部定位失败返回空。此处强制放开为 644 防复发。

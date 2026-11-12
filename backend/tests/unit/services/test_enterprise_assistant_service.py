@@ -30,16 +30,17 @@ from app.models.billing_ledger import (
 )
 from app.models.enterprise_chat import EnterpriseAssistantRun, EnterpriseChatMessage, EnterpriseConversation
 from app.models.enterprise_knowledge import EnterpriseKnowledgeEntry
-from app.models.enterprise_org import Enterprise, EnterpriseMember
+from app.models.enterprise_org import Enterprise, EnterpriseGroup, EnterpriseGroupMember, EnterpriseMember
 from app.models.user import User
 from app.services import billing_ledger_service
 from app.services import enterprise_assistant_service as assistant
 
 
-def test_enterprise_answer_uses_company_wallet_and_duplicate_is_idempotent(monkeypatch):
+def test_enterprise_group_answer_uses_company_wallet_and_duplicate_is_idempotent(monkeypatch):
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     tables = [
-        User.__table__, Enterprise.__table__, EnterpriseMember.__table__, EnterpriseConversation.__table__,
+        User.__table__, Enterprise.__table__, EnterpriseMember.__table__, EnterpriseGroup.__table__,
+        EnterpriseGroupMember.__table__, EnterpriseConversation.__table__,
         EnterpriseAssistantRun.__table__, EnterpriseChatMessage.__table__, EnterpriseKnowledgeEntry.__table__,
         BillingWallet.__table__, BillingCreditBatch.__table__, BillingLimit.__table__,
         BillingReservation.__table__, BillingReservationPart.__table__, BillingReservationLimit.__table__,
@@ -64,6 +65,8 @@ def test_enterprise_answer_uses_company_wallet_and_duplicate_is_idempotent(monke
         db.add_all([
             EnterpriseMember(enterprise_id=10, user_id=1, role="owner", status="active"),
             EnterpriseMember(enterprise_id=10, user_id=2, role="member", status="active"),
+            EnterpriseGroup(id=100, enterprise_id=10, name="研发", status="active"),
+            EnterpriseGroupMember(enterprise_id=10, group_id=100, user_id=2, role="member", status="active"),
         ])
         order = BillingOrder(order_no="enterprise-paid", user_id=1, enterprise_id=10, product="enterprise",
                              amount_fen=6900, quantity=1, channel="alipay", status="paid")
@@ -78,8 +81,8 @@ def test_enterprise_answer_uses_company_wallet_and_duplicate_is_idempotent(monke
         db.add(BillingSubscriptionPeriod(subscription_id=subscription.id, order_no=order.order_no,
                                          starts_at=now - timedelta(days=1), ends_at=now + timedelta(days=30),
                                          credit_milli=1_000_000, seats=5, granted_at=now))
-        room = EnterpriseConversation(enterprise_id=10, kind="company", conversation_key="company",
-                                      created_by=1)
+        room = EnterpriseConversation(enterprise_id=10, kind="group", conversation_key="group:100",
+                                      group_id=100, created_by=1)
         db.add(room)
         wallet = BillingWallet(owner_type="enterprise", owner_id=10)
         db.add(wallet)
@@ -202,7 +205,7 @@ def test_enterprise_answer_uses_company_wallet_and_duplicate_is_idempotent(monke
         with factory() as db:
             reservation = db.query(BillingReservation).one()
             assert reservation.enterprise_id == 10 and reservation.user_id == 2
-            assert reservation.group_id is None and reservation.personal_wallet_id is None
+            assert reservation.group_id == 100 and reservation.personal_wallet_id is None
             assert reservation.status == "settled"
             assert reservation.input_tokens == 20 and reservation.output_tokens == 12
             assert reservation.actual_milli == billing_ledger_service.quote_milli("deepseek-v4-flash", 20, 12)

@@ -97,12 +97,11 @@ def test_mysql_team_budget_holds_each_accounting_lock_until_commit(fresh_chain, 
 
 def _pending(engine, monkeypatch, key):
     monkeypatch.setattr("app.services.enterprise_org_service._billing_access_suspended", lambda *a, **k: False)
-    maker, eid, rid, actor, _ = _setup(engine, key)
+    maker, eid, rid, actor, _ = _setup(engine, key, prior_directive=True)
     with maker.begin() as db:
         run = db.query(EnterpriseAssistantRun).filter_by(enterprise_id=eid, conversation_id=rid).one()
         state = db.query(EnterpriseAssistantRuntimeState).filter_by(assistant_run_id=run.id).one()
         prior = db.query(EnterpriseChatMessage).filter_by(conversation_id=rid, sender_id=actor).one()
-        prior.content = "@小菱 不要创建团队"
         room = db.get(EnterpriseConversation, rid)
         messages = (
             db.query(EnterpriseChatMessage).filter_by(conversation_id=rid).order_by(EnterpriseChatMessage.id).all()

@@ -3,16 +3,24 @@
 import asyncio
 import json
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import httpx
 import pytest
 from sqlalchemy import event
 from sqlalchemy.orm import sessionmaker
 
+from app.core.exceptions import ForbiddenError
 from app.models.billing_ledger import BillingLimit, BillingReservation, BillingToolExecutionResult
+from app.models.enterprise_chat import EnterpriseConversation
+from app.models.enterprise_org import Enterprise, EnterpriseGroup, EnterpriseGroupMember, EnterpriseMember
+from app.models.user import User
 from app.services import billing_ledger_service as ledger
 from app.services import billing_rate_catalog_service as catalog
 from app.services import billing_search_fetch_service as service
+from app.services import enterprise_assistant_billing_group as billing_group
+from app.services import enterprise_assistant_runtime_service as runtime
+from app.services import enterprise_org_service
 from app.services.billing_ledger_service import get_or_create_wallet, grant
 
 NOW = datetime(2026, 11, 7, 6, 0, tzinfo=timezone.utc)
@@ -256,6 +264,92 @@ def test_final_authorization_failure_releases_as_not_sent_without_http(db, monke
     assert len(calls) == 0
     row = _reservation(factory, "search-revoked")
     assert (row.status, row.usage_state, row.provider_attempt_started_at) == ("released", "not_sent", None)
+
+
+@pytest.mark.parametrize("room_kind", ["company", "direct"])
+def test_default_group_aba_before_search_fetch_send_marker_releases_frozen_group(
+    db, monkeypatch, room_kind,
+):
+    """The child tool must reject a changed default group before its one-way send marker."""
+    monkeypatch.setattr(runtime, "_CROSS_SCOPE_ATTRIBUTION_VERIFIED", True)
+    conversation_id = 70 if room_kind == "company" else 71
+    conversation_key = "company" if room_kind == "company" else "direct:41:42"
+    db.add_all([
+        User(id=41, username="search-fetch-owner", password="x", role="user", status=1),
+        User(id=42, username="search-fetch-member", password="x", role="user", status=1),
+        Enterprise(id=7, name="Search Fetch 企业", owner_id=41, seat_limit=5, status="active",
+                   paid_order_id="search-fetch-enterprise"),
+        EnterpriseMember(enterprise_id=7, user_id=41, role="owner", status="active"),
+        EnterpriseMember(enterprise_id=7, user_id=42, role="member", status="active",
+                         default_group_id=9, billing_group_version=5),
+        EnterpriseGroup(id=9, enterprise_id=7, name="A 组", status="active"),
+        EnterpriseGroup(id=10, enterprise_id=7, name="B 组", status="active"),
+        EnterpriseGroupMember(enterprise_id=7, group_id=9, user_id=42, role="member", status="active"),
+        EnterpriseGroupMember(enterprise_id=7, group_id=10, user_id=42, role="member", status="active"),
+        EnterpriseConversation(id=conversation_id, enterprise_id=7, kind=room_kind,
+                               conversation_key=conversation_key,
+                               participant_low_id=41 if room_kind == "direct" else None,
+                               participant_high_id=42 if room_kind == "direct" else None,
+                               created_by=41),
+    ])
+    db.flush()
+    factory, wallet_id = _prepare(db, monkeypatch)
+    with factory.begin() as session:
+        snapshot = billing_group.capture(
+            session, enterprise_id=7, user_id=42, conversation_id=conversation_id,
+        )
+    assert snapshot.group_id == 9
+    run = SimpleNamespace(
+        enterprise_id=7,
+        initiator_user_id=42,
+        conversation_id=conversation_id,
+        group_id=None,
+        billing_attribution_version=1,
+        billing_group_id=9,
+        billing_membership_version=snapshot.membership_version,
+        billing_user_token_version=snapshot.user_token_version,
+    )
+    calls = _patch_transport(monkeypatch, httpx.Response(200, json={"results": []}))
+    checks = 0
+
+    def authorize(session):
+        nonlocal checks
+        checks += 1
+        if checks == 2:
+            # Commit a real A→B→A change in an independent transaction after
+            # reservation but before the tool's final authorization check.
+            with factory.begin() as mutation_session:
+                enterprise_org_service.set_default_group(
+                    mutation_session, 7, actor_id=41, user_id=42, group_id=10,
+                )
+                enterprise_org_service.set_default_group(
+                    mutation_session, 7, actor_id=41, user_id=42, group_id=9,
+                )
+        assert billing_group.validate(session, run) == 9
+
+    with pytest.raises(ForbiddenError, match="计费归属已变化"):
+        asyncio.run(service.execute_tool(
+            session_factory=factory,
+            request_key=f"search-fetch-default-group-aba-{room_kind}",
+            tool_name="search",
+            arguments={"query": "默认小组切换竞态"},
+            user_id=42,
+            enterprise_id=7,
+            enterprise_wallet_id=wallet_id,
+            group_id=9,
+            authorize=authorize,
+            **PROVIDER,
+        ))
+
+    assert checks == 2
+    assert calls == []
+    row = _reservation(factory, f"search-fetch-default-group-aba-{room_kind}")
+    assert (row.group_id, row.status, row.usage_state, row.provider_attempt_started_at) == (
+        9, "released", "not_sent", None,
+    )
+    with factory() as session:
+        member = session.query(EnterpriseMember).filter_by(enterprise_id=7, user_id=42).one()
+        assert (member.default_group_id, member.billing_group_version) == (9, 7)
 
 
 def test_authorization_is_rechecked_after_provider_response_before_settlement(db, monkeypatch):

@@ -138,8 +138,7 @@ def test_legacy_uncertain_enterprise_refund_blocks_only_its_own_members(
         companies.append((company, order))
     db.commit()
     company, order = companies[0]
-    refund = checkout.request_refund(db, order_no=order.order_no, requester_id=buyer.id,
-                                     reason="退款", enterprise_admin_authorized=True)
+    refund = checkout.request_refund(db, order_no=order.order_no, requester_id=buyer.id, reason="退款")
     checkout.review_manual_refund(db, refund_no=refund.refund_no, admin_id=777,
                                   decision="approve", reason="核验", now=now)
     checkout.prepare_refund(db, refund_no=refund.refund_no, admin_id=1777)
@@ -1221,7 +1220,7 @@ def test_refunding_current_enterprise_renewal_restores_prior_valid_seats(db, buy
     assert current.granted_at is not None and company.seat_limit == 5
 
     refund = checkout.request_refund(
-        db, order_no=renewal.order_no, requester_id=buyer.id, reason="新周期撤销", enterprise_admin_authorized=True,
+        db, order_no=renewal.order_no, requester_id=buyer.id, reason="新周期撤销",
     )
     db.commit()
     checkout.review_manual_refund(
@@ -1519,7 +1518,7 @@ def test_refunded_initial_enterprise_is_billing_suspended_and_can_renew(db, buye
     db.add(EnterpriseMember(enterprise_id=company.id, user_id=employee.id, role="member", status="active"))
     db.commit()
     refund = checkout.request_refund(
-        db, order_no=create.order_no, requester_id=buyer.id, reason="企业创建退款", enterprise_admin_authorized=True,
+        db, order_no=create.order_no, requester_id=buyer.id, reason="企业创建退款",
     )
     db.commit()
 

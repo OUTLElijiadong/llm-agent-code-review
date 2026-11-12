@@ -37,7 +37,13 @@ from app.models.enterprise_asset import (
 )
 from app.models.enterprise_assistant_runtime import EnterpriseAssistantRuntimeState
 from app.models.enterprise_chat import EnterpriseAssistantRun, EnterpriseConversation
-from app.models.enterprise_org import Enterprise, EnterpriseAuditEvent, EnterpriseMember
+from app.models.enterprise_org import (
+    Enterprise,
+    EnterpriseAuditEvent,
+    EnterpriseGroup,
+    EnterpriseGroupMember,
+    EnterpriseMember,
+)
 from app.models.user import User
 from app.services import billing_reservation_reconciliation_service as reconciliation
 from app.services import enterprise_asset_service as assets
@@ -50,6 +56,7 @@ def asset_runtime(monkeypatch):
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     tables = [
         User.__table__, Enterprise.__table__, EnterpriseMember.__table__, EnterpriseAuditEvent.__table__,
+        EnterpriseGroup.__table__, EnterpriseGroupMember.__table__,
         EnterpriseConversation.__table__, EnterpriseAssistantRun.__table__,
         EnterpriseAssistantRuntimeState.__table__, EnterpriseAssetDraft.__table__,
         EnterpriseAssetDraftVersion.__table__, EnterpriseAssetPublication.__table__,
@@ -882,6 +889,90 @@ def test_publication_revoked_before_billing_authorization_never_calls_provider(a
         assert current_publication.status == "revoked"
         assert invocation.status == "suppressed"
         assert invocation.output_text is None
+    engine.dispose()
+
+
+@pytest.mark.parametrize("room_kind", ["company", "direct"])
+def test_default_group_aba_before_asset_stream_send_blocks_provider_and_freezes_hold_for_review(
+    asset_runtime, monkeypatch, room_kind,
+):
+    from app.services import billing_runtime_gate, enterprise_org_service
+    from app.services import enterprise_assistant_runtime_service as assistant_runtime
+
+    engine, factory, publication, executor = asset_runtime
+    monkeypatch.setattr(assistant_runtime, "_CROSS_SCOPE_ATTRIBUTION_VERIFIED", True)
+    with factory.begin() as db:
+        db.add_all([
+            EnterpriseGroup(id=900, enterprise_id=10, name="资产 A 组", status="active"),
+            EnterpriseGroup(id=901, enterprise_id=10, name="资产 B 组", status="active"),
+            EnterpriseGroupMember(enterprise_id=10, group_id=900, user_id=2,
+                                  role="member", status="active"),
+            EnterpriseGroupMember(enterprise_id=10, group_id=901, user_id=2,
+                                  role="member", status="active"),
+            BillingLimit(
+                limit_key="asset-default-group-aba", enterprise_id=10, category="normal",
+                group_id=900, user_id=2, period_start=datetime.now(timezone.utc).replace(tzinfo=None)
+                - timedelta(days=1),
+                period_end=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=30),
+                limit_milli=1_000_000, used_milli=0, reserved_milli=0,
+            ),
+        ])
+        member = db.query(EnterpriseMember).filter_by(enterprise_id=10, user_id=2).one()
+        member.default_group_id = 900
+        member.billing_group_version = 5
+        run = db.query(EnterpriseAssistantRun).filter_by(public_id="ear_asset_invocation").one()
+        run.billing_attribution_version = 1
+        run.billing_group_id = 900
+        run.billing_membership_version = 5
+        run.billing_user_token_version = int(db.get(User, 2).token_version)
+        room = db.query(EnterpriseConversation).filter_by(id=20).one()
+        room.kind = room_kind
+        room.participant_low_id = 1 if room_kind == "direct" else None
+        room.participant_high_id = 2 if room_kind == "direct" else None
+
+    original_before_send = billing_runtime_gate.before_stream_send
+
+    def move_group_before_final_authorization(ticket):
+        if ticket is not None:
+            with factory.begin() as mutation_db:
+                enterprise_org_service.set_default_group(
+                    mutation_db, 10, actor_id=1, user_id=2, group_id=901,
+                )
+                enterprise_org_service.set_default_group(
+                    mutation_db, 10, actor_id=1, user_id=2, group_id=900,
+                )
+        return original_before_send(ticket)
+
+    monkeypatch.setattr(billing_runtime_gate, "before_stream_send", move_group_before_final_authorization)
+    provider_calls = []
+
+    async def fake_stream(self, payload):
+        provider_calls.append(payload)
+        yield {
+            "type": "response.completed",
+            "response": {
+                "status": "completed", "model": payload["model"],
+                "output": [{"type": "message", "content": [{"type": "output_text", "text": "不应发出"}]}],
+                "usage": {"input_tokens": 10, "output_tokens": 4},
+            },
+        }
+
+    monkeypatch.setattr(runtime.NativeResponsesTransport, "_stream_without_billing", fake_stream)
+    result = asyncio.run(executor.execute(_call(
+        publication.id, call_id=f"asset-default-group-aba-{room_kind}",
+    )))
+
+    assert provider_calls == []
+    assert result.status == "error"
+    with factory() as db:
+        reservation = db.query(BillingReservation).one()
+        invocation = db.query(EnterpriseAssistantAssetInvocation).one()
+        member = db.query(EnterpriseMember).filter_by(enterprise_id=10, user_id=2).one()
+        assert (reservation.group_id, reservation.status, reservation.usage_state,
+                reservation.provider_attempt_started_at) == (900, "unknown", "unknown", None)
+        assert (invocation.status, invocation.error_code) == ("unknown", "ForbiddenError")
+        assert invocation.output_text is None
+        assert (member.default_group_id, member.billing_group_version) == (900, 7)
     engine.dispose()
 
 

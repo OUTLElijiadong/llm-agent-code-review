@@ -1,5 +1,23 @@
 # 验收记录：企业与计费体系
 
+## 2026-11-12：提交前全量回归与生产发布门复核
+
+- 后端全量：`backend/.venv/bin/python -m pytest -q`，**11,097 passed、736 skipped、0 failed**，85% 覆盖率，2,501 条警告，耗时 993.96 秒。MySQL 新库全链环境变量 `PRISM_FRESH_CHAIN_MYSQL_URL` 未配置且本机无可用 Docker daemon，因此跳过的数据库专项不算本轮全链验收。
+- 前端：**210 个测试文件、2,978 项通过**；ESLint 与 Vite 生产构建通过。部署回归：发布绑定 **41 项通过**，故障注入 **40 个场景通过**；`git diff --check` 通过。
+- 候选版本 `4.1.43`，当前代码仍为未提交工作树；GitHub PR #4 上可见的检查属于旧 SHA `2a429d45`，不是本轮最终内容，需提交推送后等待新 SHA 的 CI。
+- 生产只读 `/readyz` 返回 `ready / 4.1.42 / a165f94ed4c208fb05251e4c7d12accb427c8ba3`。本次没有部署或修改生产。尝试对历史 SSH 主机做只读盘点时，连接在 SSH 端口被关闭，未获得当前生产主机证据。
+- 生产门仍未满足：迁移 119 前 Compose 外写入者清单和停写证据、生产备份的隔离恢复演练、迁移后的兼容回滚/前向恢复方案、维护窗口及生产业务冒烟尚未核验。旧生产镜像 4.1.42 不支持迁移 119；新镜像失败时部署逻辑会保持 Backend 停止，而不启动不兼容旧镜像。真实浏览器角色验收、商户沙箱和生产迁移亦未完成。
+
+这些是工作树本地自动化与只读生产观察记录；不等于 GitHub CI、生产恢复能力或线上业务验收。
+
+
+## 2026-11-09：企业聊天摘要与个人渗透项目绑定门
+
+- 会话列表 API 在服务端先完成企业/小组/私聊可见性过滤，再按最多 500 个会话 ID 一批聚合读取最新消息；响应增加可选摘要、发送者、消息 ID 和时间，原会话与消息详情接口兼容。前端按最近消息时间排序，显示真实摘要和时间，移除重复类型标签；40360 明确显示计费尚未就绪，不再建议稍后重试。
+- 复现了持久执行 staging 关闭时，已启动并取消的旧个人渗透任务仍可绑定企业项目。绑定现在始终核验终止证据；活动或未知状态拒绝。没有运行记录且没有启动时间的未启动草稿/申请仍可绑定；已授权任务须先取消授权。历史运行缺少父线程/子活动/沙箱回执时保持待核查。
+- 修复后个人渗透绑定、执行证据和企业项目策略组合 **86 项通过**；企业沟通前端 **78 项通过**，`vue-tsc --noEmit` 通过；企业聊天 service **12 项通过**。拒绝绑定用例先以旧代码复现为未抛预期 `ConflictError`，修复后在 86 项组合中通过。随后合并重跑相关后端模块 **98 项通过**；目标 Ruff 全部通过。
+- UX/DX/AX：会话列表用真实授权数据识别对话；前端消费可选字段且旧响应可读；后端只对通过资源授权过滤的会话读取摘要。本地自动化不代表真实浏览器或生产验收。生产仍为 4.1.42，本轮未操作生产数据库、商户或真实角色账号。
+
 ## 2026-11-09：Linux CI 复现、修复与预览 RPC 边界
 
 - GitHub 对候选 SHA `3bca80e` 的部署回归在 Linux 失败。复现确认 `cleanup.sh` 的只读全局变量 `proc_root` 与公共锁函数的同名局部变量冲突；初次修复遗漏引用已由 Linux 回归捕获并修正。首次修复提交的 Linux `deploy/tests` 为 **225 通过、2 跳过**。本轮追加 fake `/proc/<pid>/stat` 与 `boot_id` 的锁身份回归后，Mac 完整 `deploy/tests` 为 **224 通过、3 跳过**；当前这一最终 follow-up 尚待 GitHub Linux job 验证。
@@ -566,4 +584,118 @@
 - 后端结果可用 `cd backend && .venv/bin/pytest -q --no-cov tests/unit/api/test_enterprise_clarification_routes.py tests/unit/services/test_enterprise_assistant_clarification_records.py tests/unit/services/test_enterprise_assistant_clarification_authority_version.py tests/unit/services/test_enterprise_assistant_clarification_open_gaps.py tests/unit/services/test_enterprise_assistant_team_clarification.py` 重现；结果为 79 passed、3 warnings。
 - 更高权限者的复核仍要求当前会话成员有效、权限级别高于原作者及上一决议人；同级不能覆盖较高复核。决议审计只追加不改写，复核者角色降级再恢复后旧证据失效。
 - 更高权限复核是可行的纠正路径，不是每条较低/同级 `allow` 的强制二次审批；但已识别的更高权限候选需独立决议，不能由低权候选替代。组合候选回归确认低权 `allow` 后原发起人恢复仍返回 `awaiting_clarification/waiting`；高权最终拒绝后返回 `awaiting_clarification/denied`。
-- 这是决议优先级的局部修复。代码尚未推送、尚未进入 CI；未扩展自然语言冲突覆盖范围、未解除公司/私聊跨空间计费门，也不是企业/小菱运行的全部副作用门禁验收。
+- 这是决议优先级的局部修复，已推送至 PR #4，提交 `2a429d45318f384e2dc71f28dc6defc8aba48ce5`。该提交的前端、部署执行器、CodeQL Python 与 JavaScript 工作流均通过；后端全量回归在 workflow 配置的 35 分钟超时点被取消，没有得到测试结论。aggregate `CodeQL` 检查因变更文件告警失败，并报告 18 条新告警（2 critical、16 high）；不能称为远端 CI 通过。当前工作树新补丁尚未提交或推送，不属于该 SHA 的检查结果。未扩展自然语言冲突覆盖范围、未解除公司/私聊跨空间计费门，也不是企业/小菱运行的全部副作用门禁验收。
+
+## 2026-11-09：退款、企业小菱授权与团队执行锁序复核
+
+- 通过新事务快照无锁预检，未获委任的请求在查退款号前即拒绝；企业订阅退款服务在订单与企业行之后仍锁定复核账号、RBAC、委任和令牌版本，保留撤权竞态防护；企业积分退款不经过企业订阅锁序。团队执行、主运行和其他共用 `_require_subscription()` 的企业小菱路径均使用当前订阅读取；团队 MySQL 测试只验证计费 guard，角色快照和额度读取为替身。
+- 当前订阅积分批次上存在 `reserved` 或 `unknown` 的 reservation 时，人工批准退款会被拒绝；未来续费退款不会撤销当前有效周期授权。测试先后触发批次账本一致性拒绝，未单独命中新加的企业范围 reservation 兜底查询。支付订单仍保留创建时冻结金额，付款/退款边界未改为外部网络原子操作。
+- 计费服务、订单 API、退款复核 API 与团队运行单测组合 **163 项通过、3 条既有弃用警告**。复跑方式：`cd backend && .venv/bin/pytest -q --no-cov tests/unit/services/test_billing_checkout_service.py tests/unit/api/test_billing_orders_api.py tests/unit/api/test_billing_refund_review_api.py tests/unit/services/test_enterprise_agent_team_runtime_service.py`。
+- 一次性隔离 MySQL 8.0.45 上，退款与团队锁序三组测试共 **29 项通过、18 条既有弃用警告**。复跑方式：设置 `PRISM_FRESH_CHAIN_MYSQL_URL` 指向测试专用空库后，执行 `cd backend && .venv/bin/pytest -q --no-cov tests/test_mysql_enterprise_billing_auth_protocol_probe.py tests/test_mysql_enterprise_send_lock_probe.py tests/test_mysql_enterprise_team_lock_order_repair.py`。结果验证 InnoDB 实际锁等待、退款 writer 对企业行的串行化、当前订阅批次的 `reserved/unknown` 均拒绝批准、旧快照被新快照拒绝，以及未来周期退款保留当前授权；不是商户、模型供应商或生产验收。
+- 真实模型/工具外呼、支付宝/微信商户沙箱、浏览器多账号、生产迁移/恢复/部署仍未验收；跨空间小菱计费门保持关闭，不能以本地事务回归开放销售。
+
+## 2026-11-09：后到权限指令使旧澄清失效
+
+- 冻结上下文之后，其他会话成员发送时权限同级或更高的显式 `@小菱` 时，不把新消息塞入旧澄清候选；旧澄清返回 `stale`，禁止继续决议、恢复、创建旧运行的新澄清或模型发送。迁移 119 让新消息的权限等级由服务端随消息一起写入并不可变；低权限成员和发起人自己的后续消息不触发失效。候选仍限来源消息之前的冻结历史。
+- 锁序沿用企业当前行在先；在该锁保护下读取后到人类 `@小菱` 消息。回归覆盖指令事务先提交后状态失效、检查持锁时并发消息等待、提交后再次检查失效、失效运行不能创建新澄清、消息作者后来撤权仍保持失效，以及普通权限消息和发起人自己的后续消息不触发失效。迁移前旧聊天消息因没有权限快照而按检查时当前权限兼容判断；没有或损坏运行冻结快照时服务失败关闭。
+- 本轮本地目标组合 **306 项通过、21 条既有弃用警告**；覆盖账单/退款/团队/聊天服务、澄清记录/权限版本/模型发送/工具门、迁移 068/083/119 与 5 个企业 MySQL 模块。MySQL 8.0.45 全链夹具升至 Alembic head `119_chat_message_authority`；另验证 117 历史数据升级至 head 119 后旧澄清保持 stale。复跑文件：`tests/unit/services/test_billing_checkout_service.py`、`tests/unit/api/test_billing_orders_api.py`、`tests/unit/api/test_billing_refund_review_api.py`、`tests/unit/services/test_enterprise_agent_team_runtime_service.py`、`tests/unit/services/test_enterprise_chat_service.py`、澄清服务/权限/模型发送/团队澄清四组单测、`tests/unit/test_migration_{119_chat_message_authority,083_manual_refund_review,068_enterprise_chat}.py`、`tests/test_mysql_enterprise_{assistant_clarification,billing_auth_protocol_probe,send_lock_probe,team_lock_order_repair,chat_authority}.py` 与 `tests/test_mysql_clarification_legacy_migration_118.py`。隔离 MySQL 测试需令 `PRISM_FRESH_CHAIN_MYSQL_URL` 指向一次性空库并设置 `PRISM_FRESH_CHAIN_REQUIRED=1`。
+- 目标业务源码、新增 119 迁移及对应目标测试 Ruff 通过；涉及 Python 文件 `py_compile` 通过，`git diff --check` 通过。未执行真实模型、支付渠道或生产环境验收。
+- 本结果是本地自动化和隔离数据库证据，不表示真实模型、商户渠道、生产数据库、真实账号浏览器、部署或完整自由文本冲突检测已验收；支付销售锁与公司/私聊跨空间计费门仍按原约束保持关闭。
+
+## 2026-11-09：退款复核范围与指令消息快照复核
+
+- 明确 C4 专指模型/工具预占人工对账；会员/席位人工退款复核是 D2 下的 D2-R 独立委任。退款复核不授予 C4、费率审批或渠道退款执行权。真实 JWT/FastAPI 退款接口回归覆盖未授权管理员、自批、只读待审、独立批准/拒绝、撤权、禁用后恢复、平台角色降级后重新升职仍无授权；API/迁移定向组合 **3 项通过**。
+- MySQL 退款并发测试现直接走 `review_manual_refund(... reviewer_token_version=...)` 的生产审核锁序，不先用外部测试调用替代授权门。审核与授权撤销、审核与平台角色降级分别测试“审核先锁”和“撤权/降级先提交”两种顺序，共 **4 项通过**；审核先锁时撤权等待，撤权或降级先锁时审核等待后失败关闭。
+- 迁移 119 的数据库层保护现覆盖：新写入显式人类 `@小菱` 必须含 1–4 的发送时权限等级；等级不可改；人类 `@小菱` 消息正文、作者、企业/会话归属和客户端消息身份不可改、不可删，MySQL `REPLACE` 也不能替换该行。普通聊天消息可以继续使用空权限等级；升级前历史消息保持原值，不伪造历史权限。SQLite 迁移回归 **2 项通过**；MySQL 聊天权限及旧澄清相关组合覆盖以上触发器。
+- 一次性空 MySQL 8.0.45 从 `init.sql → seed.sql → Alembic head 119_chat_message_authority` 后，退款/权限/聊天/团队/澄清相关组合 **35 项通过、1 项既有严格 xfail**；容器测试结束确认 `code_review` schema 表数为 0。上述仅为本地隔离数据库，不是生产或商户验收。
+- 发布约束：119 会拒绝仍在运行的旧后端对显式 `@小菱` 消息写入缺失快照；应用回滚到不认识新字段的旧版本后，该消息发送仍失败关闭。发布编排必须确保旧写进程在迁移前退出，并为迁移后回滚准备兼容版本；当前未在生产执行或验收。
+
+## 2026-11-09：迁移 119 的部署与回滚安全门
+
+- `deploy.sh` 在目标 Alembic head 为迁移 119 或其后继时要求操作者确认 Compose 外所有 `code_review` 写进程已停；随后停止并核实 Compose Backend，核对数据库 revision、权限列和三个 MySQL 触发器，执行迁移并复核目标 Backend 镜像能力。目标 119 迁移预检中数据库 revision 或权限结构无法读取/确认时，也会先尝试停止并核实 Compose Backend；候选 Alembic 图解析失败或与 119 已知不兼容时，在任何迁移/应用切换前拒绝发布并保留当前 Backend。目标 head 更早时只读核对 revision/schema：数据库领先旧目标时拒绝切换；revision/schema 查询失败时拒绝本次发布并保留当前 Backend；多 current revision、可查询出的部分结构或 revision/schema 不一致时会先尝试停止并核实 Compose Backend；旧 head 前已有 119 物理结构时停止 Backend 并拒绝按旧迁移链继续。
+- 迁移成功后的自动回滚及手动回滚共享 119 schema 与目标镜像能力门。手动回滚遇到结构查询失败、revision 未知/多行、权限快照兼容图无法解析、结构部分完成或 revision/schema 不一致时会先尝试停止并核实 Compose Backend；结构完整但目标旧 reader 能力 probe 失败时，在替换容器前拒绝并保留当前 Backend 运行。自动回滚会先停止当前 Backend；若上一镜像不兼容，保持停机且不启动它。回滚只切换应用镜像，不自动 downgrade 或恢复数据库。
+- 隔离 MySQL 8.0 元数据实测使用迁移 119 原始三个触发器，在 `utf8mb4_0900_bin` 下执行同一份部署状态查询：完整状态为 `1,1,1,1`；移除不可变触发器后为 `1,1,0,1`。这次实测发现并修正了依赖大小写不敏感比较的 `BINARY` 文本检查；临时数据库已删除。
+- `bash deploy/tests/test_scripts.sh` 全量通过：发布绑定 **41 项通过**，发布故障注入 **40 个场景通过**，包含 revision/权限结构查询失败、损坏迁移图、多 current revision、旧目标 head、部分 DDL、数据库超前、手动回滚停写及新旧镜像兼容。目标 Alembic 图解析失败时，本次发布在迁移前拒绝且保持现运行版本；手动回滚图解析失败则先停写并拒绝切换。`bash -n`、目标 Python Ruff/编译、ShellCheck `-S error` 与 `git diff --check` 通过。完整 ShellCheck 仍会报告既有 warning/info；不把 `-S error` 通过误报成零警告。
+- 本地自动化和隔离 MySQL 验证不代表生产发布已验收；生产写入者清单、停写、生产备份恢复演练、真实账号浏览器、模型供应商/支付渠道、生产迁移及线上回滚仍未完成。真实商户沙箱未执行，销售门仍关闭。
+
+## 2026-11-09：跨会话默认小组的模型发送时序
+
+- 默认组 A→B→A 若在模型最后一次当前授权事务提交之前完成，当前锁定读看到单调版本变化并拒绝发送；若发生在该事务提交之后，本次调用已获准进入在途，仍使用运行和 reservation 冻结的 A 组，后续调用按新版本重新授权。这是明确的事务线性化边界，不承诺改组后撤回已获准调用，也不会把当前费用转移、释放或再次收取。
+- 旧 strict xfail 已改为普通测试；公司群和企业私聊的发送时序及相关归属/计费门组合 **46 项通过**。此前 `--runxfail` 先复现了该失败；修订后模拟供应商返回正常用量，本次 reservation 按 A 结算为 `settled`，成员默认组保持 A 但版本增长。该时序切片未用 MySQL 或真实 HTTP 验证。
+- 此处的供应商为测试替身，未验证实际 HTTP 请求体、网络取消或 MySQL 并发。跨会话计费功能门仍关闭；Search/Fetch、发布资产、团队 Agent 和其他撤权/企业状态外发边界仍未闭环，不能据此开放企业群或私聊收费。
+
+## 2026-11-09：旧版企业小菱新外呼入口关闭
+
+- 当前企业聊天 API 和队列调度器使用版本化运行时；旧 `enterprise_assistant_service.run_for_message` 没有生产路由调用，但仍是可调用的服务函数。其旧计费 scope 对公司群/私聊传 `group_id=None`，无法应用新运行默认小组的用户额度，因此不允许该入口再启动公司群/私聊新模型调用。
+- 旧入口现在在模型配置、预占和外呼前失败关闭；已完成结果仍可读取，已有答复可走旧结果恢复，小组会话保留原实际小组口径。公司群/私聊需使用当前版本化运行时，该运行时的跨会话总门仍关闭。
+- 对已设置有效默认组的合成企业成员，公司群和私聊两类回归均确认旧入口在 provider 配置前拒绝，且不创建运行或 reservation。旧服务与归属模块定向 **11 项通过**；前序发送门组合 **46 项通过**。这些是 SQLite/模拟供应商自动化，不是 HTTP、MySQL、浏览器或生产验收。
+- 该边界按三个维度处理：UX 保留会话历史并返回既有计费门错误语义；DX 让版本化运行时成为公司群/私聊新调用的唯一入口，避免两套计费发送路径；AX 不允许旧路径跳过默认组额度，当前归属快照仍由版本化运行时提供。不能据此宣称 Search/Fetch、资产或团队子调用已完成。
+
+## 2026-11-09：Search/Fetch 继承父运行小组并复核发送授权
+
+- `EnterpriseAssistantToolExecutor._execute_search_fetch` 从父运行的版本化 billing snapshot 得到 `group_id`，同值传给 Search/Fetch 预占和幂等重放校验。授权回调通过 `_current(db=..., lock_state=True)` 重验当前运行、会话权限、订阅/退款状态、小组、默认组及单调成员版本；计费服务在新预占前、提交 `provider_attempt_started_at` 发送标记前以及供应商响应后结算前调用该回调。
+- Search/Fetch 的最终授权事务成功提交 `provider_attempt_started_at` 是进入在途的逻辑线性化点；数据库提交与物理 socket 写入之间没有跨网络锁。提交前改组则拒绝；提交后改组不撤回本次调用，reservation 继续绑定原组；响应后的权限复验失败则保持 `unknown` 待核对，不迁移或释放原组账单。
+- 新增公司群和私聊两类 A→B→A 回归：预占后用独立事务调用真实组织服务将默认组从 A 改至 B 再改回 A，发送前当前授权因单调版本变化拒绝；验证没有 HTTP、原组 reservation 以 `not_sent` 释放、最终默认组仍为 A 且版本递增。ABA 用例直接组合计费服务、合成父运行快照和真实归属校验；完整 Runtime wiring 另由既有测试覆盖，但该 wiring 测试 mock 了 `_current` 与计费 service。服务、归属及 wiring 定向组合 **34 项通过**。这次 ABA 用例在 SQLite/mock transport；没有用 MySQL RR 验证并发锁行为，也没有真实 HTTP/供应商账单。公司群/私聊的新运行总门仍关闭，不代表功能可售或线上启用。
+- 三个维度：UX 在发送前变化时阻止旧组请求，在途请求不被静默转组；DX 复用父运行授权回调和 Search/Fetch 账本服务；AX 以冻结 payer group 校验 reservation/重放并留住 unknown 证据。资产和团队的单独验证及状态差异见下一节。
+
+## 2026-11-09：发布资产与 Agent 团队继承冻结小组
+
+- 发布资产子调用经 `_billing_scope` 使用父 `EnterpriseAssistantRun` 的冻结 `billing_group_id`，预占与 `before_stream_send` 当前授权均通过 `_validated_billing_group` 校验单调默认组版本；成员计费后续仍查同一成员/小组额度。企业 Agent 团队通过 `_task_billing_scope` 冻结父运行组，`attempt_guard`、`on_reserved` 与 `send_guard` 均经 `_lock_live_context`→`billing_group.validate` 复验，再校验 request reservation 仍属该组。
+- 新增资产公司群和私聊两类 A→B→A 回归：真实组织服务在子调用预占后、流式发送授权前独立提交组 A→B→A。父运行检查拒绝，mock provider 零调用，reservation 仍记录冻结 A 组；通用 Responses 流式闸把预占标记为 `unknown` 且无 provider attempt marker，资产调用也立即转为 `unknown`，不输出子调用结果。该状态保持积分冻结并阻止重试，不自动记账或释放；按既定财务流程需 C4 双人凭证审查，不能因本地 mock 观察到未调用就跳过审计。
+- 新增团队公司群 A→B→A 回归：实际 `claim_task`/`metered_team_call`/发送守卫在独立事务组变更后复核父运行，provider callable 未执行；reservation 以原 A 组记为 `released/not_sent`，团队追加 `billing.not_sent` 事件，成员计费归属版本从 5 单调递增到 7。
+- 资产调用专项文件 **21 项通过**，团队运行服务专项文件 **48 项通过**；此为本阶段的 SQLite/模拟 provider 结果，后续 MySQL RR 发送边界见本文末尾专项。团队 `send_guard` 为保持现有取消/撤权语义，会持运行、组织和团队授权行直至同步 provider callable 返回；企业内相关操作可等待该调用结束。未改变此锁序，本轮不声称其吞吐或长时调用体验已验收。
+- UX/DX/AX：UX 发送前改组即不外发；团队错误可明确释放未发送预占，资产未知预占需双人核对，避免错误扣费但会暂时占住额度。DX 复用统一父归属校验和现有 C4 核对流程，不新增并行归属源。AX 账单与运行都保留冻结组、单调版本和 attempt 证据；不以旧权限快照执行或自动释放未知用量。
+- 企业群/私聊跨会话计费总门仍为 `_CROSS_SCOPE_ATTRIBUTION_VERIFIED = False`。本段是资产/团队 MySQL RR 回归补充前的阶段记录；其后新增测试见本文末尾。provider 实际送达、撤权/企业状态全部 ABA、真实供应商费用和生产验收仍未覆盖。
+
+## 2026-11-09：企业群聊权限与团队锁序 MySQL 复验（历史基线）
+
+- 修正锁序测试数据：只让第一条会话消息显式 `@小菱`，第二条仍是普通消息，避免测试本身生成同级竞争指令并触发预期的权限优先级拒绝。权限冲突仍由 authority 专项测试覆盖，锁序文件只检查授权锁顺序和并发行为。
+- 在一次性 MySQL 8.0.45 容器中从空库走完整建库链至唯一 Alembic head 119，再执行聊天权限、助手澄清、小组澄清、群共享锁、团队锁序五个 MySQL 文件：**42 passed、1 strict xfailed、0 failed**（27.03 秒，8 条依赖弃用警告）。隔离容器已删除。strict xfail 是既有明确标注的预期失败，未以 `--runxfail` 改写结果。
+- 随后的企业授权共享锁复验已替换此处仍有 strict xfail 的状态；最新结果见下节。此处仍用于记录测试夹具修正后的中间基线。以上均为隔离 MySQL 合成数据，不代表真实浏览器、生产数据库、供应商或支付渠道验收；企业群/私聊跨空间计费门仍关闭。
+
+## 2026-11-09：企业授权共享锁并发复验
+
+- 真实角色快照对企业状态使用共享当前读并持有到受保护事务结束。组织成员权限变更、企业停用和退款等排他写事务仍需企业排他锁，因此不能越过在途授权；不同成员的锁定读可以并行。`test_live_team_authorization_does_not_serialize_independent_members` 已从严格预期失败改为必须通过的竞争断言。
+- 一次性 MySQL 8.0.45 从空库迁移到唯一 head 119 后，企业聊天权限、助手/团队澄清、群共享锁、团队锁序、发送/退款 HTTP 探针和计费归属版本七个测试文件组合 **58 passed、0 failed**（42.05 秒，42 条弃用警告）。`performance_schema` 实测独立成员授权并行，成员撤权/小组停用/企业写入等待；本地 HTTP 收到请求时锁已释放，账本未知用量仍保持 `unknown` 并冻结。新增 MySQL RR A→B→A 测试确认携带旧成员版本的计费归属快照，即使旧事务先前读到 A 组，也会因单调归属版本变化在 `billing_group.validate` 中被拒绝；该测试止于账本授权校验，不是完整 Search/Fetch、资产或团队供应商发送链。临时容器已删除。
+- 定向 SQLite 服务回归 **90 passed、2 warnings**；这组 MySQL 样本使用合成数据和测试计费目录/部分业务桩，不是实际供应商或生产负载。此段为当时阶段状态：Search/Fetch 的发送前 A→B→A 随后已在下面“Search/Fetch 默认小组 A→B→A 与钱包锁范围复验”通过；资产与团队的 MySQL RR A→B→A、真实供应商账单、真实浏览器和生产验收仍待完成。
+
+## 2026-11-09：Search/Fetch 默认小组 A→B→A 与钱包锁范围复验
+
+- 在一次性 MySQL 8.0.45 中从 `init.sql → seed.sql → Alembic head 119` 执行 `tests/test_mysql_search_fetch_replay.py`，最终 **6 passed、0 failed**。除四条既有账本/重放/并发用例外，新增公司群 Search、Fetch 两条用例：建立真实企业、小组、成员、公司会话，并由真实 `billing_group.capture` 生成冻结归属快照；父运行对象是 `SimpleNamespace` 测试快照，不是持久化 `EnterpriseAssistantRun`，也未执行完整 Runtime executor wiring。随后执行实际 `execute_tool`，首轮授权后真实提交 reservation，再用组织服务在独立 MySQL 事务中把默认组 A→B→A；第二次授权通过实际 `billing_group.validate` 拒绝，传输层零请求；检查 reservation 归属仍是 A、状态为 `released/not_sent`、发送标记为空、批次恢复余额，成员版本增加 2。整个环境只使用合成数据及 HTTP mock。
+- 首次完整文件复跑失败在既有的“不同企业并行 Search”用例。同步线程屏障单独重现后，读取 MySQL `performance_schema.data_lock_waits`，看到企业 2 的 `billing_credit_batch` 锁定查询等待另一钱包的索引记录。最初确认带过期 OR 条件的锁定读采用了主键扫描；即使强制使用既有 `(wallet_id, expires_at)` 索引，RR 范围锁仍等待相邻钱包。最终锁定读取改为只以 `wallet_id` 精确查询并固定钱包前缀索引；读取后在应用层滤除过期批次。并行用例在两个事务均持有预插入锁且同时到达 reservation INSERT 屏障时读取 `performance_schema.data_lock_waits`，该时点 `billing_credit_batch` 待锁数为 **0**；两笔请求随后均完成。此断言验证屏障采样点没有该表的等待，不外推为所有时刻都不存在任何短暂锁等待。修复后并行用例和所有新旧模块用例 6/6 通过。
+- `test_billing_ledger_service.py`、`test_billing_tool_reservations.py`、`test_billing_search_fetch_service.py` 与 `test_billing_metered_call.py` 合计 **59 passed**；目标 Ruff 通过。初次 A→B→A 夹具因没有将合成员工加入企业，被组织服务正确拒绝；修正夹具后专项通过。全模块初跑的并发失败已按上文说明复现与修复，没有计为通过。
+- 本次仅覆盖 Search/Fetch 已发标记前的组织归属变化和钱包锁竞争；没有覆盖 provider 收到的真实请求/账单、资产和团队的 MySQL RR 发送栅栏、多账号浏览器或生产数据库。企业群/私聊跨会话计费门仍为关闭，`_CROSS_SCOPE_ATTRIBUTION_VERIFIED` 不变。
+
+## 2026-11-09：发布资产与 Agent 团队默认小组 MySQL RR 发送复验
+
+- 使用一次性 MySQL 8.0.45，从 `init.sql → seed.sql → Alembic head 119_chat_message_authority` 建库；新增测试与既有团队锁序测试合计 **10 passed、0 failed**。命令：`cd backend && PRISM_FRESH_CHAIN_MYSQL_URL=<一次性空 MySQL 回环地址> PRISM_FRESH_CHAIN_REQUIRED=1 .venv/bin/pytest -q -o addopts='' --tb=short tests/test_mysql_enterprise_asset_billing_group.py tests/test_mysql_enterprise_group_shared_lock.py`。复跑含资产积分批次和成员/小组额度双重冻结断言。夹具在结束时删除自建 `code_review` schema；专用一次性容器随后已停止并移除。
+- 发布资产覆盖公司群、企业私聊两类真实 MySQL RR 场景：持久化 `EnterpriseAssistantRun`、runtime state、发布版本、子调用、真实 `EnterpriseAssistantToolExecutor` 与真实账本。预占提交后由独立事务通过真实组织服务把默认组 A→B→A，再调用原始 `billing_runtime_gate.before_stream_send`；当前归属版本变化使发送失败，provider 零调用。reservation 与资产 invocation 保持 `unknown`、发送标记为空、子调用输出为空，额度继续冻结，必须进入 C4 双人凭证审查；这避免把“本地替身未观察到调用”错误升级成可自动释放的供应商未送达凭证。
+- 团队覆盖公司群范围的真实持久化运行、`claim_task`、`metered_team_call`、reservation 和 `send_guard`。reservation 提交后默认组发生 A→B→A，实际发送守卫重新检查父运行并拒绝；provider callable 零调用。该同步守卫能证明发送函数未执行，因此 reservation 以原 A 组记为 `released/not_sent`，积分批次余额和成员额度已释放，并写入 `billing.not_sent` 团队事件。不得把资产与团队状态合并：两者使用不同的发送适配器和可验证证据。
+- 定向 MySQL Ruff 检查通过；运行时未调用真实网络、模型供应商或支付渠道，仅使用合成企业、测试费率和 provider 替身。资产/团队的本地 MySQL RR 发送栅栏已覆盖，真实 HTTP 到达/供应商账单、长时间持锁的用户体验和容量、生产数据库/恢复/发布及真实浏览器账号仍待验收；跨会话计费总门保持关闭。
+- UX/DX/AX：UX 在当前发送授权提交前发现组版本变化就不外发；资产未知账单显示为待审计冻结，团队有明确未发送证据时及时退回额度。DX 复用默认组单调版本、父运行归属校验及现有 C4 流程，不增添第二套计费范围来源。AX 保留冻结 payer group、A→B→A 版本变化、发送标记和子调用状态；只有可证明未发送时才自动释放。
+
+## 2026-11-09：权限快照与计费运行时全量复验
+
+- 当时全量后端回归为 **11,095 passed、728 skipped、0 failed**；在本轮增加 6 项需独立 MySQL 的用例后，完整命令最新结果为 **11,095 passed、734 skipped、0 failed**（14 分 21 秒、2,494 条警告）。两次全量命令均未配置 `PRISM_FRESH_CHAIN_MYSQL_URL`，新库 MySQL 专项因此跳过；`tests/test_fresh_database_chain.py` 的既有隔离 MySQL 8.0.45 建库链结果为 `init.sql → seed.sql → head 119` **94 passed、11 warnings**，测试结束删除其 `code_review` schema。退款复核与撤权双向锁序另有独立 MySQL RR 专项 **4 项通过**。
+- 首轮全量复验暴露 16 个测试失败：计费检查点测试替身未接受新增 `now` 参数；权限测试把迁移 119 的未知发送权限快照当作普通角色等级，并以旧式断言验证。已修正替身及明确的快照测试数据，加入真正同级普通成员用例，并按已定规则验证发送时高权指令在作者之后撤权仍保持优先级。随后权限、计费检查点与组长重试 **41 项通过**；再跑完整后端套件全部通过。
+- 运行时代码、新迁移、部署辅助模块和本轮重点单测 Ruff 通过；目标 Python 编译、修改部署脚本 `bash -n`/ShellCheck、全量 `bash deploy/tests/test_scripts.sh`（发布绑定 41 项、故障注入 40 场景）及 `git diff --check` 通过。未运行前端全量（本轮未修改前端），未运行最新远端 CI。
+- MySQL 专项最初的 cancel/reclaim 两项失败来自测试屏障在 worker 已持有父授权锁之后才暂停；调整为先建立 RR 快照、再让取消/新租约先提交，原测试意图下的两种顺序现均通过。单独复现 **2 项通过**，完整 `001→119` 专项随即 **94 项通过**。这一变化只修正竞态测试屏障，不改变生产锁序。
+- 本结果仅为当前本地工作树自动化。生产仍为最近核验版本 4.1.42；没有提交、推送、部署或接触生产数据库。真实浏览器、支付商户沙箱、模型账单与生产迁移/备份恢复仍未验收。
+
+## 2026-11-09：退款撤权竞态与 119 触发器兼容探针复验
+
+- 企业退款 API 不再把预检得到的管理员布尔值传入账务服务。服务先锁订单和企业，再以当前锁定读复核申请人的企业角色；若请求在企业锁上等待期间管理员被降级，退款请求返回无订单语义，不创建退款单、不冻结退款额度。一次性 MySQL 8.0.45 上新撤权先提交并发用例与退款锁序/钱包竞争模块组合 **20 passed**；目标计费服务/API 单测组合 **115 passed、20 skipped**。MySQL 用例使用合成企业、订单和积分，无真实支付外呼。
+- 部署状态探针现直接读取 `enterprise_chat_message` 的全部触发器，并将三个预期 `ACTION_STATEMENT` 与 119 迁移文件中的 SQL 做忽略格式与关键字大小写、保留字符串字面值的 token 比对。实际 MySQL 8.0.45 fresh-chain 测试通过：原迁移定义识别为 `complete`；保留全部保护语句但放入恒假分支后识别为 `partial`；额外 `BEFORE INSERT` 改写权限等级的触发器也识别为 `partial`。该测试结束时恢复三个原始触发器，fresh-chain 夹具删除 `code_review` schema。
+- 回滚目标版本位于 119 后、数据库 schema 却仍为 119 前时，拒绝启动依赖 `sender_authority_rank` 的镜像；旧 reader 才能匹配旧 schema。独立镜像能力探针现验证 `_live_role_snapshot` 的直接调用点、未知权限分支和实际阻断异常。回滚绑定新增拒绝场景，完整部署/运维回归最终 **41 项发布绑定、40 个故障注入场景通过**。首轮运行暴露的是测试夹具漏拷贝新探针；修正夹具后完整脚本通过。
+- 本次修复按 UX/DX/AX 收敛：撤权后不生成误导性的退款待办或冻结额度；退款管理员身份以锁内当前状态为唯一服务端事实，避免 API 与账务两套授权口径；小菱权限快照以迁移 SQL 实际控制流为依据，未知触发器、死分支和不兼容 reader 均失败关闭。
+- 该证据只覆盖本地代码、合成业务数据与隔离 MySQL。生产仍为最近核验版本 4.1.42；本轮补丁未推送或部署，也未完成真实浏览器账号验证、支付商户沙箱、生产备份恢复演练、外部写入者盘点或生产回滚验收。
+
+## 2026-11-09：退款授权与 119 发布兼容复核收尾
+
+- 最终本地后端全量命令 `.venv/bin/pytest -q -o addopts='' --tb=short` 结果为 **11,095 passed、736 skipped、0 failed**（788.97 秒，2,493 条警告）。本次未设置 `PRISM_FRESH_CHAIN_MYSQL_URL`，故需独立新库的 MySQL 测试在该全量运行中跳过；退款撤权竞态、迁移 119 部署触发器探针另在一次性 MySQL 8.0.45 测试环境分别 **20 passed**、**1 passed**。MySQL 结果仅为合成数据与隔离数据库。
+- `bash deploy/tests/test_scripts.sh` 通过：**41 项发布绑定、40 个故障注入场景**。相关目标 Ruff、Python 编译、Shell `bash -n`、ShellCheck `-S error`、`git diff --check` 通过；未修改前端，本轮没有重跑前端全量。
+- 独立只读 diff 复核未发现 P1/P2；确认退款权限在企业锁内重验，119 部署探针核对实际列与迁移定义中的完整触发器集合，并拒绝死分支、缺失定义、未知额外触发器及不兼容镜像。复核未另行跑测试或操作生产。
+- 生产只读观察：当前浏览器打开 `https://www.lijiadong.cn/login?redirect=/`，登录页显示构建版本 `v4.1.42`；没有已登录账号。本次只核实登录页版本展示，不计为真实角色、计费或企业功能验收。
+- 本轮修订文档证据口径：区分 MySQL 手工元数据向量观察与 pytest 的 `complete/partial` 断言；将任务表 head 100 条目标注为历史快照；补齐本轮后端全量和部署矩阵最新结果。
+- UX/DX/AX：撤权后不生成误导退款待办或冻结额度；服务端锁内当前权限是退款授权唯一事实；数据库触发器结构与运行镜像契约以可重复探针核验，遇未知情况失败关闭。以上是实现与本地/隔离 MySQL 自动化证据，不是生产验收。
+- 未完成：真实角色多账号浏览器、支付宝/微信商户沙箱与资金/手续费对账、供应商真实账单与整体成本证明、生产副本迁移及备份恢复、外部写入者盘点、生产迁移/发布/回滚和发布后业务验收。生产未变更，最近核验版本仍为 4.1.42；支付销售门与企业群/私聊跨会话计费门继续关闭。

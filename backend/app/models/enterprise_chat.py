@@ -59,6 +59,7 @@ class EnterpriseChatMessage(Base, IdMixin, TimestampMixin):
     assistant_run_id = Column(BigInteger, ForeignKey("enterprise_assistant_run.id"), nullable=True)
     client_message_id = Column(String(80), nullable=False)
     content = Column(Text, nullable=False)
+    sender_authority_rank = Column(Integer, nullable=True)
 
 
 class EnterpriseAssistantRun(Base, IdMixin, TimestampMixin):

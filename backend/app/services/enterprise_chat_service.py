@@ -2,7 +2,7 @@
 
 该服务仅提供员工消息存储，不调用模型，也不将企业会话映射到个人小菱会话。
 """
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -36,7 +36,7 @@ def _require_locked_member(db: Session, enterprise_id: int, user_id: int, *,
     return row
 
 
-def _require_locked_group(db: Session, enterprise_id: int, group_id: int, user_id: int) -> None:
+def _require_locked_group(db: Session, enterprise_id: int, group_id: int, user_id: int) -> EnterpriseGroupMember:
     group = db.query(EnterpriseGroup).filter_by(
         id=group_id, enterprise_id=enterprise_id, status="active"
     ).populate_existing().with_for_update().first()
@@ -45,6 +45,15 @@ def _require_locked_group(db: Session, enterprise_id: int, group_id: int, user_i
     ).populate_existing().with_for_update().first()
     if group is None or member is None:
         raise ForbiddenError("没有该小组的访问权限")
+    return member
+
+
+def authority_rank(member_role: str | None, group_role: str | None, room_kind: str) -> int:
+    """Resolve message authority in this conversation's role scope."""
+    rank = {"owner": 4, "admin": 3, "member": 1}.get(member_role or "", 0)
+    if room_kind == "group" and group_role == "leader":
+        rank = max(rank, 2)
+    return rank
 
 
 def _check_access(
@@ -157,6 +166,38 @@ def list_conversations(db: Session, enterprise_id: int, user_id: int) -> list[En
     return visible
 
 
+def latest_messages_by_conversation(
+    db: Session, enterprise_id: int, conversation_ids: list[int],
+) -> dict[int, EnterpriseChatMessage]:
+    """Fetch one latest message per already-authorized conversation in one query."""
+    scoped_ids = sorted({int(conversation_id) for conversation_id in conversation_ids if int(conversation_id) > 0})
+    if not scoped_ids:
+        return {}
+    result: dict[int, EnterpriseChatMessage] = {}
+    for offset in range(0, len(scoped_ids), 500):
+        batch = scoped_ids[offset:offset + 500]
+        latest = (
+            db.query(
+                EnterpriseChatMessage.conversation_id.label("conversation_id"),
+                func.max(EnterpriseChatMessage.id).label("message_id"),
+            )
+            .filter(
+                EnterpriseChatMessage.enterprise_id == enterprise_id,
+                EnterpriseChatMessage.conversation_id.in_(batch),
+            )
+            .group_by(EnterpriseChatMessage.conversation_id)
+            .subquery()
+        )
+        rows = (
+            db.query(EnterpriseChatMessage)
+            .join(latest, EnterpriseChatMessage.id == latest.c.message_id)
+            .filter(EnterpriseChatMessage.enterprise_id == enterprise_id)
+            .all()
+        )
+        result.update({int(row.conversation_id): row for row in rows})
+    return result
+
+
 def list_messages(db: Session, enterprise_id: int, user_id: int, conversation_id: int, *, after_id: int | None = None,
                   before_id: int | None = None, limit: int = 50) -> list[EnterpriseChatMessage]:
     get_conversation(db, enterprise_id, user_id, conversation_id)
@@ -188,10 +229,11 @@ def send_message(
 ) -> EnterpriseChatMessage:
     # 组织服务在成员或小组变更时也锁企业行；发消息与撤权串行化。
     company = _lock_enterprise(db, enterprise_id)
-    _require_locked_member(db, enterprise_id, user_id, expected_token_version=expected_token_version)
+    member = _require_locked_member(db, enterprise_id, user_id, expected_token_version=expected_token_version)
     room = get_conversation(db, enterprise_id, user_id, conversation_id)
+    group_member = None
     if room.kind == "group":
-        _require_locked_group(db, enterprise_id, int(room.group_id), user_id)
+        group_member = _require_locked_group(db, enterprise_id, int(room.group_id), user_id)
     if not content.strip() or len(content) > 10000 or not client_message_id.strip() or len(client_message_id) > 80:
         raise ValidationError("消息内容或客户端消息编号无效")
     row = db.query(EnterpriseChatMessage).filter_by(
@@ -204,6 +246,8 @@ def send_message(
                 row = EnterpriseChatMessage(
                     enterprise_id=enterprise_id, conversation_id=conversation_id, sender_id=user_id,
                     client_message_id=client_message_id, content=content,
+                    sender_authority_rank=(authority_rank(member.role, group_member.role if group_member else None,
+                                                         room.kind) if "@小菱" in content else None),
                 )
                 db.add(row)
                 db.flush()

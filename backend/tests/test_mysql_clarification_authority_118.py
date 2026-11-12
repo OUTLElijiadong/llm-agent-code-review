@@ -13,10 +13,11 @@ from app.models.enterprise_org import Enterprise, EnterpriseMember
 from app.models.enterprise_chat import EnterpriseConversation, EnterpriseChatMessage, EnterpriseAssistantRun
 from app.models.enterprise_assistant_runtime import EnterpriseAssistantRuntimeState
 from app.services import enterprise_assistant_clarification_service as clarity
+from app.services import enterprise_assistant_runtime_service as runtime
 from datetime import timedelta
 
 
-def _setup(engine, key):
+def _setup(engine, key, *, prior_directive=False):
     maker = sessionmaker(bind=engine, expire_on_commit=False)
     with maker.begin() as db:
         uid = 910000 + key * 10
@@ -30,16 +31,26 @@ def _setup(engine, key):
                     for i,role in [(1,'owner'),(2,'admin'),(3,'member')]])
         db.add(EnterpriseConversation(id=room_id, enterprise_id=eid, kind='company', conversation_key='company', created_by=uid+1))
         db.add_all([EnterpriseChatMessage(id=message_id, enterprise_id=eid, conversation_id=room_id, sender_id=uid+2,
-                                          sender_type='human', client_message_id='old', content='先停止'),
+                                          sender_type='human', client_message_id='old',
+                                          content='@小菱 不要执行' if prior_directive else '先停止',
+                                          sender_authority_rank=3 if prior_directive else None),
                     EnterpriseChatMessage(id=message_id+1, enterprise_id=eid, conversation_id=room_id, sender_id=uid+3,
-                                          sender_type='human', client_message_id='new', content='@小菱 执行')])
+                                          sender_type='human', client_message_id='new', content='@小菱 执行',
+                                          sender_authority_rank=1)])
         run = EnterpriseAssistantRun(public_id=f'clarity-{key}', request_key=f'clarity-{key}', enterprise_id=eid,
                                      conversation_id=room_id, initiator_user_id=uid+3, source_message_id=message_id+1,
                                      prompt_sha256='a'*64, status='running')
         db.add(run); db.flush()
+        room = db.get(EnterpriseConversation, room_id)
+        messages = (db.query(EnterpriseChatMessage).filter_by(enterprise_id=eid, conversation_id=room_id)
+                    .order_by(EnterpriseChatMessage.id).all())
+        snapshot = runtime._role_snapshot(
+            db, enterprise_id=eid, room=room, messages=messages, initiator_id=uid+3,
+        )
         db.add(EnterpriseAssistantRuntimeState(assistant_run_id=run.id, enterprise_id=eid, conversation_id=room_id,
                                                initiator_user_id=uid+3, source_message_id=message_id+1, status='running',
-                                               permission_snapshot_json='{}', permission_snapshot_sha256='b'*64))
+                                               permission_snapshot_json=runtime._json(snapshot),
+                                               permission_snapshot_sha256=runtime._digest(snapshot)))
         db.flush()
         run_id = run.id
     with maker.begin() as db:
@@ -262,7 +273,7 @@ def test_mysql_model_send_requires_fresh_persisted_clearance(fresh_chain, monkey
 
     monkeypatch.setattr('app.services.enterprise_org_service._billing_access_suspended', lambda *a, **k: False)
     key = 20
-    maker, eid, rid, _admin, _old_request = _setup(fresh_chain, key)
+    maker, eid, rid, _admin, _old_request = _setup(fresh_chain, key, prior_directive=True)
     uid = 910000 + key * 10
     message_id = 940000 + key * 10
 
@@ -273,7 +284,6 @@ def test_mysql_model_send_requires_fresh_persisted_clearance(fresh_chain, monkey
         messages = (db.query(EnterpriseChatMessage)
                     .filter_by(enterprise_id=eid, conversation_id=rid, sender_type='human')
                     .order_by(EnterpriseChatMessage.id).all())
-        db.get(EnterpriseChatMessage, message_id).content = '@小菱 请不要继续这个操作'
         run.model_name = 'deepseek-flash'
         checkpoint = RunCheckpoint(run_id=run.public_id, model='deepseek-flash', transcript=[], tools=[],
                                    instructions='企业助手指令')
@@ -304,18 +314,22 @@ def test_mysql_model_send_requires_fresh_persisted_clearance(fresh_chain, monkey
         checkpoint.context_metadata['model_send_clearance'] = marker
         runtime._require_model_send_clearance(db, run=run, state=state, checkpoint=checkpoint)
 
+    from sqlalchemy.exc import DBAPIError
+
     with maker.begin() as db:
-        db.get(EnterpriseChatMessage, message_id).content = '@小菱 现在改成允许继续'
+        with pytest.raises(DBAPIError):
+            db.query(EnterpriseChatMessage).filter_by(id=message_id).update(
+                {EnterpriseChatMessage.content: '@小菱 现在改成允许继续'}, synchronize_session=False,
+            )
 
     with maker.begin() as db:
         run = db.query(EnterpriseAssistantRun).filter_by(enterprise_id=eid, conversation_id=rid).one()
         state = db.query(EnterpriseAssistantRuntimeState).filter_by(assistant_run_id=run.id).one()
-        with pytest.raises(ForbiddenError, match='权限澄清已过期'):
-            runtime._require_model_send_clearance(db, run=run, state=state,
-                                                  checkpoint=RunCheckpoint(
-                                                      run_id=run.public_id, model='deepseek-flash', transcript=[],
-                                                      tools=[], instructions='企业助手指令',
-                                                      context_metadata={'model_send_clearance': marker}))
+        runtime._require_model_send_clearance(db, run=run, state=state,
+                                              checkpoint=RunCheckpoint(
+                                                  run_id=run.public_id, model='deepseek-flash', transcript=[],
+                                                  tools=[], instructions='企业助手指令',
+                                                  context_metadata={'model_send_clearance': marker}))
 
 
 @pytest.mark.parametrize('first', ['clarification', 'revocation'])

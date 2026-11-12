@@ -19,10 +19,6 @@ from app.services.deepseek_responses_runtime import ToolCall
 from app.services.enterprise_assistant_runtime_service import EnterpriseAssistantToolExecutor
 
 
-class AttributionSentAfterCheck(AssertionError):
-    """Observed a provider send after attribution changed past its final check."""
-
-
 @pytest.fixture
 def db(monkeypatch):
     monkeypatch.setattr(proactive.settings, "billing_commercial_metering_ready", True)
@@ -113,10 +109,7 @@ def test_new_manual_company_and_direct_billing_stays_closed_until_verified(db, m
     ("direct", 1_000_000, "before_claim"), ("company", 1_000_000, "after_hold"),
     ("company", 1_000_000, "gate_before_claim"), ("direct", 1_000_000, "gate_after_hold"),
     ("company", 1_000_000, "gate_after_send"),
-    pytest.param("company", 1_000_000, "after_last_check", marks=pytest.mark.xfail(
-        strict=True, raises=AttributionSentAfterCheck,
-        reason="最终检查事务提交后到 HTTP 发出间尚有归属变化窗口；入口必须保持关闭",
-    )),
+    ("company", 1_000_000, "after_last_check"), ("direct", 1_000_000, "after_last_check"),
 ])
 def test_closed_feature_test_mode_parent_model_uses_default_group_limit(db, monkeypatch, kind, group_limit, change_default):
     from types import SimpleNamespace
@@ -221,8 +214,13 @@ def test_closed_feature_test_mode_parent_model_uses_default_group_limit(db, monk
     assert run.group_id is None and run.billing_group_id == 100
     reservations = db.query(BillingReservation).all()
     if change_default == "after_last_check":
-        if sends:
-            raise AttributionSentAfterCheck("最终检查后归属变化仍触发了模拟供应商请求")
+        assert sends == [True]
+        assert len(reservations) == 1
+        assert reservations[0].group_id == 100 and reservations[0].status == "settled"
+        assert run.status == "completed"
+        member = db.query(EnterpriseMember).filter_by(enterprise_id=10, user_id=2).one()
+        assert member.default_group_id == 100
+        assert member.billing_group_version > run.billing_membership_version
     elif change_default == "gate_before_claim":
         assert not sends and not reservations
         status = runtime.get_run_status(db, enterprise_id=10, user_id=2, conversation_id=room.id,

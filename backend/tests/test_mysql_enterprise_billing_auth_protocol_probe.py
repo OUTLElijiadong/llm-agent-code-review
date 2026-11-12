@@ -1,300 +1,393 @@
-"""Proof-of-concept only: serialize subscription-refund changes with an auth mutex.
+"""MySQL proof for company-row serialization of enterprise billing authorization."""
 
-This isolated test creates a throwaway table. No application migration or gate is enabled.
-"""
-
-import asyncio
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from uuid import uuid4
 
-import httpx
 import pytest
 import test_fresh_database_chain as chain
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
-from app.models.billing_ledger import BillingReservation
+from app.core.exceptions import ForbiddenError
+from app.models.billing_ledger import BillingCreditBatch, BillingRefund, BillingRefundReviewerGrant, BillingReservation
+from app.models.enterprise_org import EnterpriseMember
 from app.models.user import User
 from app.services import billing_checkout_service as checkout
 from app.services import billing_ledger_service as ledger
-from app.services import enterprise_assistant_billing_group as billing_group
-from app.services import enterprise_chat_service as chat
+from app.services import enterprise_org_service as org
+from app.services import user_service
 
 fresh_chain = chain.fresh_chain
 fresh_chain_url = chain.fresh_chain_url
 verified_model_catalog = chain.verified_model_catalog
 
 
-def _scenario(factory):
+def _seed_company(factory, *, with_refund=True):
     suffix = uuid4().hex[:12]
     paid_at = datetime.now(timezone.utc).replace(microsecond=0)
     with factory.begin() as db:
         buyer = User(username=f"auth-buyer-{suffix}", password="x", role="user", status=1)
         reviewer = User(username=f"auth-reviewer-{suffix}", password="x", role="user", status=1)
-        db.add_all([buyer, reviewer])
+        executor = User(username=f"auth-executor-{suffix}", password="x", role="user", status=1)
+        db.add_all([buyer, reviewer, executor])
         db.flush()
-        initial = checkout.create_order(db, user_id=buyer.id, product="enterprise_create", quantity=1,
-                                        channel="alipay", enterprise_name="授权锁测试")
-        checkout._apply_verified(db, initial, {"trade_id": f"auth-initial-{suffix}"}, now=paid_at)
-        company, buyer_id, reviewer_id = initial.enterprise_id, buyer.id, reviewer.id
+        order = checkout.create_order(db, user_id=buyer.id, product="enterprise_create", quantity=1,
+                                      channel="alipay", enterprise_name="授权锁测试")
+        checkout._apply_verified(db, order, {"trade_id": f"auth-initial-{suffix}"}, now=paid_at)
+        company_id, buyer_id, reviewer_id, executor_id = order.enterprise_id, buyer.id, reviewer.id, executor.id
+        order_no = order.order_no
+    refund_no = None
     with factory.begin() as db:
-        renewal = checkout.create_order(db, user_id=buyer_id, product="enterprise_renew", quantity=1,
-                                        channel="alipay", enterprise_id=company)
-        checkout._apply_verified(db, renewal, {"trade_id": f"auth-renewal-{suffix}"}, now=paid_at)
-        refund = checkout.request_refund(db, order_no=renewal.order_no, requester_id=buyer_id, reason="隔离测试")
-        assert refund.status == "manual_review"
-        wallet = ledger.get_or_create_wallet(db, "enterprise", company)
-        refund_no, wallet_id = refund.refund_no, wallet.id
+        wallet = ledger.get_or_create_wallet(db, "enterprise", company_id)
+        wallet_id = wallet.id
+        if with_refund:
+            refund = checkout.request_refund(db, order_no=order_no, requester_id=buyer_id, reason="隔离测试")
+            assert refund.status == "manual_review"
+            refund_no = refund.refund_no
+    return {
+        "company": company_id,
+        "buyer": buyer_id,
+        "reviewer": reviewer_id,
+        "executor": executor_id,
+        "order_no": order_no,
+        "refund_no": refund_no,
+        "wallet": wallet_id,
+        "suffix": suffix,
+    }
+
+
+def _grant_reviewer(factory, seeded):
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     with factory.begin() as db:
-        room_id = chat.open_conversation(db, company, buyer_id, "company").id
-    request_key = f"auth-probe-{suffix}"
+        user = db.query(User).filter_by(id=seeded["reviewer"]).populate_existing().with_for_update().one()
+        user_service.set_role(db, user.id, "admin", admin_id=seeded["buyer"], commit=False)
+        db.add(BillingRefundReviewerGrant(
+            user_id=user.id, active=1, granted_by=seeded["buyer"], granted_at=now,
+        ))
+        seeded["reviewer_token_version"] = int(user.token_version or 0)
+    return seeded["reviewer_token_version"]
+
+
+def _reserve_one(factory, seeded):
+    request_key = f"auth-probe-{seeded['suffix']}"
     with factory.begin() as db:
         reservation = ledger.reserve(
-            db, request_key=request_key, model_name="deepseek-flash", user_id=buyer_id, max_milli=100,
-            enterprise_wallet_id=wallet_id, enterprise_id=company,
+            db,
+            request_key=request_key,
+            model_name="deepseek-flash",
+            user_id=seeded["buyer"],
+            max_milli=100,
+            enterprise_wallet_id=seeded["wallet"],
+            enterprise_id=seeded["company"],
             provider_identity=ledger.BillingProviderIdentity(
                 "deepseek-official-v1", "deepseek", "api.deepseek.com", "system",
             ),
         )
         assert reservation.status == "reserved"
-    return company, buyer_id, reviewer_id, room_id, refund_no, request_key
+    return request_key
 
 
-def _create_mutex_table(engine, company):
-    with engine.begin() as db:
-        db.execute(text("CREATE TABLE test_billing_auth_mutex "
-                        "(enterprise_id BIGINT PRIMARY KEY, epoch BIGINT NOT NULL DEFAULT 0) ENGINE=InnoDB"))
-        db.execute(text("INSERT INTO test_billing_auth_mutex (enterprise_id) VALUES (:id)"), {"id": company})
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("winner", ["send", "refund"])
-@pytest.mark.parametrize("mutation", ["review", "prepare", "late_success"])
-async def test_proposed_auth_mutex_serializes_real_refund_approval_and_send(
-    fresh_chain, verified_model_catalog, winner, mutation,
+@pytest.mark.parametrize("reservation_status", ["reserved", "unknown"])
+def test_mysql_current_period_refund_rejects_unsettled_reservation_statuses(
+    fresh_chain, verified_model_catalog, reservation_status,
 ):
     factory = sessionmaker(bind=fresh_chain, autoflush=False, expire_on_commit=False)
-    company, buyer, reviewer, room, refund_no, request_key = _scenario(factory)
-    if mutation != "review":
-        observed_at = datetime.now(timezone.utc).replace(microsecond=0)
+    seeded = _seed_company(factory)
+    _grant_reviewer(factory, seeded)
+    request_key = _reserve_one(factory, seeded)
+    if reservation_status == "unknown":
         with factory.begin() as db:
-            checkout.review_manual_refund(db, refund_no=refund_no, admin_id=reviewer,
-                                          decision="approve", reason="协议测试", now=observed_at)
-            checkout.prepare_refund(db, refund_no=refund_no, admin_id=reviewer + 10000)
-            checkout.update_refund_result(db, refund_no=refund_no, result={"state": "UNKNOWN"},
-                                          now=observed_at, attempt_no=1, create_response_verified=True)
-        with factory.begin() as db:
-            token = checkout.claim_refund_reconciliation(db, refund_no=refund_no,
-                                                         now=observed_at + timedelta(seconds=16))
-            assert token
-            refund = checkout.update_refund_result(
-                db, refund_no=refund_no, result={"state": "FAILED"}, verified_provider_query=True,
-                reconciliation_token=token, now=observed_at + timedelta(seconds=17),
-            )
-            assert refund.status == "approved" and refund.provider_status == "FAILED"
-        with factory() as db:
-            assert not checkout.enterprise_subscription_refund_pending(db, company)
-    _create_mutex_table(fresh_chain, company)
-    sender_ready, sender_release, writer_ready, writer_release, received, respond = (
-        threading.Event() for _ in range(6)
-    )
-    sender_locked, sender_continue = threading.Event(), threading.Event()
-    sender_attempt, writer_attempt = threading.Event(), threading.Event()
-    connection_ids = {}
-    calls = []
+            ledger.mark_unknown(db, request_key)
 
-    def send_guard():
+    with factory.begin() as db:
+        with pytest.raises(ledger.BillingError, match="未结算预占"):
+            checkout.review_manual_refund(
+                db,
+                refund_no=seeded["refund_no"],
+                admin_id=seeded["reviewer"],
+                decision="approve",
+                reason="验证未结算小菱调用",
+                reviewer_token_version=seeded["reviewer_token_version"],
+            )
+
+    with factory() as db:
+        reservation = db.query(BillingReservation).filter_by(request_key=request_key).one()
+        refund = db.query(checkout.BillingRefund).filter_by(refund_no=seeded["refund_no"]).one()
+        assert reservation.status == reservation_status
+        assert refund.status == "manual_review"
+
+
+def _waiting_table(engine, connection_id):
+    with engine.connect() as connection:
+        return connection.execute(text(
+            "SELECT l.OBJECT_NAME FROM performance_schema.data_lock_waits w "
+            "JOIN performance_schema.threads t ON t.THREAD_ID=w.REQUESTING_THREAD_ID "
+            "JOIN performance_schema.data_locks l ON l.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID "
+            "WHERE t.PROCESSLIST_ID=:cid LIMIT 1"
+        ), {"cid": connection_id}).scalar_one_or_none()
+
+
+def _wait_for_enterprise_lock(engine, connection_id):
+    for _ in range(200):
+        if _waiting_table(engine, connection_id) == "enterprise":
+            return True
+        time.sleep(0.02)
+    return False
+
+
+@pytest.mark.parametrize("operation", ["request", "review", "prepare", "update"])
+def test_mysql_enterprise_refund_writers_lock_company_before_refund_state(fresh_chain, operation):
+    factory = sessionmaker(bind=fresh_chain, autoflush=False, expire_on_commit=False)
+    seeded = _seed_company(factory, with_refund=operation != "request")
+    _grant_reviewer(factory, seeded)
+    reconciliation_at = None
+    if operation in {"prepare", "update"}:
+        with factory.begin() as db:
+            checkout.review_manual_refund(db, refund_no=seeded["refund_no"], admin_id=seeded["reviewer"],
+                                          decision="approve", reason="准备并发状态",
+                                          reviewer_token_version=seeded["reviewer_token_version"])
+            if operation == "update":
+                checkout.prepare_refund(db, refund_no=seeded["refund_no"], admin_id=seeded["executor"])
+                checkout.update_refund_result(
+                    db, refund_no=seeded["refund_no"], result={"state": "UNKNOWN"},
+                    attempt_no=1, create_response_verified=True,
+                )
+        if operation == "update":
+            reconciliation_at = datetime.now(timezone.utc) + timedelta(seconds=16)
+            with factory.begin() as db:
+                reconciliation_token = checkout.claim_refund_reconciliation(
+                    db, refund_no=seeded["refund_no"], now=reconciliation_at,
+                )
+                assert reconciliation_token
+
+    started = threading.Event()
+    connection_ids = {}
+
+    def write_refund_state():
+        with factory.begin() as db:
+            connection_ids["writer"] = db.execute(text("SELECT CONNECTION_ID()")).scalar_one()
+            started.set()
+            if operation == "request":
+                return checkout.request_refund(
+                    db, order_no=seeded["order_no"], requester_id=seeded["buyer"], reason="并发申请",
+                ).status
+            if operation == "review":
+                return checkout.review_manual_refund(
+                    db, refund_no=seeded["refund_no"], admin_id=seeded["reviewer"],
+                    decision="approve", reason="并发审核",
+                    reviewer_token_version=seeded["reviewer_token_version"],
+                ).status
+            if operation == "prepare":
+                return checkout.prepare_refund(
+                    db, refund_no=seeded["refund_no"], admin_id=seeded["executor"],
+                )[0].status
+            return checkout.update_refund_result(
+                db, refund_no=seeded["refund_no"], result={"state": "UNKNOWN"},
+                verified_provider_query=True,
+                reconciliation_token=reconciliation_token,
+                now=reconciliation_at + timedelta(seconds=1),
+            ).status
+
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        with factory.begin() as guard:
+            company = org._company(guard, seeded["company"], lock=True)
+            assert company.status == "active"
+            task = pool.submit(write_refund_state)
+            assert started.wait(5)
+            assert _wait_for_enterprise_lock(fresh_chain, connection_ids["writer"])
+            assert not task.done()
+        expected = {"request": "manual_review", "review": "approved", "prepare": "processing",
+                    "update": "unknown"}[operation]
+        assert task.result(timeout=5) == expected
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
+
+
+def test_mysql_enterprise_refund_rechecks_admin_after_revocation_commits(fresh_chain):
+    """A stale API authorization cannot create or freeze a refund after demotion."""
+    factory = sessionmaker(bind=fresh_chain, autoflush=False, expire_on_commit=False)
+    seeded = _seed_company(factory, with_refund=False)
+    requester_id = seeded["reviewer"]
+    with factory.begin() as db:
+        db.add(EnterpriseMember(
+            enterprise_id=seeded["company"], user_id=requester_id, role="admin", status="active",
+        ))
+
+    api_authorized = threading.Event()
+    connection_ids = {}
+
+    def request_after_stale_api_check():
+        with factory.begin() as db:
+            connection_ids["requester"] = db.execute(text("SELECT CONNECTION_ID()")).scalar_one()
+            # Mirrors the route's preflight check, which can race with demotion.
+            org.require_enterprise_admin(db, seeded["company"], requester_id)
+            api_authorized.set()
+            try:
+                checkout.request_refund(
+                    db, order_no=seeded["order_no"], requester_id=requester_id, reason="撤权并发退款",
+                )
+            except ForbiddenError:
+                return "denied"
+            return "created"
+
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        with factory.begin() as revoke:
+            org._company(revoke, seeded["company"], lock=True)
+            member = (revoke.query(EnterpriseMember)
+                      .filter_by(enterprise_id=seeded["company"], user_id=requester_id)
+                      .populate_existing().with_for_update().one())
+            member.role = "member"
+            future = pool.submit(request_after_stale_api_check)
+            assert api_authorized.wait(5)
+            assert _wait_for_enterprise_lock(fresh_chain, connection_ids["requester"])
+            assert not future.done()
+        assert future.result(timeout=10) == "denied"
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
+
+    with factory() as db:
+        assert db.query(BillingRefund).filter_by(order_no=seeded["order_no"]).count() == 0
+        refund_holds = (db.query(BillingCreditBatch.refund_reserved_milli)
+                        .filter_by(wallet_id=seeded["wallet"]).all())
+        assert refund_holds and all(value == 0 for (value,) in refund_holds)
+
+
+@pytest.mark.parametrize("winner", ["send", "refund"])
+def test_mysql_send_reservation_and_current_period_refund_have_one_winner(
+    fresh_chain, verified_model_catalog, winner,
+):
+    factory = sessionmaker(bind=fresh_chain, autoflush=False, expire_on_commit=False)
+    seeded = _seed_company(factory)
+    _grant_reviewer(factory, seeded)
+    sender_started, sender_locked, sender_continue = threading.Event(), threading.Event(), threading.Event()
+    writer_started = threading.Event()
+    connection_ids = {}
+
+    def authorize_and_reserve():
         with factory.begin() as db:
             connection_ids["sender"] = db.execute(text("SELECT CONNECTION_ID()")).scalar_one()
-            sender_attempt.set()
-            db.execute(text("SELECT enterprise_id FROM test_billing_auth_mutex "
-                            "WHERE enterprise_id=:id FOR SHARE"), {"id": company}).one()
+            sender_started.set()
+            org._company(db, seeded["company"], lock=True)
+            db.query(User).filter_by(id=seeded["reviewer"]).populate_existing().with_for_update().one()
             sender_locked.set()
             if winner == "send":
                 assert sender_continue.wait(10)
-            # The refund predicate remains the only truth; never cache a duplicate boolean.
-            with factory() as fresh:
-                pending = checkout.enterprise_subscription_refund_pending(fresh, company)
-            if pending:
-                sender_ready.set()
+            status = checkout.enterprise_subscription_status_current(db, seeded["company"])
+            if status not in {"active", "grace"}:
                 return "denied"
-            snapshot = billing_group.capture(db, enterprise_id=company, user_id=buyer,
-                                             conversation_id=room, lock_company=False)
-            assert snapshot.group_id is None
-            sender_ready.set()
-            assert sender_release.wait(10)
+            ledger.reserve(
+                db,
+                request_key=f"auth-race-{seeded['suffix']}",
+                model_name="deepseek-flash",
+                user_id=seeded["buyer"],
+                max_milli=100,
+                enterprise_wallet_id=seeded["wallet"],
+                enterprise_id=seeded["company"],
+                provider_identity=ledger.BillingProviderIdentity(
+                    "deepseek-official-v1", "deepseek", "api.deepseek.com", "system",
+                ),
+            )
             return "authorized"
 
-    def refund_writer():
+    def approve_refund():
         with factory.begin() as db:
             connection_ids["writer"] = db.execute(text("SELECT CONNECTION_ID()")).scalar_one()
-            checkout._lock_refund_and_order(db, refund_no)  # Existing actual order -> refund order.
-            writer_attempt.set()
-            db.execute(text("SELECT enterprise_id FROM test_billing_auth_mutex "
-                            "WHERE enterprise_id=:id FOR UPDATE"), {"id": company}).one()
-            writer_ready.set()
-            if winner == "refund":
-                assert writer_release.wait(10)
-            if mutation == "review":
-                refund = checkout.review_manual_refund(db, refund_no=refund_no, admin_id=reviewer,
-                                                       decision="approve", reason="隔离测试")
-                assert refund.status == "approved"
-            elif mutation == "prepare":
-                refund, _ = checkout.prepare_refund(db, refund_no=refund_no, admin_id=reviewer + 10000)
-                assert refund.status == "processing"
-            else:
-                refund = checkout.update_refund_result(db, refund_no=refund_no, result={"state": "SUCCESS"},
-                                                       attempt_no=1, create_response_verified=True)
-                assert (refund.status, refund.provider_status) == ("manual_review", "UNKNOWN")
-            db.execute(text("UPDATE test_billing_auth_mutex SET epoch=epoch+1 WHERE enterprise_id=:id"),
-                       {"id": company})
+            writer_started.set()
+            return checkout.review_manual_refund(
+                db, refund_no=seeded["refund_no"], admin_id=seeded["reviewer"],
+                decision="approve", reason="并发裁决",
+                reviewer_token_version=seeded["reviewer_token_version"],
+            ).status
 
-    def waiting_table(connection_id):
-        with fresh_chain.connect() as connection:
-            return connection.execute(text(
-                "SELECT l.OBJECT_NAME FROM performance_schema.data_lock_waits w "
-                "JOIN performance_schema.threads t ON t.THREAD_ID=w.REQUESTING_THREAD_ID "
-                "JOIN performance_schema.data_locks l ON l.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID "
-                "WHERE t.PROCESSLIST_ID=:cid LIMIT 1"
-            ), {"cid": connection_id}).scalar_one_or_none()
-
-    async def wait_for_wait(name):
-        for _ in range(200):
-            table = await asyncio.to_thread(waiting_table, connection_ids[name])
-            if table:
-                return table
-            await asyncio.sleep(0.02)
-        pytest.fail("未观察到授权互斥行上的锁等待")
-
-    class Handler(BaseHTTPRequestHandler):
-        def do_POST(self):
-            self.rfile.read(int(self.headers["Content-Length"]))
-            calls.append(1)
-            received.set()
-            if respond.wait(10):
-                self.send_response(200)
-                self.end_headers()
-                self.wfile.write(b"ok")
-
-        def log_message(self, *_args):
-            pass
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
-    server_thread.start()
     pool = ThreadPoolExecutor(max_workers=2)
     try:
         if winner == "send":
-            sender = pool.submit(send_guard)
-            assert await asyncio.to_thread(sender_locked.wait, 5)
-            writer = pool.submit(refund_writer)
-            assert await asyncio.to_thread(writer_attempt.wait, 5)
-            assert await wait_for_wait("writer") == "test_billing_auth_mutex"
+            sender = pool.submit(authorize_and_reserve)
+            assert sender_locked.wait(5)
+            writer = pool.submit(approve_refund)
+            assert writer_started.wait(5)
+            assert _wait_for_enterprise_lock(fresh_chain, connection_ids["writer"])
             sender_continue.set()
-            assert await asyncio.to_thread(sender_ready.wait, 5)
-
-            async def trace(name, _info):
-                if name == "http11.send_request_body.complete":
-                    sender_release.set()
-
-            async def send():
-                async with httpx.AsyncClient(trust_env=False, http2=False, timeout=10) as client:
-                    async with client.stream("POST", f"http://127.0.0.1:{server.server_port}/",
-                                             json={"model": "test"}, extensions={"trace": trace}) as response:
-                        return await response.aread()
-
-            task = asyncio.create_task(send())
-            assert await asyncio.to_thread(received.wait, 5)
-            assert await asyncio.to_thread(sender.result, 5) == "authorized"
-            await asyncio.to_thread(writer.result, 5)
-            assert not task.done()
-            respond.set()
-            assert await task == b"ok" and calls == [1]
-            # Local fixture usage, not a claim that a real supplier returned it.
-            with factory.begin() as db:
-                row = db.query(BillingReservation).filter_by(request_key=request_key).one()
-                actual = ledger._quote_with_rates(ledger._reservation_rates(row), 10, 5)
-                settled = ledger.settle(db, request_key=request_key, actual_milli=actual,
-                                        input_tokens=10, output_tokens=5)
-                assert settled.status == "settled"
-        else:
-            writer = pool.submit(refund_writer)
-            assert await asyncio.to_thread(writer_ready.wait, 5)
-            sender = pool.submit(send_guard)
-            assert await asyncio.to_thread(sender_attempt.wait, 5)
-            assert await wait_for_wait("sender") == "test_billing_auth_mutex"
-            writer_release.set()
-            await asyncio.to_thread(writer.result, 5)
-            assert await asyncio.to_thread(sender.result, 5) == "denied"
-            assert not calls
+            assert sender.result(timeout=5) == "authorized"
+            with pytest.raises(ledger.BillingError):
+                writer.result(timeout=5)
             with factory() as db:
-                assert db.query(BillingReservation).filter_by(request_key=request_key).one().status == "reserved"
-    finally:
-        sender_release.set()
-        sender_continue.set()
-        writer_release.set()
-        respond.set()
-        pool.shutdown(wait=True, cancel_futures=True)
-        server.shutdown()
-        server.server_close()
-        server_thread.join(timeout=5)
-        with fresh_chain.begin() as db:
-            db.execute(text("DROP TABLE test_billing_auth_mutex"))
-
-
-def test_unmodified_old_refund_worker_bypasses_candidate_mutex(fresh_chain, verified_model_catalog):
-    """Schema alone does not protect mixed old/new worker deployments."""
-    factory = sessionmaker(bind=fresh_chain, autoflush=False, expire_on_commit=False)
-    company, _buyer, reviewer, _room, refund_no, _request_key = _scenario(factory)
-    _create_mutex_table(fresh_chain, company)
-
-    def old_refund_worker():
-        with factory.begin() as db:
-            refund = checkout.review_manual_refund(db, refund_no=refund_no, admin_id=reviewer,
-                                                   decision="approve", reason="旧 worker 隔离测试")
-            assert refund.status == "approved"
-
-    try:
-        with factory.begin() as guard:
-            guard.execute(text("SELECT enterprise_id FROM test_billing_auth_mutex "
-                               "WHERE enterprise_id=:id FOR SHARE"), {"id": company}).one()
-            with factory() as fresh:
-                assert not checkout.enterprise_subscription_refund_pending(fresh, company)
-            pool = ThreadPoolExecutor(max_workers=1)
-            try:
-                pool.submit(old_refund_worker).result(timeout=5)
-            finally:
-                pool.shutdown(wait=False, cancel_futures=True)
-            with factory() as fresh:
-                assert checkout.enterprise_subscription_refund_pending(fresh, company)
-    finally:
-        with fresh_chain.begin() as db:
-            db.execute(text("DROP TABLE test_billing_auth_mutex"))
-
-
-def test_proposed_refund_epoch_and_review_roll_back_together(fresh_chain, verified_model_catalog):
-    """A failed refund transaction cannot leave a false committed authorization epoch."""
-    factory = sessionmaker(bind=fresh_chain, autoflush=False, expire_on_commit=False)
-    company, _buyer, reviewer, _room, refund_no, _request_key = _scenario(factory)
-    _create_mutex_table(fresh_chain, company)
-    try:
-        with pytest.raises(RuntimeError, match="forced rollback"):
+                reservation = db.query(BillingReservation).filter_by(
+                    request_key=f"auth-race-{seeded['suffix']}"
+                ).one()
+                refund = db.query(checkout.BillingRefund).filter_by(refund_no=seeded["refund_no"]).one()
+                assert reservation.status == "reserved"
+                assert refund.status == "manual_review"
+                assert checkout.enterprise_subscription_refund_pending(db, seeded["company"]) is False
             with factory.begin() as db:
-                checkout._lock_refund_and_order(db, refund_no)
-                db.execute(text("SELECT epoch FROM test_billing_auth_mutex "
-                                "WHERE enterprise_id=:id FOR UPDATE"), {"id": company}).one()
-                checkout.review_manual_refund(db, refund_no=refund_no, admin_id=reviewer,
-                                              decision="approve", reason="回滚隔离测试")
-                db.execute(text("UPDATE test_billing_auth_mutex SET epoch=epoch+1 WHERE enterprise_id=:id"),
-                           {"id": company})
-                raise RuntimeError("forced rollback")
-        with factory() as db:
-            assert db.execute(text("SELECT epoch FROM test_billing_auth_mutex WHERE enterprise_id=:id"),
-                              {"id": company}).scalar_one() == 0
-            assert not checkout.enterprise_subscription_refund_pending(db, company)
+                with pytest.raises(ledger.BillingError, match="未结算预占"):
+                    checkout.review_manual_refund(
+                        db, refund_no=seeded["refund_no"], admin_id=seeded["reviewer"],
+                        decision="approve", reason="重试并发审核",
+                        reviewer_token_version=seeded["reviewer_token_version"],
+                    )
+        else:
+            writer = pool.submit(approve_refund)
+            assert writer.result(timeout=5) == "approved"
+            sender = pool.submit(authorize_and_reserve)
+            assert sender_started.wait(5)
+            assert sender.result(timeout=5) == "denied"
+            with factory() as db:
+                assert db.query(BillingReservation).filter_by(
+                    request_key=f"auth-race-{seeded['suffix']}"
+                ).first() is None
+                assert checkout.enterprise_subscription_refund_pending(db, seeded["company"]) is True
     finally:
-        with fresh_chain.begin() as db:
-            db.execute(text("DROP TABLE test_billing_auth_mutex"))
+        sender_continue.set()
+        pool.shutdown(wait=True, cancel_futures=True)
+
+
+def test_mysql_current_subscription_check_uses_fresh_snapshot_after_company_lock(fresh_chain):
+    factory = sessionmaker(bind=fresh_chain, autoflush=False, expire_on_commit=False)
+    seeded = _seed_company(factory)
+    _grant_reviewer(factory, seeded)
+    stale = factory()
+    try:
+        assert checkout.enterprise_subscription_status(stale, seeded["company"]) == "active"
+        with factory.begin() as db:
+            checkout.review_manual_refund(db, refund_no=seeded["refund_no"], admin_id=seeded["reviewer"],
+                                          decision="approve", reason="旧快照验证",
+                                          reviewer_token_version=seeded["reviewer_token_version"])
+        org._company(stale, seeded["company"], lock=True)
+        assert checkout.enterprise_subscription_status(stale, seeded["company"]) == "active"
+        assert checkout.enterprise_subscription_status_current(stale, seeded["company"]) == "none"
+    finally:
+        stale.rollback()
+        stale.close()
+
+
+def test_mysql_future_renewal_refund_keeps_current_period_authorized(
+    fresh_chain, verified_model_catalog,
+):
+    factory = sessionmaker(bind=fresh_chain, autoflush=False, expire_on_commit=False)
+    seeded = _seed_company(factory, with_refund=False)
+    paid_at = datetime.now(timezone.utc).replace(microsecond=0)
+    with factory.begin() as db:
+        renewal = checkout.create_order(db, user_id=seeded["buyer"], product="enterprise_renew", quantity=1,
+                                        channel="alipay", enterprise_id=seeded["company"])
+        checkout._apply_verified(db, renewal, {"trade_id": f"auth-renewal-{seeded['suffix']}"}, now=paid_at)
+        future_refund = checkout.request_refund(
+            db, order_no=renewal.order_no, requester_id=seeded["buyer"], reason="取消下周期续费",
+        )
+        assert future_refund.status == "manual_review"
+        future_refund_no = future_refund.refund_no
+    request_key = _reserve_one(factory, seeded)
+    with factory.begin() as db:
+        approved = checkout.review_manual_refund(
+            db, refund_no=future_refund_no, admin_id=seeded["reviewer"],
+            decision="approve", reason="取消下周期续费",
+        )
+        assert approved.status == "approved"
+        assert checkout.enterprise_subscription_status_current(db, seeded["company"]) == "active"
+    with factory() as db:
+        assert db.query(BillingReservation).filter_by(request_key=request_key).one().status == "reserved"

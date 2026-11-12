@@ -55,15 +55,18 @@ def _authority_db(tmp_path):
         User(id=2, username="member-a", password="x", email="a@example.invalid", role="user", status=1),
         User(id=3, username="member-b", password="x", email="b@example.invalid", role="user", status=1),
         User(id=4, username="member-c", password="x", email="c@example.invalid", role="user", status=1),
+        User(id=5, username="member-d", password="x", email="d@example.invalid", role="user", status=1),
     ])
     db.add_all([
         EnterpriseMember(enterprise_id=10, user_id=1, role="owner", status="active"),
         EnterpriseMember(enterprise_id=10, user_id=2, role="admin", status="active"),
         EnterpriseMember(enterprise_id=10, user_id=3, role="member", status="active"),
         EnterpriseMember(enterprise_id=10, user_id=4, role="member", status="active"),
+        EnterpriseMember(enterprise_id=10, user_id=5, role="member", status="active"),
         EnterpriseGroupMember(enterprise_id=10, group_id=20, user_id=2, role="member", status="active"),
         EnterpriseGroupMember(enterprise_id=10, group_id=20, user_id=3, role="member", status="active"),
         EnterpriseGroupMember(enterprise_id=10, group_id=20, user_id=4, role="leader", status="active"),
+        EnterpriseGroupMember(enterprise_id=10, group_id=20, user_id=5, role="member", status="active"),
         EnterpriseGroup(id=20, enterprise_id=10, name="小组", status="active"),
         EnterpriseChatMessage(
             id=100, enterprise_id=10, conversation_id=30, sender_id=3,
@@ -81,6 +84,7 @@ def test_newer_admin_or_group_leader_directive_blocks_member_run(tmp_path, sende
         db.add(EnterpriseChatMessage(
             id=101, enterprise_id=10, conversation_id=30, sender_id=sender_id,
             sender_type="human", client_message_id="new", content="@小菱 暂停并先复核",
+            sender_authority_rank=3 if sender_id == 2 else 2,
         ))
         db.commit()
         with pytest.raises(ConflictError, match="新的同级或更高权限"):
@@ -103,6 +107,7 @@ def test_newer_lower_rank_or_non_xiaoling_message_does_not_override_owner(tmp_pa
             EnterpriseChatMessage(
                 id=101, enterprise_id=10, conversation_id=30, sender_id=3,
                 sender_type="human", client_message_id="lower", content="@小菱 继续处理",
+                sender_authority_rank=1,
             ),
             EnterpriseChatMessage(
                 id=102, enterprise_id=10, conversation_id=30, sender_id=2,
@@ -124,8 +129,9 @@ def test_same_rank_peer_directive_blocks_member_run(tmp_path):
     engine, db = _authority_db(tmp_path)
     try:
         db.add(EnterpriseChatMessage(
-            id=101, enterprise_id=10, conversation_id=30, sender_id=4,
+            id=101, enterprise_id=10, conversation_id=30, sender_id=5,
             sender_type="human", client_message_id="peer", content="@小菱 先停止",
+            sender_authority_rank=1,
         ))
         db.commit()
         with pytest.raises(ConflictError, match="新的同级或更高权限"):
@@ -199,22 +205,35 @@ def test_removed_enterprise_member_cannot_keep_group_leader_authority(tmp_path):
 
 
 @pytest.mark.parametrize("revocation", ["group", "account"])
-def test_later_message_from_revoked_author_cannot_supersede_current_run(tmp_path, revocation):
+def test_send_time_authority_survives_later_author_revocation(tmp_path, revocation):
     engine, db = _authority_db(tmp_path)
     try:
+        if revocation == "group":
+            db.query(EnterpriseMember).filter_by(enterprise_id=10, user_id=2).one().role = "member"
+            db.query(EnterpriseGroupMember).filter_by(
+                enterprise_id=10, group_id=20, user_id=2,
+            ).one().role = "leader"
+        sender_authority_rank = 2 if revocation == "group" else 3
         db.add(EnterpriseChatMessage(
             id=101, enterprise_id=10, conversation_id=30, sender_id=2,
             sender_type="human", client_message_id="revoked-newer", content="@小菱 旧指令",
+            sender_authority_rank=sender_authority_rank,
         ))
         if revocation == "group":
             db.query(EnterpriseGroupMember).filter_by(enterprise_id=10, group_id=20, user_id=2).one().status = "removed"
         else:
             db.query(User).filter_by(id=2).one().status = 0
         db.commit()
-        _assert_no_newer_authority_directive(
+        current = _role_snapshot(
             db, enterprise_id=10, room=SimpleNamespace(id=30, kind="group", group_id=20),
-            source_message_id=100, initiator_id=3, initiator_rank=1,
+            messages=[db.query(EnterpriseChatMessage).filter_by(id=101).one()], initiator_id=3,
         )
+        assert current["messages"][0]["rank"] == 0
+        with pytest.raises(ConflictError, match="新的同级或更高权限"):
+            _assert_no_newer_authority_directive(
+                db, enterprise_id=10, room=SimpleNamespace(id=30, kind="group", group_id=20),
+                source_message_id=100, initiator_id=3, initiator_rank=1,
+            )
     finally:
         db.close()
         engine.dispose()

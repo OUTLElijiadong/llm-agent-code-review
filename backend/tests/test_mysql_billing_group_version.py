@@ -5,16 +5,22 @@ from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from threading import Event
 from time import monotonic, sleep
+from types import SimpleNamespace
 from uuid import uuid4
 
+import pytest
 import test_fresh_database_chain as chain
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
+from app.core.exceptions import ForbiddenError
 from app.models.enterprise_org import EnterpriseGroupMember, EnterpriseMember
 from app.models.user import User
+from app.services import enterprise_assistant_billing_group as billing_group
+from app.services import enterprise_assistant_runtime_service as assistant_runtime
+from app.services import enterprise_chat_service
 from app.services import enterprise_org_service as org
 
 fresh_chain = chain.fresh_chain
@@ -92,6 +98,55 @@ def test_stale_mysql_snapshot_cannot_reuse_old_group_version(fresh_chain):
     with factory() as verify:
         member = verify.query(EnterpriseMember).filter_by(enterprise_id=company, user_id=user).one()
         assert (member.default_group_id, member.billing_group_version) == (second, 6)
+
+
+def test_mysql_repeatable_read_rejects_old_billing_run_after_default_group_aba(fresh_chain, monkeypatch):
+    """An old RR snapshot cannot authorize a run after its default group changes A→B→A."""
+    monkeypatch.setattr(assistant_runtime, "_CROSS_SCOPE_ATTRIBUTION_VERIFIED", True)
+    factory = sessionmaker(bind=fresh_chain, autoflush=False, expire_on_commit=False)
+    company, owner, user, first, second = _seed(factory)
+    with factory.begin() as db:
+        org.set_group_member(db, company, first, owner, user, "member")
+        org.set_group_member(db, company, second, owner, user, "member")
+        org.set_default_group(db, company, owner, user, first)
+        room_id = enterprise_chat_service.open_conversation(db, company, owner, "company").id
+    with factory.begin() as db:
+        snapshot = billing_group.capture(
+            db, enterprise_id=company, user_id=user, conversation_id=room_id,
+        )
+    run = SimpleNamespace(
+        enterprise_id=company,
+        initiator_user_id=user,
+        conversation_id=room_id,
+        group_id=None,
+        billing_attribution_version=1,
+        billing_group_id=first,
+        billing_membership_version=snapshot.membership_version,
+        billing_user_token_version=snapshot.user_token_version,
+    )
+
+    with factory() as stale:
+        isolation = stale.execute(text("SELECT @@transaction_isolation")).scalar_one()
+        assert str(isolation).upper() == "REPEATABLE-READ"
+        old_member = stale.query(EnterpriseMember).filter_by(
+            enterprise_id=company, user_id=user,
+        ).one()
+        assert (old_member.default_group_id, old_member.billing_group_version) == (
+            first, snapshot.membership_version,
+        )
+        with factory.begin() as writer:
+            org.set_default_group(writer, company, owner, user, second)
+        with factory.begin() as writer:
+            org.set_default_group(writer, company, owner, user, first)
+
+        with pytest.raises(ForbiddenError, match="计费归属已变化"):
+            billing_group.validate(stale, run)
+        stale.rollback()
+
+    with factory() as verify:
+        current = verify.query(EnterpriseMember).filter_by(enterprise_id=company, user_id=user).one()
+        assert current.default_group_id == first
+        assert current.billing_group_version == snapshot.membership_version + 2
 
 
 def test_rejoin_after_removal_refreshes_older_member_snapshot(fresh_chain):

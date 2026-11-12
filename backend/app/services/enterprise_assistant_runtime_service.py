@@ -107,7 +107,6 @@ _PROVIDER_ATTEMPT_PENDING_RECONCILIATION = "provider_attempt_pending_reconciliat
 _TERMINAL = {COMPLETED, CANCELLED}
 _RETRYABLE = {FAILED, INCOMPLETE, MAX_ROUNDS_EXCEEDED}
 _PENDING = {WAITING_APPROVAL, WAITING_INPUT, WAITING_CLARIFICATION}
-_MEMBER_ROLE_RANK = {"owner": 4, "admin": 3, "member": 1}
 _SUPPORTED_SUBSCRIPTIONS = {"active", "grace"}
 _CROSS_SCOPE_ATTRIBUTION_VERIFIED = False
 
@@ -124,8 +123,10 @@ def _now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def _require_enterprise_active(db: Session, enterprise_id: int, *, lock: bool = False) -> None:
-    company = enterprise_org_service._company(db, enterprise_id, lock=lock)
+def _require_enterprise_active(
+    db: Session, enterprise_id: int, *, lock: bool = False, shared_lock: bool = False
+) -> None:
+    company = enterprise_org_service._company(db, enterprise_id, lock=lock, shared_lock=shared_lock)
     if company.status != "active":
         raise ForbiddenError("企业已暂停，禁止继续运行小菱任务")
 
@@ -149,10 +150,7 @@ def _parse_json(value: str, *, message: str) -> dict[str, Any]:
 
 
 def _rank(member_role: str | None, group_role: str | None, room_kind: str) -> int:
-    rank = _MEMBER_ROLE_RANK.get(member_role or "", 0)
-    if room_kind == "group" and group_role == "leader":
-        rank = max(rank, 2)
-    return rank
+    return enterprise_chat_service.authority_rank(member_role, group_role, room_kind)
 
 
 def _role_snapshot(
@@ -340,9 +338,9 @@ def _live_role_snapshot(
 ) -> dict[str, Any]:
     saved = _parse_json(state.permission_snapshot_json, message="企业运行权限快照损坏")
     # Organization writers take the company lock before changing membership.
-    # Hold it through the guarded action/publication, then lock relevant users
-    # and membership rows using current reads in that same transaction.
-    _require_enterprise_active(db, int(state.enterprise_id), lock=True)
+    # Hold a shared current-read lock through the guarded action/publication:
+    # writers still wait, while independent members can run concurrently.
+    _require_enterprise_active(db, int(state.enterprise_id), lock=True, shared_lock=True)
     room = enterprise_chat_service.get_conversation(
         db,
         int(state.enterprise_id),
@@ -434,17 +432,19 @@ def _assert_no_newer_authority_directive(
         if not other_authors:
             return
         scoped_messages = [row for row in newer if int(row.sender_id or 0) in other_authors]
-        latest_roles = _role_snapshot(
-            current_db,
-            enterprise_id=enterprise_id,
-            room=room,
-            messages=scoped_messages,
-            initiator_id=initiator_id,
-        )
-    if any(
-        int(row.get("rank") or 0) > 0 and int(row.get("rank") or 0) >= initiator_rank
-        for row in latest_roles.get("messages", [])
-    ):
+    superseded = False
+    for message in scoped_messages:
+        # Legacy messages predate immutable send-time ranks. Unknown authority
+        # must fail closed; current roles cannot prove who was authorized when
+        # the directive was sent, nor allow later role changes to revive a run.
+        if message.sender_authority_rank is None:
+            superseded = True
+            break
+        rank = int(message.sender_authority_rank)
+        if rank > 0 and rank >= initiator_rank:
+            superseded = True
+            break
+    if superseded:
         raise SupersededByAuthorityDirectiveError(
             "会话中有新的同级或更高权限成员 @小菱 指令；旧运行已停止后续工具调用，请按最新会话重新发起"
         )
@@ -793,7 +793,12 @@ class EnterpriseAssistantToolExecutor:
             if expires <= int(datetime.now(timezone.utc).timestamp()):
                 raise AuthError("登录状态已过期，请重新登录")
         run = self._db.query(EnterpriseAssistantRun).filter_by(id=state.assistant_run_id).one()
-        _room, candidates, rows, _fingerprint = clarification._context(self._db, run)
+        _room, candidates, rows, _fingerprint, superseded = clarification._context(self._db, run)
+        if superseded:
+            return ToolExecutionResult.failure(
+                "会话已有新的同级或更高权限 @小菱 指令，旧运行已失效。",
+                failure_kind="clarification_closed",
+            )
         existing = (self._db.query(EnterpriseAssistantClarification).filter_by(
             assistant_run_id=run.id, phase="tool", call_id=call.call_id,
         ).order_by(EnterpriseAssistantClarification.version.desc()).populate_existing().with_for_update().first())
@@ -1937,7 +1942,30 @@ class EnterpriseAssistantToolExecutor:
             )
         except (ConflictError, ForbiddenError, NotFoundError, PaymentRequiredError) as exc:
             self._db.rollback()
-            if not isinstance(exc, PaymentRequiredError):
+            with factory() as billing_db:
+                unresolved_attempt = (
+                    billing_db.query(BillingReservation.id)
+                    .filter(
+                        BillingReservation.enterprise_id == self._enterprise_id,
+                        BillingReservation.user_id == int(state.initiator_user_id),
+                        BillingReservation.request_key.startswith(
+                            f"{request_key_prefix}:", autoescape=True,
+                        ),
+                        BillingReservation.status.in_({"reserved", "unknown"}),
+                    )
+                    .limit(1)
+                    .first()
+                )
+            if unresolved_attempt is not None:
+                # Authorization can fail after the child hold but before the
+                # stream starts. Keep the hold frozen for audited C4 review,
+                # and expose the child as unknown instead of leaving a stale
+                # running lease that might look safe to retry.
+                self._mark_asset_invocation(
+                    factory, invocation.id, "unknown", type(exc).__name__[:64],
+                    execution_token=execution_token, lease_generation=retry_generation,
+                )
+            elif not isinstance(exc, PaymentRequiredError):
                 self._suppress_if_current_generation_unreserved(
                     factory,
                     invocation_id=int(invocation.id),
@@ -2516,10 +2544,9 @@ def _billing_scope(
             if controller_room is None:
                 raise ForbiddenError("企业运行控制者缺少当前会话授权上下文")
             _require_run_retry_controller(db, run, controller_id, controller_room)
-        if (
-            billing_checkout_service.enterprise_subscription_status(db, int(run.enterprise_id))
-            not in _SUPPORTED_SUBSCRIPTIONS
-        ):
+        if (billing_checkout_service.enterprise_subscription_status_current(
+                db, int(run.enterprise_id),
+        ) not in _SUPPORTED_SUBSCRIPTIONS):
             raise PaymentRequiredError("企业订阅已到期，禁止发送新的模型请求")
         if proactive:
             proactive_service.ensure_auto_budget(db, enterprise_org_service._company(db, int(run.enterprise_id)))
@@ -2582,8 +2609,14 @@ def _billing_scope(
             proactive_service.require_live_policy(db, run)
             proactive_service.require_fresh_event(db, run)
             _live_role_snapshot(db, current)
-            assistant_service._require_subscription(db, int(run.enterprise_id))
+            if (billing_checkout_service.enterprise_subscription_status_current(
+                    db, int(run.enterprise_id),
+            ) not in _SUPPORTED_SUBSCRIPTIONS):
+                raise PaymentRequiredError("企业订阅已到期，禁止发送新的模型请求")
             if getattr(run, "billing_attribution_version", 0) == 1:
+                # The successful current-read transaction is this attempt's dispatch
+                # linearization point. Later default-group changes affect later calls;
+                # this request and its reservation stay pinned to the original group.
                 if _validated_billing_group(db, current) != group_id:
                     raise ForbiddenError("企业小菱计费归属已变化，请重新发起任务")
                 reservation = db.query(BillingReservation).filter_by(

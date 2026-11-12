@@ -3,10 +3,12 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.exceptions import ForbiddenError
-from app.models.enterprise_chat import EnterpriseConversation
+from app.models.enterprise_chat import EnterpriseAssistantRun, EnterpriseChatMessage, EnterpriseConversation
 from app.models.enterprise_org import Enterprise, EnterpriseGroup, EnterpriseGroupMember, EnterpriseMember
 from app.models.user import User
 from app.services import enterprise_assistant_billing_group as billing_group
+from app.services import enterprise_assistant_service as legacy_assistant
+from app.models.billing_ledger import BillingReservation
 
 
 @pytest.fixture
@@ -116,3 +118,34 @@ def test_closed_feature_blocks_new_v1_actions_but_preserves_frozen_accounting(sc
     with pytest.raises(ForbiddenError, match="暂不能继续执行"):
         billing_group.validate(scope.db, run)
     assert billing_group.frozen(run) is None
+
+
+@pytest.mark.parametrize("room_id", [301, 302])
+def test_legacy_answer_path_cannot_start_new_company_or_direct_send(scope, monkeypatch, room_id):
+    import asyncio
+
+    db = scope.db
+    db.add(EnterpriseGroupMember(
+        enterprise_id=101, group_id=201, user_id=102, role="member", status="active",
+    ))
+    scope.member.default_group_id = 201
+    db.flush()
+    assert billing_group.capture(
+        db, enterprise_id=101, user_id=102, conversation_id=room_id,
+    ).group_id == 201
+    message = EnterpriseChatMessage(
+        enterprise_id=101, conversation_id=room_id, sender_id=102, sender_type="human",
+        client_message_id=f"legacy-cross-scope-{room_id}", content="@小菱 请总结",
+    )
+    db.add(message)
+    db.commit()
+    monkeypatch.setattr(legacy_assistant, "_model_config",
+                        lambda *_args: pytest.fail("legacy cross-scope path must stop before provider setup"))
+
+    with pytest.raises(billing_group.BillingAttributionUnavailable, match="旧版问答入口"):
+        asyncio.run(legacy_assistant.run_for_message(
+            db, enterprise_id=101, user_id=102, conversation_id=room_id, source_message_id=message.id,
+        ))
+
+    assert db.query(EnterpriseAssistantRun).filter_by(source_message_id=message.id).count() == 0
+    assert db.query(BillingReservation).count() == 0

@@ -977,16 +977,18 @@ def cancel_payment_order(order_no: str, db: Session = Depends(get_db), user: Use
 def request_order_refund(order_no: str, payload: RefundRequest, db: Session = Depends(get_db),
                          user: User = Depends(get_current_user)):
     try:
-        order = _accessible_order(db, order_no, user)
+        _accessible_order(db, order_no, user)
         refund = billing_checkout_service.request_refund(
             db, order_no=order_no, requester_id=user.id, reason=payload.reason,
-            enterprise_admin_authorized=order.enterprise_id is not None,
         )
         db.commit()
         return Resp(data=_refund_view(refund))
     except billing_ledger_service.BillingError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ForbiddenError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail="支付订单不存在") from exc
 
 
 @router.get("/orders/{order_no}/refunds")
@@ -1634,10 +1636,21 @@ def list_refund_reviews(limit: int = Query(50, ge=1, le=100), before_id: int | N
 @router.post("/admin/refunds/{refund_no}/decision")
 def admin_decide_refund(refund_no: str, payload: RefundDecision, db: Session = Depends(get_db),
                         admin: User = Depends(get_current_user)):
-    billing_refund_reviewer_service.require_reviewer(db, int(admin.id), int(admin.token_version or 0))
     try:
+        reviewer_id = int(admin.id)
+        reviewer_token_version = int(getattr(
+            admin, "_authenticated_token_version", admin.token_version or 0,
+        ))
+        # Authentication has completed, but its read transaction may have an
+        # older REPEATABLE READ snapshot. End it before the lock-free reviewer
+        # preflight so a revoked grant is rejected before looking up refund ids.
+        db.rollback()
+        billing_refund_reviewer_service.require_reviewer_snapshot(
+            db, reviewer_id, reviewer_token_version,
+        )
         refund = billing_checkout_service.review_manual_refund(
-            db, refund_no=refund_no, admin_id=admin.id, decision=payload.decision, reason=payload.reason,
+            db, refund_no=refund_no, admin_id=reviewer_id, decision=payload.decision, reason=payload.reason,
+            reviewer_token_version=reviewer_token_version,
         )
         db.commit()
         return Resp(data=_refund_view(refund))

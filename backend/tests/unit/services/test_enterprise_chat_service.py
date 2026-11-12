@@ -324,6 +324,13 @@ def test_http_tenant_private_chat_and_assistant_requires_paid_scope(orgdb):
         next_message = client.post(url, headers={"x-test-user": "2"},
                                    json={"client_message_id": "http-2", "content": "下一条"})
         next_id = next_message.json()["data"]["message"]["id"]
+        conversations = client.get("/enterprises/10/conversations", headers={"x-test-user": "2"})
+        direct = next(row for row in conversations.json()["data"]["items"] if row["id"] == room)
+        assert direct["last_message_id"] == next_id
+        assert direct["last_message_preview"] == "下一条"
+        assert direct["last_message_sender_id"] == 2
+        assert client.get("/enterprises/10/conversations", headers={"x-test-user": "1"}) \
+            .json()["data"]["items"] == []
         assert [row["id"] for row in client.get(url, headers={"x-test-user": "2"}, params={"limit": 1})
                 .json()["data"]["items"]] == [next_id]
         assert [row["id"] for row in client.get(url, headers={"x-test-user": "2"},

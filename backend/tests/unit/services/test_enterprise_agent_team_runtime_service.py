@@ -1671,6 +1671,82 @@ def test_company_team_bills_frozen_default_group_without_changing_chat_scope(run
         assert db.get(EnterpriseAssistantRun, 200).group_id is None
 
 
+def test_company_team_default_group_aba_after_reservation_is_released_before_send(runtime_factory, monkeypatch):
+    from app.services import enterprise_assistant_runtime_service as assistant_runtime
+    from app.services import enterprise_org_service
+    from app.services.billing_metered_call import MeteredRequestNotSent
+
+    monkeypatch.setattr(assistant_runtime, "_CROSS_SCOPE_ATTRIBUTION_VERIFIED", True)
+    factory, now = runtime_factory
+    with factory.begin() as db:
+        db.add_all([
+            EnterpriseGroup(id=1000, enterprise_id=10, name="团队默认 A 组", status="active"),
+            EnterpriseGroup(id=1001, enterprise_id=10, name="团队默认 B 组", status="active"),
+            EnterpriseGroupMember(enterprise_id=10, group_id=1000, user_id=2,
+                                  role="member", status="active"),
+            EnterpriseGroupMember(enterprise_id=10, group_id=1001, user_id=2,
+                                  role="member", status="active"),
+        ])
+        member = db.query(EnterpriseMember).filter_by(enterprise_id=10, user_id=2).one()
+        member.default_group_id = 1000
+        member.billing_group_version = 5
+        run = db.get(EnterpriseAssistantRun, 200)
+        run.billing_attribution_version = 1
+        run.billing_group_id = 1000
+        run.billing_membership_version = 5
+        run.billing_user_token_version = int(db.get(User, 2).token_version)
+        wallet = ledger.get_or_create_wallet(db, "enterprise", 10)
+        ledger.grant(db, wallet_id=int(wallet.id), grant_key="team-group-aba-credit",
+                     kind="purchase", amount_milli=20_000)
+    claim = runtime.claim_task(factory, enterprise_id=10, task_id=600, now=now)
+    provider = ledger.BillingProviderIdentity(
+        identity_version="deepseek-official-v1", provider_name="deepseek",
+        endpoint_host="api.deepseek.com", credential_source="system",
+    )
+
+    original_metered_call = runtime.billing_metered_call.metered_call
+
+    def change_group_before_guard(**kwargs):
+        original_send_guard = kwargs["send_guard"]
+
+        def change_then_send(send, request_key):
+            with factory.begin() as mutation_db:
+                enterprise_org_service.set_default_group(
+                    mutation_db, 10, actor_id=1, user_id=2, group_id=1001,
+                )
+                enterprise_org_service.set_default_group(
+                    mutation_db, 10, actor_id=1, user_id=2, group_id=1000,
+                )
+            return original_send_guard(send, request_key)
+
+        kwargs["send_guard"] = change_then_send
+        return original_metered_call(**kwargs)
+
+    monkeypatch.setattr(runtime.billing_metered_call, "metered_call", change_group_before_guard)
+    provider_calls = []
+
+    def send():
+        provider_calls.append(True)
+        return "must-not-send", {"prompt_tokens": 10, "completion_tokens": 10}
+
+    with pytest.raises(MeteredRequestNotSent, match="发出前"):
+        runtime.metered_team_call(
+            session_factory=factory, enterprise_id=10, task_id=600,
+            lease_token=claim["lease_token"], lease_generation=claim["lease_generation"],
+            call_index=1, model_name="deepseek-flash", max_input_tokens=200,
+            max_output_tokens=200, provider_identity=provider, send=send, now=now,
+        )
+
+    assert provider_calls == []
+    with factory() as db:
+        reservation = db.query(BillingReservation).one()
+        member = db.query(EnterpriseMember).filter_by(enterprise_id=10, user_id=2).one()
+        assert (reservation.group_id, reservation.status, reservation.usage_state,
+                reservation.provider_attempt_started_at) == (1000, "released", "not_sent", None)
+        assert (member.default_group_id, member.billing_group_version) == (1000, 7)
+        assert any(event.event_type == "billing.not_sent" for event in db.query(EnterpriseAgentTeamEvent).all())
+
+
 def test_enterprise_team_budget_rejects_before_provider_send(runtime_factory):
     factory, now = runtime_factory
     claim = runtime.claim_task(factory, enterprise_id=10, task_id=600, now=now)

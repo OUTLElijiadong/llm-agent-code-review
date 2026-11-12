@@ -67,6 +67,19 @@ def _conversation(row):
             "create_time": row.create_time}
 
 
+def _conversation_with_latest_message(row, latest_message):
+    data = _conversation(row)
+    if latest_message is None:
+        data.update(last_message_id=None, last_message_preview=None, last_message_at=None,
+                    last_message_sender_id=None, last_message_sender_type=None)
+        return data
+    preview = " ".join((latest_message.content or "").split())[:160]
+    data.update(last_message_id=latest_message.id, last_message_preview=preview,
+                last_message_at=latest_message.create_time, last_message_sender_id=latest_message.sender_id,
+                last_message_sender_type=latest_message.sender_type)
+    return data
+
+
 def _message(row):
     return {"id": row.id, "conversation_id": row.conversation_id, "sender_id": row.sender_id,
             "sender_type": row.sender_type, "assistant_run_id": row.assistant_run_id,
@@ -89,7 +102,13 @@ def _require_current_room_member(db: Session, enterprise_id: int, conversation_i
 @router.get("", response_model=Resp[dict])
 def list_conversations(enterprise_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     rows = service.list_conversations(db, enterprise_id, user.id)
-    return Resp(data={"items": [_conversation(row) for row in rows],
+    latest_messages = service.latest_messages_by_conversation(
+        db, enterprise_id, [int(row.id) for row in rows],
+    )
+    items = [_conversation_with_latest_message(row, latest_messages.get(int(row.id))) for row in rows]
+    items.sort(key=lambda item: (item["last_message_at"] or item["create_time"],
+                                 item["last_message_id"] or 0, item["id"]), reverse=True)
+    return Resp(data={"items": items,
                       "assistant_available": assistant_service.capability_available(db, enterprise_id),
                       "assistant_mode": "enterprise_agent_runtime"})
 

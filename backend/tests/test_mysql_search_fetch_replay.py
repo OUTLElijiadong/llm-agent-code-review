@@ -2,19 +2,27 @@
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from threading import Barrier, Event
+from types import SimpleNamespace
 from uuid import uuid4
 
 import httpx
 import pytest
 import test_fresh_database_chain as chain
-from sqlalchemy import event
+from sqlalchemy import event, text
 from sqlalchemy.orm import sessionmaker
 
-from app.models.billing_ledger import BillingCreditBatch, BillingReservation, BillingToolExecutionResult
+from app.core.exceptions import ForbiddenError
+from app.models.billing_ledger import BillingCreditBatch, BillingLimit, BillingReservation, BillingToolExecutionResult
+from app.models.enterprise_org import EnterpriseMember
+from app.models.user import User
 from app.services import billing_ledger_service as ledger
 from app.services import billing_rate_catalog_service as catalog
 from app.services import billing_search_fetch_service as service
+from app.services import enterprise_assistant_billing_group as billing_group
+from app.services import enterprise_chat_service
+from app.services import enterprise_org_service as org
 
 fresh_chain = chain.fresh_chain
 fresh_chain_url = chain.fresh_chain_url
@@ -48,7 +56,19 @@ def test_mysql_different_enterprises_complete_search_without_gap_deadlock(fresh_
     original_client = httpx.AsyncClient
     transport = httpx.MockTransport(lambda _req: httpx.Response(200, json={"results": [{"title": "ok"}]}))
     monkeypatch.setattr(service.httpx, "AsyncClient", lambda **kw: original_client(transport=transport, **kw))
-    barrier = Barrier(2)
+    batch_lock_waits = []
+
+    def observe_batch_lock_waits():
+        with fresh_chain.connect() as observer:
+            count = observer.execute(text(
+                "SELECT COUNT(*) FROM performance_schema.data_lock_waits w "
+                "JOIN performance_schema.data_locks l "
+                "ON l.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID "
+                "WHERE l.OBJECT_SCHEMA = DATABASE() AND l.OBJECT_NAME = 'billing_credit_batch'"
+            )).scalar_one()
+        batch_lock_waits.append(int(count))
+
+    barrier = Barrier(2, action=observe_batch_lock_waits)
 
     def synchronize_insert(_conn, _cursor, statement, _params, _ctx, _many):
         if statement.lstrip().upper().startswith("INSERT INTO BILLING_RESERVATION "):
@@ -63,6 +83,8 @@ def test_mysql_different_enterprises_complete_search_without_gap_deadlock(fresh_
     finally:
         event.remove(fresh_chain, "before_cursor_execute", synchronize_insert)
     assert [result.status for result in results] == ["success", "success"]
+    # Sample while both transactions hold their pre-insert locks at the barrier.
+    assert batch_lock_waits == [0]
     with sessions() as db:
         assert db.query(BillingReservation).filter(BillingReservation.request_key.startswith(prefix)).count() == 2
         assert db.query(BillingToolExecutionResult).filter(
@@ -102,6 +124,116 @@ def test_mysql_old_rr_snapshot_retries_terminal_result_without_another_call(fres
     result = _invoke(sessions, wallets[org], org, key, authorize)
     assert result.status == "success" and result.payload["results"][0]["title"] == "saved"
     assert len(checks) == 2
+
+
+@pytest.mark.parametrize(("tool_name", "arguments"), [
+    ("search", {"query": "默认小组授权变更"}),
+    ("fetch", {"url": "https://example.com/page"}),
+])
+def test_mysql_default_group_aba_releases_search_fetch_before_provider_send(
+    fresh_chain, monkeypatch, tool_name, arguments,
+):
+    """A real MySQL RR default-group ABA cannot pass the final tool send fence."""
+    suffix = uuid4().hex[:12]
+    sessions = sessionmaker(bind=fresh_chain, autoflush=False, expire_on_commit=False)
+    with sessions.begin() as db:
+        owner = User(username=f"sf-aba-owner-{suffix}", password="x", role="user", status=1)
+        member = User(username=f"sf-aba-member-{suffix}", password="x", role="user", status=1)
+        db.add_all([owner, member])
+        db.flush()
+        company = org.create_enterprise_from_paid_order(
+            db, owner_id=int(owner.id), name=f"Search Fetch ABA {suffix}", seat_limit=3,
+            paid_order_id=f"sf-aba-{suffix}",
+        )
+        enterprise_id, owner_id, member_id = int(company.id), int(owner.id), int(member.id)
+        db.add(EnterpriseMember(
+            enterprise_id=enterprise_id, user_id=member_id, role="member", status="active",
+        ))
+        db.flush()
+        first = org.create_group(db, enterprise_id, owner_id, f"甲组-{suffix}")
+        second = org.create_group(db, enterprise_id, owner_id, f"乙组-{suffix}")
+        first_id, second_id = int(first.id), int(second.id)
+        org.set_group_member(db, enterprise_id, first_id, owner_id, member_id, "member")
+        org.set_group_member(db, enterprise_id, second_id, owner_id, member_id, "member")
+        org.set_default_group(db, enterprise_id, owner_id, member_id, first_id)
+
+    with sessions() as db:
+        room = enterprise_chat_service.open_conversation(db, enterprise_id, member_id, "company")
+        room_id = int(room.id)
+    with sessions.begin() as db:
+        snapshot = billing_group.capture(
+            db, enterprise_id=enterprise_id, user_id=member_id, conversation_id=room_id,
+        )
+        assert snapshot.group_id == first_id
+        run = SimpleNamespace(
+            enterprise_id=enterprise_id,
+            initiator_user_id=member_id,
+            conversation_id=room_id,
+            group_id=None,
+            billing_attribution_version=1,
+            billing_group_id=first_id,
+            billing_membership_version=snapshot.membership_version,
+            billing_user_token_version=snapshot.user_token_version,
+        )
+
+    sessions, wallets = _setup(fresh_chain, monkeypatch, [enterprise_id])
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    with sessions.begin() as db:
+        db.add(BillingLimit(
+            limit_key=f"sf-aba-limit:{suffix}", enterprise_id=enterprise_id, category="normal",
+            group_id=first_id, user_id=member_id, period_start=now - timedelta(days=1),
+            period_end=now + timedelta(days=31), limit_milli=10_000, used_milli=0, reserved_milli=0,
+        ))
+
+    monkeypatch.setattr(
+        "app.services.enterprise_assistant_runtime_service._CROSS_SCOPE_ATTRIBUTION_VERIFIED", True,
+    )
+    request_key = f"sf-aba:{suffix}:{tool_name}"
+    outbound = []
+    original_client = httpx.AsyncClient
+    transport = httpx.MockTransport(lambda request: (outbound.append(request),
+                                                       httpx.Response(200, json={"results": []}))[1])
+    monkeypatch.setattr(service.httpx, "AsyncClient", lambda **kw: original_client(transport=transport, **kw))
+    checks = 0
+
+    def authorize(db):
+        nonlocal checks
+        checks += 1
+        if checks == 2:
+            # The reservation is committed. Change the real member through both
+            # intermediate states before the final authorization/read-current fence.
+            with sessions.begin() as mutation:
+                org.set_default_group(mutation, enterprise_id, owner_id, member_id, second_id)
+            with sessions.begin() as mutation:
+                org.set_default_group(mutation, enterprise_id, owner_id, member_id, first_id)
+        return billing_group.validate(db, run)
+
+    with pytest.raises(ForbiddenError, match="计费归属已变化"):
+        asyncio.run(service.execute_tool(
+            session_factory=sessions, request_key=request_key, tool_name=tool_name, arguments=arguments,
+            user_id=member_id, enterprise_id=enterprise_id, enterprise_wallet_id=wallets[enterprise_id],
+            group_id=first_id, provider_name="deepseek", base_url="https://api.deepseek.com",
+            credential_source="system", api_key="sk-test", authorize=authorize,
+        ))
+
+    assert checks == 2
+    assert outbound == []
+    with sessions() as db:
+        reservation = db.query(BillingReservation).filter_by(request_key=request_key).one()
+        batch = db.query(BillingCreditBatch).filter_by(wallet_id=wallets[enterprise_id]).one()
+        member_row = db.query(EnterpriseMember).filter_by(
+            enterprise_id=enterprise_id, user_id=member_id,
+        ).one()
+        assert (reservation.enterprise_id, reservation.group_id, reservation.user_id) == (
+            enterprise_id, first_id, member_id,
+        )
+        assert (reservation.status, reservation.usage_state, reservation.provider_attempt_started_at) == (
+            "released", "not_sent", None,
+        )
+        assert (batch.remaining_milli, batch.reserved_milli) == (10_000, 0)
+        assert (member_row.default_group_id, member_row.billing_group_version) == (
+            first_id, snapshot.membership_version + 2,
+        )
 
 
 def test_mysql_same_key_concurrent_workers_freeze_unresolved_attempt_once(fresh_chain, monkeypatch):

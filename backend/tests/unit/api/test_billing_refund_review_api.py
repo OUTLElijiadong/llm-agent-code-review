@@ -1,6 +1,6 @@
 """Manual refunds require independently delegated review before execution."""
 
-from fastapi import FastAPI, Header
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -9,8 +9,8 @@ from sqlalchemy.pool import StaticPool
 
 from app.api.v1 import billing
 from app.core.database import Base, get_db
-from app.core.dependencies import get_current_user
 from app.core.exceptions import AppError
+from app.core.security import create_access_token
 from app.models.audit_log import AuditLog
 from app.models.billing_ledger import BillingOrder, BillingRefund
 from app.models.rbac import Role, UserRole
@@ -57,19 +57,19 @@ def test_refund_review_is_separate_from_other_financial_authorities(monkeypatch)
     def test_db():
         yield db
 
-    def test_user(x_test_user: int = Header()):
-        return db.get(User, x_test_user)
-
     app.dependency_overrides[get_db] = test_db
-    app.dependency_overrides[get_current_user] = test_user
     def headers(user):
-        return {"x-test-user": str(user.id)}
+        return {"Authorization": "Bearer " + create_access_token(
+            user.id, user.role, user.token_version or 0,
+        )}
 
     decision_url = f"/api/billing/admin/refunds/{refund.refund_no}/decision"
     decision = {"decision": "approve", "reason": "复核通过"}
     with TestClient(app) as client:
         assert client.get("/api/billing/refund-reviews", headers=headers(ungranted)).status_code == 403
         assert client.post(decision_url, headers=headers(owner), json=decision).status_code == 403
+        assert client.post("/api/billing/admin/refunds/not-a-refund/decision", headers=headers(ungranted),
+                           json=decision).status_code == 403
         assert client.put(f"/api/billing/admin/refund-reviewers/{reviewer.id}", headers=headers(reviewer),
                           json={"active": True, "reason": "自行委任"}).status_code == 403
         assert client.put(f"/api/billing/admin/refund-reviewers/{reviewer.id}", headers=headers(owner),
@@ -80,6 +80,8 @@ def test_refund_review_is_separate_from_other_financial_authorities(monkeypatch)
         assert client.post(f"/api/billing/admin/refunds/{refund.refund_no}/execute",
                            headers=headers(reviewer)).status_code == 403
         assert client.post(decision_url, headers=headers(reviewer), json=decision).status_code == 200
+        assert client.post("/api/billing/admin/refunds/not-a-refund/decision", headers=headers(reviewer),
+                           json=decision).status_code == 409
         assert db.query(AuditLog).filter_by(action="billing.refund.legacy_review", actor_id=owner.id,
                                             target_id=refund.refund_no).count() == 1
         assert db.query(AuditLog).filter_by(action="billing.refund.review", actor_id=reviewer.id,
@@ -122,5 +124,11 @@ def test_refund_review_is_separate_from_other_financial_authorities(monkeypatch)
         user_service.toggle_status(db, reviewer.id, 0, actor=owner)
         user_service.toggle_status(db, reviewer.id, 1, actor=owner)
         assert client.get("/api/billing/refund-reviews", headers=headers(reviewer)).status_code == 403
+        user_service.set_role(db, reviewer.id, "user", admin_id=owner.id)
+        user_service.set_role(db, reviewer.id, "admin", admin_id=owner.id)
+        assert client.get("/api/billing/refund-reviews", headers=headers(reviewer)).status_code == 403
+        from app.models.billing_ledger import BillingRefundReviewerGrant
+
+        assert db.query(BillingRefundReviewerGrant).filter_by(user_id=reviewer.id).one().active == 0
     db.close()
     engine.dispose()

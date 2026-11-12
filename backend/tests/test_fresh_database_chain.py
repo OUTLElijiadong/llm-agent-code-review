@@ -447,6 +447,7 @@ def _seed_mysql_security_scan_task(fresh_chain, monkeypatch):
             enterprise_id=int(enterprise.id), conversation_id=int(conversation.id),
             sender_id=int(initiator.id), sender_type="human", client_message_id=f"source-{suffix}",
             content="@小菱 执行安全扫描",
+            sender_authority_rank=1,
         )
         db.add(message)
         db.flush()
@@ -581,22 +582,29 @@ def test_mysql_security_artifact_commit_is_fenced_by_cancel_and_reclaimed_lease(
     from app.models.enterprise_agent_team import EnterpriseAgentTeamTask
     from app.models.enterprise_security_artifact import EnterpriseSecurityArtifact
     from app.services import enterprise_agent_team_runtime_service as runtime
-    from app.services import enterprise_org_service
 
     seeded = _seed_mysql_security_scan_task(fresh_chain, monkeypatch)
     sessions = seeded["sessions"]
     worker_entered = Event()
     winner_committed = Event()
-    real_company = enterprise_org_service._company
+    real_lock_live_context = runtime._lock_live_context
 
-    def pause_stale_worker_before_lock(db, enterprise_id, *, lock=False):
+    def pause_stale_worker_after_snapshot_before_lock(db, **kwargs):
         if current_thread().name == "sentinel-late-report":
+            # Establish this worker's MySQL RR snapshot without locking any row.
+            # Let cancellation or the new lease commit before the worker takes the
+            # parent authorization locks and the task's current-read fence.
+            isolation = str(db.execute(text("SELECT @@transaction_isolation")).scalar_one()).upper()
+            assert isolation.replace("_", "-") == "REPEATABLE-READ", (
+                f"该竞态验收要求 MySQL REPEATABLE READ，实际为 {isolation}"
+            )
+            db.query(EnterpriseAgentTeamTask.status).filter_by(id=seeded["task_id"]).one()
             worker_entered.set()
             if not winner_committed.wait(timeout=15):
                 raise AssertionError("取消或新租约事务没有完成")
-        return real_company(db, enterprise_id, lock=lock)
+        return real_lock_live_context(db, **kwargs)
 
-    monkeypatch.setattr(enterprise_org_service, "_company", pause_stale_worker_before_lock)
+    monkeypatch.setattr(runtime, "_lock_live_context", pause_stale_worker_after_snapshot_before_lock)
 
     def write_late_report() -> str:
         current_thread().name = "sentinel-late-report"
@@ -1559,6 +1567,7 @@ def test_enterprise_team_calls_allow_parallelism_while_revocation_cancel_and_lif
                     sender_type="human",
                     client_message_id=f"team-lock-message-{suffix}-{index}",
                     content="@小菱 执行只读任务",
+                    sender_authority_rank=1,
                 )
             )
             db.add(
@@ -2182,6 +2191,7 @@ def test_enterprise_team_calls_allow_parallelism_while_revocation_cancel_and_lif
             sender_type="human",
             client_message_id=f"team-lock-authority-source-{suffix}",
             content="@小菱 请处理旧任务",
+            sender_authority_rank=1,
         )
         db.add(source)
         db.flush()
@@ -5760,8 +5770,9 @@ def test_mysql_rate_review_authorization_and_revocation_serialize(fresh_chain, w
 
 
 @pytest.mark.parametrize("winner", ["review", "revoke"])
-def test_mysql_refund_review_and_revocation_serialize(fresh_chain, winner):
-    """A stale RR snapshot cannot authorize a review after revocation commits."""
+@pytest.mark.parametrize("revocation", ["grant", "role"])
+def test_mysql_refund_review_and_revocation_serialize(fresh_chain, winner, revocation):
+    """The production review lock order serializes with grant revocation and role downgrade."""
     import time
     from threading import Event, get_ident
 
@@ -5773,6 +5784,7 @@ def test_mysql_refund_review_and_revocation_serialize(fresh_chain, winner):
     from app.models.user import User
     from app.services import billing_checkout_service as checkout
     from app.services import billing_refund_reviewer_service as authority
+    from app.services import user_service
 
     sessions = sessionmaker(bind=fresh_chain, autoflush=False, expire_on_commit=False)
     with sessions.begin() as db:
@@ -5797,12 +5809,12 @@ def test_mysql_refund_review_and_revocation_serialize(fresh_chain, winner):
             # Establish an ordinary consistent-read snapshot before locking.
             db.query(BillingRefundReviewerGrant.id).filter_by(user_id=reviewer_id).first()
             try:
-                authority.require_reviewer(db, reviewer_id, 0)
+                checkout.review_manual_refund(db, refund_no=refund_no, admin_id=reviewer_id,
+                                              decision="approve", reason="复核通过",
+                                              reviewer_token_version=0)
                 if winner == "review":
                     locked.set()
                     assert release.wait(15)
-                checkout.review_manual_refund(db, refund_no=refund_no, admin_id=reviewer_id,
-                                              decision="approve", reason="复核通过")
                 db.commit()
                 return "approved"
             except ForbiddenError:
@@ -5811,7 +5823,10 @@ def test_mysql_refund_review_and_revocation_serialize(fresh_chain, winner):
 
     def revoke():
         with sessions.begin() as db:
-            authority.set_reviewer(db, actor_id=900, user_id=reviewer_id, active=False, reason="撤销测试")
+            if revocation == "grant":
+                authority.set_reviewer(db, actor_id=900, user_id=reviewer_id, active=False, reason="撤销测试")
+            else:
+                user_service.set_role(db, reviewer_id, "user", admin_id=900, commit=False)
             if winner == "revoke":
                 locked.set()
                 assert release.wait(15)
@@ -5862,6 +5877,8 @@ def test_mysql_refund_review_and_revocation_serialize(fresh_chain, winner):
             "approved" if winner == "review" else "manual_review"
         )
         assert db.query(BillingRefundReviewerGrant).filter_by(user_id=reviewer_id).one().active == 0
+        if revocation == "role":
+            assert db.get(User, reviewer_id).role == "user"
 
 
 def test_mysql_rate_cancellation_cannot_commit_after_catalog_was_used(fresh_chain, monkeypatch):

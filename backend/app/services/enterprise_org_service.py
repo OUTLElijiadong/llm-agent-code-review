@@ -39,13 +39,17 @@ def _advance_billing_group_version(member: EnterpriseMember) -> None:
     member.billing_group_version = version + 1
 
 
-def _company(db: Session, enterprise_id: int, *, lock: bool = False) -> Enterprise:
+def _company(
+    db: Session, enterprise_id: int, *, lock: bool = False, shared_lock: bool = False
+) -> Enterprise:
     query = db.query(Enterprise).filter(Enterprise.id == enterprise_id)
     # A locking read must refresh an Enterprise already present in the identity
     # map; under MySQL REPEATABLE READ, otherwise a prior consistent read can
     # leave a stale status on the ORM object even though this SELECT is current.
+    # Authorization readers may request a shared current read: organization
+    # writers still wait on this row, while independent readers can proceed.
     if lock:
-        query = query.populate_existing().with_for_update()
+        query = query.populate_existing().with_for_update(read=shared_lock)
     company = query.first()
     if not company or company.status not in {"active", "suspended"}:
         raise NotFoundError("企业不存在")
@@ -116,7 +120,7 @@ def _billing_authorization_session(db: Session, billing_db: Session | None = Non
     # enterprise permission check. Under InnoDB REPEATABLE READ that snapshot
     # can predate a refund entering processing. A short, read-only Session sees
     # the committed billing state; it deliberately takes no refund/order locks,
-    # preserving the refund -> order -> enterprise writer lock order.
+    # preserving the order -> enterprise -> refund writer lock order.
     with Session(bind=bind, autoflush=False, expire_on_commit=False) as fresh:
         yield fresh
 
@@ -379,8 +383,8 @@ def _current_billing_state(
     Management and execution requests commonly read the authenticated User before reaching
     organization services. Under MySQL REPEATABLE READ, subsequent plain reads in that request
     can keep seeing a refund as `requested` after another transaction commits `processing`.
-    Do not lock refund/order rows here: refund writers lock in refund -> order -> enterprise
-    order, and taking those locks while holding an enterprise lock would invert that order.
+    Do not lock refund/order rows here: subscription-refund writers lock in order -> enterprise
+    -> refund order, and taking those locks while holding an enterprise lock would invert it.
     """
     with _billing_authorization_session(db) as billing_db:
         company = billing_db.query(Enterprise).filter_by(id=enterprise_id).first()

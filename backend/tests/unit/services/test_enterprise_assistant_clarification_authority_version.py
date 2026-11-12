@@ -4,10 +4,12 @@ from test_enterprise_assistant_clarification_records import _request
 
 from app.core.exceptions import ConflictError, ForbiddenError
 from app.models.enterprise_assistant_clarification import EnterpriseAssistantClarificationReview
-from app.models.enterprise_chat import EnterpriseChatMessage
+from app.models.enterprise_assistant_runtime import EnterpriseAssistantRuntimeState
+from app.models.enterprise_chat import EnterpriseAssistantRun, EnterpriseChatMessage, EnterpriseConversation
 from app.models.enterprise_org import EnterpriseMember
 from app.models.user import User
 from app.services import enterprise_assistant_clarification_service as clarification
+from app.services import enterprise_assistant_runtime_service as runtime
 
 pytest_plugins = ("test_enterprise_assistant_clarification_records",)
 
@@ -25,6 +27,23 @@ def test_member_role_aba_cannot_reactivate_evidence(records_db):
     assert clarification.status(records_db, enterprise_id=10, conversation_id=30, request_id=request.id) == "stale"
 
 
+def test_legacy_newer_directive_stays_stale_after_author_loses_access(records_db):
+    request = _request(records_db)
+    records_db.add(EnterpriseChatMessage(
+        id=103, enterprise_id=10, conversation_id=30, sender_id=4, sender_type="human",
+        client_message_id="legacy-directive", content="@小菱 迁移前的指令", sender_authority_rank=None,
+    ))
+    records_db.commit()
+
+    assert clarification.status(records_db, enterprise_id=10, conversation_id=30, request_id=request.id) == "stale"
+
+    member = records_db.query(EnterpriseMember).filter_by(enterprise_id=10, user_id=4).one()
+    member.status = "removed"
+    records_db.commit()
+
+    assert clarification.status(records_db, enterprise_id=10, conversation_id=30, request_id=request.id) == "stale"
+
+
 def test_higher_authority_review_preserves_deny_and_is_idempotent(records_db):
     request = _request(records_db)
     clarification.decide(records_db, enterprise_id=10, conversation_id=30, request_id=request.id,
@@ -36,7 +55,10 @@ def test_higher_authority_review_preserves_deny_and_is_idempotent(records_db):
         records_db.commit()
     assert clarification.status(records_db, enterprise_id=10, conversation_id=30, request_id=request.id) == "recorded"
     assert clarification.decision_status(records_db, enterprise_id=10, conversation_id=30, request_id=request.id) == "complete"
-    from app.models.enterprise_assistant_clarification import EnterpriseAssistantClarificationDecision, EnterpriseAssistantClarificationReview
+    from app.models.enterprise_assistant_clarification import (
+        EnterpriseAssistantClarificationDecision,
+        EnterpriseAssistantClarificationReview,
+    )
     assert records_db.query(EnterpriseAssistantClarificationDecision).filter_by(request_id=request.id).one().decision == "deny"
     assert records_db.query(EnterpriseAssistantClarificationReview).filter_by(request_id=request.id).count() == 1
 
@@ -165,8 +187,8 @@ def test_current_authority_aba_always_invalidates(records_db, entity, changes):
 
 @pytest.mark.parametrize("field,other,original", [("role", "member", "leader"), ("status", "removed", "active")])
 def test_group_member_aba_invalidates(records_db, field, other, original):
-    from app.models.enterprise_org import EnterpriseGroup, EnterpriseGroupMember
     from app.models.enterprise_chat import EnterpriseConversation
+    from app.models.enterprise_org import EnterpriseGroup, EnterpriseGroupMember
     room = records_db.get(EnterpriseConversation, 30)
     room.kind, room.group_id = "group", 20
     records_db.add(EnterpriseGroup(id=20, enterprise_id=10, name="组", status="active"))
@@ -297,13 +319,38 @@ def test_review_audit_cannot_be_updated_or_deleted(records_db):
 
 
 def test_same_rank_author_can_revise_only_own_decision(records_db):
-    from app.models.enterprise_chat import EnterpriseChatMessage
-    from app.models.enterprise_assistant_clarification import EnterpriseAssistantClarificationReview
     from app.core.exceptions import ForbiddenError
+    from app.models.enterprise_assistant_clarification import EnterpriseAssistantClarificationReview
+    from app.models.enterprise_chat import EnterpriseChatMessage
     member = records_db.query(EnterpriseMember).filter_by(enterprise_id=10, user_id=2).one()
     member.role = "member"
-    records_db.add(EnterpriseChatMessage(id=103, enterprise_id=10, conversation_id=30, sender_id=4,
-                                         sender_type="human", client_message_id="peer", content="可以创建"))
+    records_db.add(
+        EnterpriseChatMessage(
+            id=103,
+            enterprise_id=10,
+            conversation_id=30,
+            sender_id=4,
+            sender_type="human",
+            client_message_id="peer",
+            content="@小菱 可以创建",
+        )
+    )
+    records_db.add(EnterpriseChatMessage(id=104, enterprise_id=10, conversation_id=30, sender_id=3,
+                                         sender_type="human", client_message_id="source-new",
+                                         content="@小菱 请继续"))
+    run = records_db.query(EnterpriseAssistantRun).filter_by(id=200).one()
+    state = records_db.query(EnterpriseAssistantRuntimeState).filter_by(assistant_run_id=200).one()
+    run.source_message_id = state.source_message_id = 104
+    room = records_db.query(EnterpriseConversation).filter_by(id=30).one()
+    frozen_messages = (records_db.query(EnterpriseChatMessage)
+                       .filter_by(enterprise_id=10, conversation_id=30, sender_type="human")
+                       .filter(EnterpriseChatMessage.id <= 104)
+                       .order_by(EnterpriseChatMessage.id).all())
+    snapshot = runtime._role_snapshot(records_db, enterprise_id=10, room=room,
+                                      messages=frozen_messages, initiator_id=3)
+    state.permission_snapshot_json, state.permission_snapshot_sha256 = (
+        runtime._json(snapshot), runtime._digest(snapshot),
+    )
     records_db.commit()
     request = _request(records_db)
     for author, mid, choice in ((2, 100, "deny"), (4, 103, "allow")):
@@ -411,6 +458,7 @@ def test_sqlite_role_change_with_explicit_version_bumps_exactly_once(records_db,
 def test_sqlite_all_authority_rows_protect_version_and_increment_once(records_db, recursive, table, where, field, new_value):
     from sqlalchemy import text
     from sqlalchemy.exc import IntegrityError
+
     from app.models.enterprise_org import EnterpriseGroup, EnterpriseGroupMember
     records_db.execute(text(f'PRAGMA recursive_triggers={recursive}'))
     if table == 'enterprise_group_member':

@@ -59,15 +59,16 @@ def _context(db: Session, run: EnterpriseAssistantRun):
     state = db.query(EnterpriseAssistantRuntimeState).filter_by(assistant_run_id=run.id).first()
     saved = json.loads(state.permission_snapshot_json or "{}") if state else {}
     frozen = saved.get("messages") if isinstance(saved, dict) else None
+    if (not isinstance(frozen, list) or len(frozen) > 30 or _digest(saved) != state.permission_snapshot_sha256
+            or any(not isinstance(row, dict) or type(row.get("message_id")) is not int
+                   or row.get("sender_type") not in {None, "human", "assistant"} for row in frozen)):
+        raise ForbiddenError("小菱会话快照缺失或无效")
     query = db.query(EnterpriseChatMessage).filter_by(
         enterprise_id=run.enterprise_id, conversation_id=run.conversation_id, sender_type="human")
-    if isinstance(frozen, list):
-        if len(frozen) > 30 or _digest(saved) != state.permission_snapshot_sha256:
-            raise ForbiddenError("小菱会话快照无效")
-        ids = [int(row["message_id"]) for row in frozen if row.get("sender_type") != "assistant"]
-        if int(run.source_message_id) not in ids:
-            raise ForbiddenError("小菱来源消息不在会话快照中")
-        query = query.filter(EnterpriseChatMessage.id.in_(ids), EnterpriseChatMessage.id <= run.source_message_id)
+    ids = [int(row["message_id"]) for row in frozen if row.get("sender_type") != "assistant"]
+    if int(run.source_message_id) not in ids:
+        raise ForbiddenError("小菱来源消息不在会话快照中")
+    query = query.filter(EnterpriseChatMessage.id.in_(ids), EnterpriseChatMessage.id <= run.source_message_id)
     messages = query.order_by(EnterpriseChatMessage.id.asc()).populate_existing().with_for_update().all()
     snapshot = _role_snapshot(db, enterprise_id=int(run.enterprise_id), room=room, messages=messages,
                               initiator_id=int(run.initiator_user_id), lock_current=True)
@@ -81,10 +82,35 @@ def _context(db: Session, run: EnterpriseAssistantRun):
     candidates = [message for message in messages if int(message.sender_id or 0) != int(run.initiator_user_id)
                   and int(rows[int(message.id)].get("rank") or 0) >= initiator_rank
                   and (not isinstance(frozen, list) or "@小菱" in (message.content or ""))]
+    newer_directives = (db.query(EnterpriseChatMessage)
+                        .filter(EnterpriseChatMessage.enterprise_id == int(run.enterprise_id),
+                                EnterpriseChatMessage.conversation_id == int(run.conversation_id),
+                                EnterpriseChatMessage.id > int(run.source_message_id),
+                                EnterpriseChatMessage.sender_type == "human",
+                                EnterpriseChatMessage.sender_id != int(run.initiator_user_id),
+                                EnterpriseChatMessage.content.like("%@小菱%"))
+                        .order_by(EnterpriseChatMessage.id.asc()).populate_existing().with_for_update().all())
+    superseding_directives = []
+    for message in newer_directives:
+        # Migration 119 cannot reconstruct send-time authority for legacy rows.
+        # Treat any such later directive as superseding so a future role change
+        # cannot make a previously stale clarification actionable again.
+        if message.sender_authority_rank is None:
+            superseding_directives.append({
+                "id": int(message.id), "author": int(message.sender_id), "rank": None,
+                "authority_unknown": True, "content": _digest({"text": message.content}),
+            })
+            continue
+        rank = int(message.sender_authority_rank)
+        if rank > 0 and rank >= initiator_rank:
+            superseding_directives.append({
+                "id": int(message.id), "author": int(message.sender_id), "rank": rank,
+                "content": _digest({"text": message.content}),
+            })
     source_message = next((message for message in messages if int(message.id) == int(run.source_message_id)), None)
     if source_message is None:
         raise ForbiddenError("小菱来源消息已变化")
-    fingerprint = _digest({
+    fingerprint_payload = {
         "initiator_rank": initiator_rank,
         "initiator_role": source.get("member_role"),
         "initiator_group_role": source.get("group_role"),
@@ -95,13 +121,18 @@ def _context(db: Session, run: EnterpriseAssistantRun):
                       "group_role": rows[int(message.id)].get("group_role"),
                       "content": _digest({"text": message.content})}
                      for message in candidates],
-    })
-    return room, candidates, rows, fingerprint
+    }
+    if superseding_directives:
+        fingerprint_payload["superseding_directives"] = superseding_directives
+    fingerprint = _digest(fingerprint_payload)
+    return room, candidates, rows, fingerprint, bool(superseding_directives)
 
 
 def model_send_evidence(db: Session, run: EnterpriseAssistantRun) -> dict[str, Any]:
     """Fingerprint all frozen input and authority rows for the run-level send gate."""
-    room, candidates, rows, _candidate_fingerprint = _context(db, run)
+    room, candidates, rows, _, superseded = _context(db, run)
+    if superseded:
+        raise ForbiddenError("会话已有新的同级或更高权限 @小菱 指令，旧运行已失效")
     state = (db.query(EnterpriseAssistantRuntimeState)
              .filter_by(assistant_run_id=int(run.id), enterprise_id=int(run.enterprise_id),
                         conversation_id=int(run.conversation_id))
@@ -188,7 +219,9 @@ def create_request(db: Session, *, enterprise_id: int, conversation_id: int, run
             or expires_at <= _now()):
         raise ValidationError("澄清动作或有效期无效")
     run = _run(db, enterprise_id, conversation_id, run_id)
-    room, messages, _rows, fingerprint = _context(db, run)
+    room, messages, _rows, fingerprint, superseded = _context(db, run)
+    if superseded:
+        raise ConflictError("会话已有新的同级或更高权限 @小菱 指令，不能继续创建澄清")
     authority_versions = _version_fingerprint(db, room, enterprise_id,
         {int(run.initiator_user_id), *(int(m.sender_id) for m in messages)})
     target_json = _json(dict(target))
@@ -242,8 +275,13 @@ def _record(db: Session, enterprise_id: int, conversation_id: int, request_id: i
 
 def status(db: Session, *, enterprise_id: int, conversation_id: int, request_id: int) -> str:
     record = _record(db, enterprise_id, conversation_id, request_id)
+    if record.expires_at <= _now():
+        return "expired"
     run = _run(db, enterprise_id, conversation_id, int(record.assistant_run_id))
-    room, messages, rows, current = _context(db, run)
+    try:
+        room, messages, rows, current, superseded = _context(db, run)
+    except (ForbiddenError, NotFoundError):
+        return "expired" if record.expires_at <= _now() else "stale"
     record = _record(db, enterprise_id, conversation_id, request_id, lock=True)
     if int(record.assistant_run_id) != int(run.id):
         raise ConflictError("澄清关联运行已变化")
@@ -251,6 +289,8 @@ def status(db: Session, *, enterprise_id: int, conversation_id: int, request_id:
         return "expired"
     if record.status != "pending":
         return record.status
+    if superseded:
+        return "stale"
     versions = _version_fingerprint(db, room, enterprise_id,
         {int(run.initiator_user_id), *(int(m.sender_id) for m in messages)})
     if record.phase == "model_send":
@@ -350,7 +390,9 @@ def decide(db: Session, *, enterprise_id: int, conversation_id: int, request_id:
     if current_status not in {"waiting", "recorded", "denied"}:
         raise ConflictError("澄清请求已结束、过期或会话权限已变化")
     run = _run(db, enterprise_id, conversation_id, int(record.assistant_run_id))
-    room, messages, rows, _fingerprint = _context(db, run)
+    room, messages, rows, _fingerprint, superseded = _context(db, run)
+    if superseded:
+        raise ConflictError("会话已有新的同级或更高权限 @小菱 指令，澄清已失效")
     enterprise_chat_service.get_conversation(db, enterprise_id, user_id, conversation_id)
     row = db.query(EnterpriseAssistantClarificationDecision).filter_by(
         request_id=request_id, source_message_id=source_message_id,

@@ -1,6 +1,7 @@
 """MySQL group attribution locks must stay shared across team authorization reads."""
 
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from threading import Barrier, Event, get_ident
 from time import monotonic, sleep
 from uuid import uuid4
@@ -13,11 +14,18 @@ from sqlalchemy.orm import sessionmaker
 
 import app.main  # noqa: F401 - register models for the fresh-chain fixture
 from app.core.exceptions import ForbiddenError, NotFoundError
-from app.models.enterprise_agent_team import EnterpriseAgentTeam, EnterpriseAgentTeamMember, EnterpriseAgentTeamTask
+from app.models.billing_ledger import BillingCreditBatch, BillingLimit, BillingReservation
+from app.models.enterprise_agent_team import (
+    EnterpriseAgentTeam,
+    EnterpriseAgentTeamEvent,
+    EnterpriseAgentTeamMember,
+    EnterpriseAgentTeamTask,
+)
 from app.models.enterprise_assistant_runtime import EnterpriseAssistantRuntimeState
 from app.models.enterprise_chat import EnterpriseAssistantRun, EnterpriseChatMessage, EnterpriseConversation
 from app.models.enterprise_org import Enterprise, EnterpriseGroup, EnterpriseGroupMember, EnterpriseMember
 from app.models.user import User
+from app.services import billing_ledger_service as ledger
 from app.services import enterprise_agent_team_runtime_service as runtime
 from app.services import enterprise_assistant_billing_group as billing_group
 from app.services import enterprise_assistant_runtime_service as parent_runtime
@@ -26,9 +34,10 @@ from app.services import enterprise_org_service as org
 
 fresh_chain = chain.fresh_chain
 fresh_chain_url = chain.fresh_chain_url
+verified_model_catalog = chain.verified_model_catalog
 
 
-def _seed(factory):
+def _seed(factory, *, ordinary_message_indexes=frozenset()):
     suffix = uuid4().hex[:12]
     permission, plan, capability = {"messages": []}, {"project_id": None}, {"execution_mode": "model_only"}
     with factory.begin() as db:
@@ -74,7 +83,8 @@ def _seed(factory):
                 sender_id=user.id,
                 sender_type="human",
                 client_message_id=f"message-{suffix}-{index}",
-                content="@小菱 执行任务",
+                content="普通消息" if index in ordinary_message_indexes else "@小菱 执行任务",
+                sender_authority_rank=None if index in ordinary_message_indexes else 1,
             )
             db.add(message)
             db.flush()
@@ -303,6 +313,134 @@ def test_group_v1_team_rechecks_old_snapshot_after_revocation(fresh_chain, monke
             runtime._lock_live_context(stale, enterprise_id=company, task_id=tasks[0], lock_company=False)
 
 
+def test_mysql_company_team_default_group_aba_releases_reservation_before_send(
+    fresh_chain, verified_model_catalog, monkeypatch,
+):
+    """A team in a company room cannot send after its frozen default group changes A→B→A."""
+    from app.services.billing_metered_call import MeteredRequestNotSent
+
+    _ready(monkeypatch)
+    factory = sessionmaker(bind=fresh_chain, autoflush=False, expire_on_commit=False)
+    company_id, group_a_id, owner_id, users, tasks, teams = _seed(factory)
+    member_id = users[0]
+    now = datetime.now(timezone.utc).replace(microsecond=0).replace(tzinfo=None)
+    suffix = uuid4().hex[:12]
+    plan = {
+        "project_id": None,
+        "allowed_models": ["deepseek-flash"],
+        "max_calls_per_task": 3,
+        "max_input_tokens_per_call": 200,
+        "max_output_tokens_per_call": 200,
+        "max_team_credits_milli": 10_000,
+        "risk_level": "low",
+        "requires_approval": False,
+    }
+    with factory.begin() as db:
+        group_b = org.create_group(db, company_id, owner_id, f"默认 B 组-{suffix}")
+        group_b_id = int(group_b.id)
+        org.set_group_member(db, company_id, group_b_id, owner_id, member_id, "member")
+        member = db.query(EnterpriseMember).filter_by(
+            enterprise_id=company_id, user_id=member_id,
+        ).one()
+        member.default_group_id = group_a_id
+        member.billing_group_version = 5
+        user = db.get(User, member_id)
+        run = db.query(EnterpriseAssistantRun).filter_by(
+            enterprise_id=company_id, initiator_user_id=member_id,
+        ).one()
+        room = db.get(EnterpriseConversation, run.conversation_id)
+        team = db.get(EnterpriseAgentTeam, teams[0])
+        # Exercise the cross-scope company-room path: group membership controls
+        # billing attribution while chat/team authorization remains ungrouped.
+        for room_team in db.query(EnterpriseAgentTeam).filter_by(conversation_id=room.id).all():
+            room_team.group_id = None
+        db.flush()
+        for room_run in db.query(EnterpriseAssistantRun).filter_by(conversation_id=room.id).all():
+            room_run.group_id = None
+        db.flush()
+        for room_state in db.query(EnterpriseAssistantRuntimeState).filter_by(conversation_id=room.id).all():
+            room_state.group_id = None
+        db.flush()
+        room.kind = "company"
+        room.group_id = None
+        room.conversation_key = f"company:{company_id}"
+        run.billing_attribution_version = 1
+        run.billing_group_id = group_a_id
+        run.billing_membership_version = 5
+        run.billing_user_token_version = int(user.token_version)
+        team.plan_snapshot_json = runtime._canonical_json(plan)
+        team.plan_sha256 = runtime._digest(plan)
+
+        wallet = ledger.get_or_create_wallet(db, "enterprise", company_id)
+        ledger.grant(
+            db, wallet_id=int(wallet.id), grant_key=f"team-default-group-aba:{suffix}",
+            kind="purchase", amount_milli=50_000,
+        )
+        db.add(BillingLimit(
+            limit_key=f"team-default-group-aba:{suffix}", enterprise_id=company_id,
+            category="normal", group_id=group_a_id, user_id=member_id,
+            period_start=now - timedelta(days=1), period_end=now + timedelta(days=31),
+            limit_milli=50_000, used_milli=0, reserved_milli=0,
+        ))
+
+    claim = runtime.claim_task(factory, enterprise_id=company_id, task_id=tasks[0], now=now)
+    provider = ledger.BillingProviderIdentity(
+        identity_version="deepseek-official-v1", provider_name="deepseek",
+        endpoint_host="api.deepseek.com", credential_source="system",
+    )
+    original_metered_call = runtime.billing_metered_call.metered_call
+
+    def change_group_before_send_guard(**kwargs):
+        original_send_guard = kwargs["send_guard"]
+
+        def change_then_send(send, request_key):
+            with factory.begin() as mutation_db:
+                org.set_default_group(mutation_db, company_id, owner_id, member_id, group_b_id)
+            with factory.begin() as mutation_db:
+                org.set_default_group(mutation_db, company_id, owner_id, member_id, group_a_id)
+            return original_send_guard(send, request_key)
+
+        kwargs["send_guard"] = change_then_send
+        return original_metered_call(**kwargs)
+
+    monkeypatch.setattr(runtime.billing_metered_call, "metered_call", change_group_before_send_guard)
+    provider_calls = []
+
+    def send():
+        provider_calls.append(True)
+        return "must-not-send", {"prompt_tokens": 10, "completion_tokens": 10}
+
+    with pytest.raises(MeteredRequestNotSent, match="发出前"):
+        runtime.metered_team_call(
+            session_factory=factory, enterprise_id=company_id, task_id=tasks[0],
+            lease_token=claim["lease_token"], lease_generation=claim["lease_generation"],
+            call_index=1, model_name="deepseek-flash", max_input_tokens=100,
+            max_output_tokens=100, provider_identity=provider, send=send, now=now,
+        )
+
+    assert provider_calls == []
+    with factory() as db:
+        team = db.get(EnterpriseAgentTeam, teams[0])
+        task = db.get(EnterpriseAgentTeamTask, tasks[0])
+        request_key = runtime._reservation_key(team, task, 1, 1)
+        reservation = db.query(BillingReservation).filter_by(request_key=request_key).one()
+        member = db.query(EnterpriseMember).filter_by(
+            enterprise_id=company_id, user_id=member_id,
+        ).one()
+        wallet = db.query(ledger.BillingWallet).filter_by(
+            owner_type="enterprise", owner_id=company_id,
+        ).one()
+        batch = db.query(BillingCreditBatch).filter_by(wallet_id=wallet.id).one()
+        limit = db.query(BillingLimit).filter_by(limit_key=f"team-default-group-aba:{suffix}").one()
+        assert (reservation.group_id, reservation.status, reservation.usage_state,
+                reservation.provider_attempt_started_at) == (group_a_id, "released", "not_sent", None)
+        assert (member.default_group_id, member.billing_group_version) == (group_a_id, 7)
+        assert (batch.remaining_milli, batch.reserved_milli, limit.reserved_milli) == (50_000, 0, 0)
+        assert db.query(EnterpriseAgentTeamEvent).filter_by(
+            team_id=teams[0], event_type="billing.not_sent",
+        ).count() == 1
+
+
 def test_team_attribution_rejects_cross_enterprise_and_closed_v1(fresh_chain, monkeypatch):
     _ready(monkeypatch)
     factory = sessionmaker(bind=fresh_chain, autoflush=False, expire_on_commit=False)
@@ -319,11 +457,6 @@ def test_team_attribution_rejects_cross_enterprise_and_closed_v1(fresh_chain, mo
             runtime._lock_live_context(db, enterprise_id=company, task_id=tasks[0], lock_company=False)
 
 
-class CompanyRowSerialization(Exception):
-    """Two independent team transactions contend on the company row."""
-
-
-
 def _install_live_snapshots(factory, company, teams, *, legacy):
     """Build real role snapshots; keep the tests independent of a model provider."""
     with factory.begin() as db:
@@ -336,9 +469,6 @@ def _install_live_snapshots(factory, company, teams, *, legacy):
             state = db.query(EnterpriseAssistantRuntimeState).filter_by(assistant_run_id=run.id).one()
             room = db.get(EnterpriseConversation, run.conversation_id)
             message = db.get(EnterpriseChatMessage, run.source_message_id)
-            if index == 1:
-                # Avoid making the later message an independent superseding command.
-                message.content = "普通消息"
             snapshot = parent_runtime._role_snapshot(
                 db,
                 enterprise_id=company,
@@ -352,17 +482,12 @@ def _install_live_snapshots(factory, company, teams, *, legacy):
             team.permission_snapshot_sha256 = parent_runtime._digest(snapshot)
 
 
-@pytest.mark.xfail(
-    raises=CompanyRowSerialization,
-    strict=True,
-    reason="真实角色快照会在 lock_company=False 路径持企业 X 锁，使同企业团队串行",
-)
 def test_live_team_authorization_does_not_serialize_independent_members(fresh_chain, monkeypatch):
     real_live_snapshot = parent_runtime._live_role_snapshot
     _ready(monkeypatch)
     monkeypatch.setattr(parent_runtime, "_live_role_snapshot", real_live_snapshot)
     factory = sessionmaker(bind=fresh_chain, autoflush=False, expire_on_commit=False)
-    company, _group, _owner, _users, tasks, teams = _seed(factory)
+    company, _group, _owner, _users, tasks, teams = _seed(factory, ordinary_message_indexes={1})
     _install_live_snapshots(factory, company, teams, legacy=True)
     held, release, started = Event(), Event(), Event()
     writer_ids = []
@@ -401,8 +526,6 @@ def test_live_team_authorization_does_not_serialize_independent_members(fresh_ch
                 if waiting_table or b.done():
                     break
                 sleep(0.05)
-            if waiting_table == "enterprise":
-                raise CompanyRowSerialization("不同成员团队等待 enterprise 行")
             assert waiting_table is None and b.done()
         finally:
             release.set()

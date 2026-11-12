@@ -59,8 +59,8 @@
           </button>
           <button v-for="room in filteredRooms" :key="room.id" type="button" class="room-row" :class="{ selected: room.id === roomId }" @click="selectRoom(room.id)">
             <span class="room-avatar" :class="`avatar-${room.kind}`">{{ roomAvatar(room) }}</span>
-            <span class="room-copy"><span class="room-title">{{ roomTitle(room) }}</span><span class="room-preview">{{ roomKindLabel(room) }}</span></span>
-            <span class="room-kind">{{ roomKindShort(room) }}</span>
+            <span class="room-copy"><span class="room-title">{{ roomTitle(room) }}</span><span class="room-preview">{{ roomPreview(room) }}</span></span>
+            <time v-if="room.last_message_at" class="room-time" :datetime="room.last_message_at">{{ formatConversationTime(room.last_message_at) }}</time>
           </button>
           <form class="direct-start" @submit.prevent="openDirect">
             <label for="direct-member">发起同事私聊</label>
@@ -325,7 +325,11 @@ const assistantRunCanCancel = computed(() => Boolean(assistantRun.value &&
 const otherMembers = computed(() => directory.value.filter(item => item.user_id !== currentUserId.value))
 const filteredRooms = computed(() => {
   const query = roomFilter.value.toLocaleLowerCase()
-  return rooms.value.filter(room => !query || roomTitle(room).toLocaleLowerCase().includes(query))
+  return rooms.value
+    .filter(room => !query || `${roomTitle(room)} ${room.last_message_preview || ''}`.toLocaleLowerCase().includes(query))
+    .sort((left, right) => Date.parse(right.last_message_at || right.create_time)
+      - Date.parse(left.last_message_at || left.create_time)
+      || (right.last_message_id || 0) - (left.last_message_id || 0) || right.id - left.id)
 })
 const currentCompanyName = computed(() => companies.value.find(item => item.id === companyId.value)?.name || '企业空间')
 const currentCompanyMeta = computed(() => {
@@ -490,8 +494,23 @@ function roomTitle(room: EnterpriseConversation) {
 function roomKindLabel(room: EnterpriseConversation) {
   return room.kind === 'company' ? '公司全员群' : room.kind === 'group' ? '企业小组群' : '企业成员私聊'
 }
-function roomKindShort(room: EnterpriseConversation) {
-  return room.kind === 'company' ? '公司' : room.kind === 'group' ? '小组' : '私聊'
+function roomPreview(room: EnterpriseConversation) {
+  if (!room.last_message_preview) return '暂无消息'
+  const sender = room.last_message_sender_type === 'assistant' ? '小菱'
+    : room.last_message_sender_id === currentUserId.value ? '我' : memberName(room.last_message_sender_id ?? null)
+  return `${sender}：${room.last_message_preview}`
+}
+function formatConversationTime(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const now = new Date()
+  const sameDay = date.getFullYear() === now.getFullYear()
+    && date.getMonth() === now.getMonth() && date.getDate() === now.getDate()
+  if (sameDay) return formatMessageTime(value)
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1)
+  if (date.getFullYear() === yesterday.getFullYear() && date.getMonth() === yesterday.getMonth()
+      && date.getDate() === yesterday.getDate()) return '昨天'
+  return new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' }).format(date)
 }
 function roomAvatar(room: EnterpriseConversation) {
   return room.kind === 'company' ? '企' : room.kind === 'group'
@@ -558,7 +577,7 @@ function assistantRunErrorLabel(error: string | null | undefined, status: Enterp
 }
 function assistantBillingUnavailable(error: unknown): string | null {
   const code = typeof error === 'object' && error !== null && 'code' in error ? Number(error.code) : 0
-  if (code === 40360) return '小菱暂不可用，请稍后再试。'
+  if (code === 40360) return '小菱计费尚未就绪。'
   if (code === 40361) return '请联系管理员设置默认小组。'
   return null
 }
@@ -1406,7 +1425,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .room-copy { display: grid; min-width: 0; gap: 5px; }
 .room-title, .room-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .room-title { color: #272b33; font-size: 13px; }.room-preview { color: #939aa7; font-size: 11px; }
-.room-kind { align-self: start; padding-top: 2px; color: #adb3bd; font-size: 10px; }
+.room-time { align-self: start; padding-top: 2px; color: #adb3bd; font-size: 10px; white-space: nowrap; }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .direct-start { display: grid; gap: 7px; margin: auto 12px 12px; padding-top: 12px; border-top: 1px solid #eceef2; font-size: 12px; }
 .direct-start > div { display: flex; gap: 6px; }.direct-start select { flex: 1; min-width: 0; padding: 7px; font-size: 12px; }.direct-start button { padding: 7px 10px; background: #f1f2ff; border-color: #dfe1ff; color: #555cc1; font-size: 12px; }

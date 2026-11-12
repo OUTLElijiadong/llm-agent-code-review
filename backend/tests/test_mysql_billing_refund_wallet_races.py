@@ -21,7 +21,7 @@ from app.models.billing_ledger import (
     BillingReservation,
     BillingSubscriptionPeriod,
 )
-from app.models.enterprise_org import Enterprise
+from app.models.enterprise_org import Enterprise, EnterpriseMember
 from app.models.user import User
 from app.services import billing_checkout_service as checkout
 from app.services import billing_ledger_service as ledger
@@ -46,6 +46,7 @@ def _seed_purchase(sessions, scope):
                                     paid_order_id=f"company-{token}")
             db.add(enterprise)
             db.flush()
+            db.add(EnterpriseMember(enterprise_id=enterprise.id, user_id=buyer.id, role="owner", status="active"))
         order = BillingOrder(order_no=f"order-{token}", user_id=buyer.id,
                              enterprise_id=enterprise.id if enterprise else None,
                              product="enterprise_credits" if enterprise else "personal_credits",
@@ -72,7 +73,7 @@ def _reserve(db, seed, key):
 
 def _request_refund(db, seed):
     return checkout.request_refund(db, order_no=seed["order"], requester_id=seed["buyer"],
-                                   enterprise_admin_authorized=seed["enterprise"] is not None, reason="隔离并发测试")
+                                   reason="隔离并发测试")
 
 
 @pytest.mark.parametrize("scope", ["user", "enterprise"])

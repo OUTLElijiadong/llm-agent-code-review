@@ -258,6 +258,7 @@ printf '%s | release=%s version=%s backend=%s frontend=%s\n' "$*" "${APP_RELEASE
 release_sha="${FAKE_RELEASE_SHA:-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}"
 release_version="${FAKE_RELEASE_VERSION:-3.8.2}"
 alembic_revision="${FAKE_ALEMBIC_REVISION:-047_review_input_snapshot}"
+  alembic_head="${FAKE_ALEMBIC_HEAD:-$alembic_revision}"
 image_digit=1
 case "$*" in
   *bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb*) release_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb; release_version=3.8.4; image_digit=3 ;;
@@ -292,6 +293,12 @@ case "${1:-}" in
         esac ;;
       ps)
         service="${*: -1}"
+        if [[ "$service" == backend && "$*" == *'--status running'* ]]; then
+          if [[ "${FAKE_CHAT_AUTHORITY_STOP_VERIFY_FAIL:-0}" == 1 || ! -f "${FAKE_RELEASE_WORKSPACE:?}/stopped" ]]; then
+            printf 'cid-backend\n'
+          fi
+          exit 0
+        fi
         if [[ "$service" == backend && -f "${FAKE_RELEASE_WORKSPACE:?}/stopped" && "$*" != *'-a'* ]]; then exit 0; fi
         printf 'cid-%s\n' "$service" ;;
       stop) touch "${FAKE_RELEASE_WORKSPACE:?}/stopped" ;;
@@ -299,6 +306,17 @@ case "${1:-}" in
       build) : ;;
       exec)
         case "$*" in
+          *'prism_chat_authority_schema'*)
+            chat_state="${FAKE_CHAT_AUTHORITY_SCHEMA_STATE:-absent}"
+            if [[ -n "${FAKE_CHAT_AUTHORITY_SCHEMA_FILE:-}" && -f "$FAKE_CHAT_AUTHORITY_SCHEMA_FILE" ]]; then
+              IFS= read -r chat_state < "$FAKE_CHAT_AUTHORITY_SCHEMA_FILE"
+            fi
+            case "$chat_state" in
+              absent) printf '{"column_count":0,"triggers":[]}\n' ;;
+              complete) cat "${FAKE_CHAT_AUTHORITY_COMPLETE_FIXTURE:?}" ;;
+              partial) printf '{"column_count":1,"triggers":[]}\n' ;;
+              invalid) printf 'unknown\n' ;;
+            esac ;;
           *'prism_checkpoint_schema'*)
             [[ "${FAKE_CHECKPOINT_DB_FAILURE:-0}" != 1 ]] || exit 71
             if [[ "${FAKE_CHECKPOINT_SCHEMA_UNKNOWN:-0}" == 1 ]]; then echo unknown; else printf '%s\t1\t1\n' "${FAKE_CHECKPOINT_SCHEMA:-0}"; fi ;;
@@ -306,8 +324,15 @@ case "${1:-}" in
             [[ "${FAKE_CHECKPOINT_DB_FAILURE:-0}" != 1 ]] || exit 71
             printf '%s\t%s\n' "${FAKE_CHECKPOINT_INVALID:-0}" "${FAKE_CHECKPOINT_REFERENCE:-0}" ;;
           *'printf "%s" "$MYSQL_DATABASE"'*) printf 'code_review' ;;
-          *'SELECT version_num'*) echo "$alembic_revision" ;;
-          *'alembic heads'*) echo "$alembic_revision (head)" ;;
+          *'SELECT version_num'*)
+            if [[ -n "${FAKE_ALEMBIC_CURRENT_ROWS:-}" ]]; then
+              printf '%s\n' "$FAKE_ALEMBIC_CURRENT_ROWS"
+            elif [[ -n "${FAKE_DB_REVISION_FILE:-}" && -f "$FAKE_DB_REVISION_FILE" ]]; then
+              cat "$FAKE_DB_REVISION_FILE"
+            else
+              echo "$alembic_revision"
+            fi ;;
+          *'alembic heads'*) echo "$alembic_head (head)" ;;
           *'--max-allowed-packet'*)
             cat >/dev/null
             if [[ "${FAKE_RELEASE_MODE:-}" == restore_import_failure ]]; then
@@ -320,8 +345,13 @@ case "${1:-}" in
         esac ;;
       run)
         case "$*" in
-          *'alembic heads'*) echo "$alembic_revision (head)" ;;
-          *'alembic current'*) echo "$alembic_revision" ;;
+          *'alembic heads'*) echo "$alembic_head (head)" ;;
+          *'alembic current'*)
+            if [[ -n "${FAKE_DB_REVISION_FILE:-}" && -f "$FAKE_DB_REVISION_FILE" ]]; then
+              cat "$FAKE_DB_REVISION_FILE"
+            else
+              echo "$alembic_revision"
+            fi ;;
         esac ;;
     esac ;;
   image)
@@ -351,7 +381,14 @@ case "${1:-}" in
     case "$*" in
       *'--entrypoint python'* )
         probe_body="$(cat)"
-        if [[ "$probe_body" == *'member capability probe deadline'* ]]; then
+        if [[ "$probe_body" == *'119_chat_message_authority compatibility probe'* ]]; then
+          [[ "${FAKE_CHAT_AUTHORITY_PROBE_FAILURE:-0}" != 1 ]] || exit 74
+          if [[ "$*" == *"$(printf '%064d' 0 | tr 0 1)"* ]]; then
+            printf '%s\n' "${FAKE_CHAT_OLD_CAPABILITY:-unsupported}"
+          else
+            printf '%s\n' "${FAKE_CHAT_NEW_CAPABILITY:-supported}"
+          fi
+        elif [[ "$probe_body" == *'member capability probe deadline'* ]]; then
           [[ "${FAKE_MEMBER_PROBE_FAILURE:-0}" != 1 ]] || exit 73
           printf '%s\n' "${FAKE_MEMBER_CAPABILITY:-supported}"
         else
@@ -360,8 +397,20 @@ case "${1:-}" in
         fi ;;
       *'heads'*)
         [[ "${FAKE_RELEASE_MODE:-}" != invalid_heads ]] || exit 23
-        echo "$alembic_revision (head)" ;;
-      *'current'*) echo "$alembic_revision" ;;
+        echo "$alembic_head (head)" ;;
+      *'current'*)
+            if [[ -n "${FAKE_ALEMBIC_CURRENT_ROWS:-}" ]]; then
+              printf '%s\n' "$FAKE_ALEMBIC_CURRENT_ROWS"
+            elif [[ -n "${FAKE_DB_REVISION_FILE:-}" && -f "$FAKE_DB_REVISION_FILE" ]]; then
+          cat "$FAKE_DB_REVISION_FILE"
+        else
+          echo "$alembic_revision"
+        fi ;;
+      *'upgrade head'*)
+        if [[ "$alembic_head" == "119_chat_message_authority" || "$alembic_head" == "120_chat_authority_fixture" ]]; then
+          [[ -z "${FAKE_DB_REVISION_FILE:-}" ]] || printf '%s\n' "$alembic_head" > "$FAKE_DB_REVISION_FILE"
+          [[ -z "${FAKE_CHAT_AUTHORITY_SCHEMA_FILE:-}" ]] || printf 'complete\n' > "$FAKE_CHAT_AUTHORITY_SCHEMA_FILE"
+        fi ;;
     esac ;;
   *) echo 'unexpected fake Docker command' >&2; exit 96 ;;
 esac
@@ -377,11 +426,18 @@ run_release_binding_case() {
   local output_file="$workspace/output.log"
   local docker_log="$workspace/docker.log"
   local status_code
-  mkdir -p "$workspace/deploy/lib" "$workspace/bin" "$workspace/releases" "$workspace/backups"
+  mkdir -p "$workspace/deploy/lib" "$workspace/bin" "$workspace/releases" "$workspace/backups" "$workspace/backend/alembic"
   cp lib/common.sh "$workspace/deploy/lib/common.sh"
   cp lib/unit_health.sh "$workspace/deploy/lib/unit_health.sh"
   [[ ! -f lib/checkpoint_compatibility.py ]] || cp lib/checkpoint_compatibility.py "$workspace/deploy/lib/"
   [[ ! -f lib/project_member_compatibility.py ]] || cp lib/project_member_compatibility.py "$workspace/deploy/lib/"
+  [[ ! -f lib/chat_authority_compatibility.py ]] || cp lib/chat_authority_compatibility.py "$workspace/deploy/lib/"
+  [[ ! -f lib/chat_authority_schema_compatibility.py ]] || cp lib/chat_authority_schema_compatibility.py "$workspace/deploy/lib/"
+  [[ ! -f lib/alembic_revision_compatibility.py ]] || cp lib/alembic_revision_compatibility.py "$workspace/deploy/lib/"
+  cp -R ../backend/alembic/versions "$workspace/backend/alembic/"
+  python3 "$workspace/deploy/lib/chat_authority_schema_compatibility.py" \
+    "$workspace/backend/alembic/versions/119_chat_message_authority.py" --fixture \
+    > "$workspace/chat-authority-complete-schema.json"
   cp restore.sh rollback.sh ops-check.sh "$workspace/deploy/"
   write_strong_database_test_env "$workspace/deploy/.env"
   cat >> "$workspace/deploy/.env" <<ENV
@@ -435,6 +491,7 @@ SCRIPT
   chmod +x "$workspace/deploy/"*.sh "$workspace/bin/"*
   export PATH="$workspace/bin:$PATH" FAKE_DOCKER_LOG="$docker_log" FAKE_RELEASE_WORKSPACE="$workspace"
   export RELEASE_STATE_DIR="$workspace/releases" DEPLOY_ENV_FILE=.env
+  export FAKE_CHAT_AUTHORITY_COMPLETE_FIXTURE="$workspace/chat-authority-complete-schema.json"
   export MAINTENANCE_LOCK_DIR="$workspace/maintenance.lock" BACKEND_HEALTH_TIMEOUT=1 FRONTEND_HEALTH_TIMEOUT=1
   export BACKUP_DIR="$workspace/backups" OPS_MEMORY_MAX_PERCENT=100 OPS_MEMORY_CRITICAL_PERCENT=100
   unset APP_VERSION APP_RELEASE BACKEND_RELEASE FRONTEND_RELEASE
@@ -556,7 +613,7 @@ PY
       fi
       assert_contains "$docker_log" "compose up -d --no-deps --no-build --pull never backend | release=$previous_sha version=3.8.2"
       assert_not_contains "$docker_log" "backend | release=$previous_sha version=3.8.4" ;;
-    rollback_ledger_compatible|rollback_ledger_empty_old|rollback_ledger_written_old|rollback_ledger_reference_without_schema|rollback_ledger_invalid_json|rollback_ledger_probe_failure|rollback_ledger_probe_unknown|rollback_ledger_db_failure|rollback_ledger_schema_unknown|rollback_ledger_legacy|rollback_member_supported|rollback_member_old|rollback_member_unknown|rollback_member_probe_failure)
+    rollback_ledger_compatible|rollback_ledger_empty_old|rollback_ledger_written_old|rollback_ledger_reference_without_schema|rollback_ledger_invalid_json|rollback_ledger_probe_failure|rollback_ledger_probe_unknown|rollback_ledger_db_failure|rollback_ledger_schema_unknown|rollback_ledger_legacy|rollback_member_supported|rollback_member_old|rollback_member_unknown|rollback_member_probe_failure|rollback_chat_authority_compatible|rollback_chat_authority_old_refused|rollback_chat_authority_absent_119_aware_refused|rollback_chat_authority_partial_refused|rollback_chat_authority_revision_mismatch|rollback_chat_authority_schema_unknown|rollback_chat_authority_multiple_revisions|rollback_chat_authority_graph_invalid)
       local expected_success=0 state_before
       case "$test_case" in
         rollback_ledger_compatible) export FAKE_CHECKPOINT_SCHEMA=1 FAKE_CHECKPOINT_REFERENCE=1 FAKE_CHECKPOINT_CAPABILITY=supported; expected_success=1 ;;
@@ -572,6 +629,33 @@ PY
         rollback_member_old) export FAKE_MEMBER_CAPABILITY=unsupported ;;
         rollback_member_unknown) export FAKE_MEMBER_CAPABILITY=unknown ;;
         rollback_member_probe_failure) export FAKE_MEMBER_PROBE_FAILURE=1 ;;
+        rollback_chat_authority_compatible)
+          export FAKE_ALEMBIC_REVISION=119_chat_message_authority
+          export FAKE_CHAT_AUTHORITY_SCHEMA_STATE=complete FAKE_CHAT_OLD_CAPABILITY=supported
+          expected_success=1 ;;
+        rollback_chat_authority_old_refused)
+          export FAKE_ALEMBIC_REVISION=119_chat_message_authority
+          export FAKE_CHAT_AUTHORITY_SCHEMA_STATE=complete FAKE_CHAT_OLD_CAPABILITY=unsupported ;;
+        rollback_chat_authority_absent_119_aware_refused)
+          export FAKE_ALEMBIC_REVISION=118_clarification_authority
+          export FAKE_CHAT_AUTHORITY_SCHEMA_STATE=absent FAKE_CHAT_OLD_CAPABILITY=supported ;;
+        rollback_chat_authority_partial_refused)
+          export FAKE_ALEMBIC_REVISION=118_clarification_authority
+          export FAKE_CHAT_AUTHORITY_SCHEMA_STATE=partial ;;
+        rollback_chat_authority_revision_mismatch)
+          export FAKE_ALEMBIC_REVISION=119_chat_message_authority
+          export FAKE_CHAT_AUTHORITY_SCHEMA_STATE=absent ;;
+        rollback_chat_authority_schema_unknown)
+          export FAKE_ALEMBIC_REVISION=118_clarification_authority
+          export FAKE_CHAT_AUTHORITY_SCHEMA_STATE=invalid ;;
+        rollback_chat_authority_multiple_revisions)
+          export FAKE_ALEMBIC_REVISION=119_chat_message_authority
+          export FAKE_CHAT_AUTHORITY_SCHEMA_STATE=complete
+          export FAKE_ALEMBIC_CURRENT_ROWS=$'119_chat_message_authority\n118_clarification_authority' ;;
+        rollback_chat_authority_graph_invalid)
+          export FAKE_ALEMBIC_REVISION=119_chat_message_authority
+          export FAKE_CHAT_AUTHORITY_SCHEMA_STATE=complete
+          printf 'revision = (\n' > "$workspace/backend/alembic/versions/broken_graph_fixture.py" ;;
       esac
       printf 'pending fixture\n' > "$workspace/releases/pending.env"
       state_before="$(file_sha256 "$workspace/releases/current.env")/$(file_sha256 "$workspace/releases/previous.env")/$(file_sha256 "$workspace/releases/pending.env")"
@@ -584,13 +668,43 @@ PY
         assert_contains "$docker_log" 'prism_checkpoint_references'
         assert_contains "$docker_log" '--network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint python sha256:'
         assert_not_contains "$docker_log" '--env-file .env -'
+        if [[ "$test_case" == rollback_chat_authority_compatible ]]; then
+          assert_contains "$docker_log" 'prism_chat_authority_schema'
+          assert_contains "$docker_log" '--entrypoint python sha256:'
+          assert_contains "$output_file" '小菱权限快照回滚门通过(schema=complete, revision=119_chat_message_authority)'
+        fi
       else
         [[ "$status_code" != 0 ]] || { printf '账本不兼容/未知仍被回退: %s\n' "$test_case" >&2; exit 1; }
         assert_not_contains "$docker_log" 'compose up '
-        assert_not_contains "$docker_log" 'compose stop '
         assert_not_contains "$docker_log" 'compose build '
         assert_not_contains "$docker_log" 'DROP DATABASE'
         assert_not_contains "$docker_log" 'UPDATE agent_response'
+        if [[ "$test_case" == rollback_chat_authority_old_refused ]]; then
+          assert_contains "$output_file" '不支持 119 小菱消息权限快照契约'
+        elif [[ "$test_case" == rollback_chat_authority_absent_119_aware_refused ]]; then
+          assert_contains "$output_file" '数据库尚未具备该结构'
+        elif [[ "$test_case" == rollback_chat_authority_partial_refused ]]; then
+          assert_contains "$output_file" '迁移结构不完整'
+        elif [[ "$test_case" == rollback_chat_authority_revision_mismatch ]]; then
+          assert_contains "$output_file" '已记录迁移 119'
+        elif [[ "$test_case" == rollback_chat_authority_schema_unknown ]]; then
+          assert_contains "$output_file" '无法只读确认小菱权限快照结构'
+        elif [[ "$test_case" == rollback_chat_authority_multiple_revisions ]]; then
+          assert_contains "$output_file" 'revision 缺失或不唯一'
+        elif [[ "$test_case" == rollback_chat_authority_graph_invalid ]]; then
+          assert_contains "$output_file" '无法确认数据库是否已经跨过迁移 119'
+        fi
+        if [[ "$test_case" == rollback_chat_authority_partial_refused \
+          || "$test_case" == rollback_chat_authority_revision_mismatch \
+          || "$test_case" == rollback_chat_authority_schema_unknown \
+          || "$test_case" == rollback_chat_authority_multiple_revisions \
+          || "$test_case" == rollback_chat_authority_graph_invalid ]]; then
+          assert_contains "$docker_log" 'compose stop backend'
+          assert_contains "$docker_log" 'compose ps --status running --quiet backend'
+          [[ -f "$workspace/stopped" ]]
+        else
+          assert_not_contains "$docker_log" 'compose stop '
+        fi
         [[ "$state_before" == "$(file_sha256 "$workspace/releases/current.env")/$(file_sha256 "$workspace/releases/previous.env")/$(file_sha256 "$workspace/releases/pending.env")" ]] || { echo '拒绝后发布账本被修改' >&2; exit 1; }
         [[ ! -e "$workspace/maintenance.lock" ]] || { echo '拒绝后维护锁未释放' >&2; exit 1; }
       fi ;;
@@ -603,7 +717,7 @@ run_release_binding_tests() {
   local workspace="$1/release-binding"
   local test_case failed=0 passed=0
   mkdir -p "$workspace"
-  for test_case in write_version legacy_labels legacy_git missing_evidence conflicting_labels wrong_revision invalid_version digest_changed ops_default_drift ops_masked_drift ops_running_drift ops_consistent restore_missing_image restore_missing_evidence restore_invalid_heads restore_pinned_image rollback_version rollback_legacy rollback_missing_evidence rollback_ledger_compatible rollback_ledger_empty_old rollback_ledger_written_old rollback_ledger_reference_without_schema rollback_ledger_invalid_json rollback_ledger_probe_failure rollback_ledger_probe_unknown rollback_ledger_db_failure rollback_ledger_schema_unknown rollback_ledger_legacy rollback_member_supported rollback_member_old rollback_member_unknown rollback_member_probe_failure; do
+  for test_case in write_version legacy_labels legacy_git missing_evidence conflicting_labels wrong_revision invalid_version digest_changed ops_default_drift ops_masked_drift ops_running_drift ops_consistent restore_missing_image restore_missing_evidence restore_invalid_heads restore_pinned_image rollback_version rollback_legacy rollback_missing_evidence rollback_ledger_compatible rollback_ledger_empty_old rollback_ledger_written_old rollback_ledger_reference_without_schema rollback_ledger_invalid_json rollback_ledger_probe_failure rollback_ledger_probe_unknown rollback_ledger_db_failure rollback_ledger_schema_unknown rollback_ledger_legacy rollback_member_supported rollback_member_old rollback_member_unknown rollback_member_probe_failure rollback_chat_authority_compatible rollback_chat_authority_old_refused rollback_chat_authority_absent_119_aware_refused rollback_chat_authority_partial_refused rollback_chat_authority_revision_mismatch rollback_chat_authority_schema_unknown rollback_chat_authority_multiple_revisions rollback_chat_authority_graph_invalid; do
     if bash "$PWD/tests/test_scripts.sh" --release-case "$test_case" "$workspace/$test_case" > "$workspace/$test_case.log" 2>&1; then
       passed=$((passed + 1)); printf 'PASS %s\n' "$test_case"
     else
@@ -662,6 +776,124 @@ with tempfile.TemporaryDirectory(prefix="prism-reader-probe-") as temporary:
     run("", 2)
     print("checkpoint reader probe: unavailable source fail closed PASS")
 PY
+}
+
+# 直接对当前 Backend 源码执行 119 部署能力 probe，再破坏关键契约确认旧/未知镜像被拒绝。
+run_chat_authority_probe_tests() {
+  python3 - "$PWD/lib/chat_authority_compatibility.py" "$PWD/../backend/app" \
+    "$PWD/lib/alembic_revision_compatibility.py" "$PWD/../backend/alembic/versions" <<'PY'
+import ast
+import os
+import pathlib
+import shutil
+import subprocess
+import sys
+import tempfile
+
+probe, app, graph_probe, versions = map(pathlib.Path, sys.argv[1:])
+with tempfile.TemporaryDirectory(prefix="prism-chat-authority-probe-") as temporary:
+    root = pathlib.Path(temporary) / "app"
+    for relative in (
+        "models/enterprise_chat.py",
+        "services/enterprise_chat_service.py",
+        "services/enterprise_assistant_runtime_service.py",
+        "services/enterprise_assistant_clarification_service.py",
+    ):
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(app / relative, target)
+
+    env = dict(os.environ, PRISM_APP_ROOT=str(root))
+
+    def run_probe(expected):
+        result = subprocess.run([sys.executable, str(probe)], capture_output=True, text=True, env=env, timeout=10)
+        assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
+        assert result.stdout.strip() == expected, (result.stdout, result.stderr)
+
+    run_probe("supported")
+    print("chat authority probe: current rank writer and both fail-closed readers PASS")
+
+    chat = root / "services/enterprise_chat_service.py"
+    original = chat.read_text(encoding="utf-8")
+    tree = ast.parse(original)
+    send = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "send_message")
+    message_call = next(node for node in ast.walk(send)
+                        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                        and node.func.id == "EnterpriseChatMessage")
+    message_call.keywords = [item for item in message_call.keywords if item.arg != "sender_authority_rank"]
+    chat.write_text(ast.unparse(ast.fix_missing_locations(tree)), encoding="utf-8")
+    run_probe("unsupported")
+    print("chat authority probe: old writer with no send-time rank refused PASS")
+    chat.write_text(original, encoding="utf-8")
+
+    runtime = root / "services/enterprise_assistant_runtime_service.py"
+    original = runtime.read_text(encoding="utf-8")
+    runtime.write_text(original.replace("if message.sender_authority_rank is None:", "if False:", 1), encoding="utf-8")
+    run_probe("unsupported")
+    print("chat authority probe: runtime that revives unknown legacy authority refused PASS")
+    runtime.write_text(original.replace(
+        "if message.sender_authority_rank is None:",
+        "if message.sender_authority_rank is None and False:", 1,
+    ), encoding="utf-8")
+    run_probe("unsupported")
+    print("chat authority probe: disabled legacy-rank branch refused PASS")
+    runtime.write_text(original, encoding="utf-8")
+
+    tree = ast.parse(original)
+    live_snapshot = next(node for node in tree.body
+                         if isinstance(node, ast.FunctionDef) and node.name == "_live_role_snapshot")
+    live_snapshot.body = [
+        statement for statement in live_snapshot.body
+        if not (isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Call)
+                and isinstance(statement.value.func, ast.Name)
+                and statement.value.func.id == "_assert_no_newer_authority_directive")
+    ]
+    runtime.write_text(ast.unparse(ast.fix_missing_locations(tree)), encoding="utf-8")
+    run_probe("unsupported")
+    print("chat authority probe: runtime missing the send gate call site refused PASS")
+    runtime.write_text(original, encoding="utf-8")
+
+    tree = ast.parse(original)
+    guard = next(node for node in tree.body
+                 if isinstance(node, ast.FunctionDef) and node.name == "_assert_no_newer_authority_directive")
+    blocking_branch = next(node for node in guard.body
+                           if isinstance(node, ast.If) and isinstance(node.test, ast.Name)
+                           and node.test.id == "superseded")
+    blocking_branch.body = [ast.Pass()]
+    runtime.write_text(ast.unparse(ast.fix_missing_locations(tree)), encoding="utf-8")
+    run_probe("unsupported")
+    print("chat authority probe: runtime without a blocking raise refused PASS")
+    runtime.write_text(original, encoding="utf-8")
+
+    result = subprocess.run([sys.executable, str(graph_probe), str(versions),
+                             "119_chat_message_authority", "118_clarification_authority"],
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0 and result.stdout.strip() == "compatible", (result.stdout, result.stderr)
+    result = subprocess.run([sys.executable, str(graph_probe), str(versions),
+                             "119_chat_message_authority", "119_chat_message_authority"],
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0 and result.stdout.strip() == "compatible", (result.stdout, result.stderr)
+    result = subprocess.run([sys.executable, str(graph_probe), str(versions),
+                             "119_chat_message_authority", "120_not_in_target_chain"],
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0 and result.stdout.strip() == "incompatible", (result.stdout, result.stderr)
+    print("chat authority rollout: pre-119 ancestor, current 119, and unknown future revision classified PASS")
+
+    with tempfile.TemporaryDirectory(prefix="prism-broken-alembic-graph-") as temporary:
+        broken_versions = pathlib.Path(temporary) / "versions"
+        shutil.copytree(versions, broken_versions)
+        (broken_versions / "broken_graph_fixture.py").write_text("revision = (\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, str(graph_probe), str(broken_versions),
+                                 "119_chat_message_authority", "118_clarification_authority"],
+                                capture_output=True, text=True, timeout=10)
+        assert result.returncode != 0, (result.stdout, result.stderr)
+        print("chat authority rollout: broken migration graph returns probe failure PASS")
+PY
+}
+
+# 迁移 119 的部署状态判定必须匹配迁移定义中的完整 SQL 控制流，不能只命中关键词。
+run_chat_authority_schema_compatibility_tests() {
+  python3 tests/test_chat_authority_schema_compatibility.py
 }
 
 # 写入可预测的 Docker 命令替身。
@@ -1784,9 +2016,12 @@ run_deploy_failure_rollback_simulation() {
   local release_sha
   local exit_code
 
-  mkdir -p "$repo/deploy/lib" "$repo/backend" "$fake_bin" "$state_dir"
+  mkdir -p "$repo/deploy/lib" "$repo/backend/alembic" "$fake_bin" "$state_dir"
   cp deploy.sh "$repo/deploy/deploy.sh"
   cp lib/common.sh "$repo/deploy/lib/common.sh"
+  cp lib/alembic_revision_compatibility.py "$repo/deploy/lib/alembic_revision_compatibility.py"
+  cp lib/chat_authority_schema_compatibility.py "$repo/deploy/lib/chat_authority_schema_compatibility.py"
+  cp -R ../backend/alembic/versions "$repo/backend/alembic/"
   printf '%s\n' '3.7.0' > "$repo/VERSION"
   printf '%s\n' 'test database' > "$repo/backend/GeoLite2-City.mmdb"
   write_strong_database_test_env "$repo/deploy/.env"
@@ -1852,7 +2087,7 @@ STATE
     MAINTENANCE_LOCK_DIR="$lock_dir" FAKE_DOCKER_LOG="$docker_log" \
     FAKE_ROLLBACK_LOG="$rollback_log" BACKEND_HEALTH_TIMEOUT=1 \
     FAKE_RELEASE_WORKSPACE="$workspace" FAKE_RELEASE_SHA="$release_sha" \
-    FAKE_RELEASE_VERSION=3.7.0 FAKE_ALEMBIC_REVISION=045 \
+    FAKE_RELEASE_VERSION=3.7.0 FAKE_ALEMBIC_REVISION=045_skill_asset_user_grant \
     "$repo/deploy/deploy.sh" all --revision "$release_sha" > "$output_file" 2>&1
   exit_code=$?
   set -e
@@ -2028,6 +2263,10 @@ if [[ "${1:-}" == --release-only ]]; then
 fi
 if [[ "${1:-}" == --reader-only ]]; then
   run_checkpoint_reader_probe_tests
+  exit 0
+fi
+if [[ "${1:-}" == --chat-authority-only ]]; then
+  run_chat_authority_probe_tests
   exit 0
 fi
 
@@ -2278,6 +2517,8 @@ run_app_version_validation
 run_compose_environment_missing_file_locale "$test_root"
 run_frontend_tls_asset_validation "$test_root"
 run_checkpoint_reader_probe_tests
+run_chat_authority_probe_tests
+run_chat_authority_schema_compatibility_tests
 run_release_binding_tests "$test_root"
 run_deploy_test_stage backup_archive_drift run_backup_archive_drift_simulation "$fake_bin" "$test_root"
 run_deploy_test_stage verify_backup_guards run_verify_backup_guard_simulation "$fake_bin" "$test_root"

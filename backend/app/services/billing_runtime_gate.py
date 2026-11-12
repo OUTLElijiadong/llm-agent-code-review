@@ -470,7 +470,11 @@ def begin_attempt(*, model_name, payload, output_key="max_output_tokens", provid
 
 
 def before_stream_send(ticket):
-    """Run an optional final authorization check after the hold and before transport I/O."""
+    """Linearize one attempt's final authorization after its hold and before transport I/O.
+
+    Once this callback commits, the attempt is in flight and remains bound to its
+    immutable reservation scope. Later access changes apply to subsequent attempts.
+    """
     if ticket is not None:
         callback = ticket["scope"].get("before_stream_send")
         if callback is not None:

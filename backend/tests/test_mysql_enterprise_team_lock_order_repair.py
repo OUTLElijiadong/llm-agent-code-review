@@ -8,20 +8,29 @@ import pytest
 import test_fresh_database_chain as chain
 from sqlalchemy import event, text
 from sqlalchemy.orm import sessionmaker
-from test_mysql_enterprise_group_shared_lock import _install_live_snapshots, _ready, _seed
+from test_mysql_enterprise_group_shared_lock import _install_live_snapshots, _seed
+from test_mysql_enterprise_group_shared_lock import _ready as _base_ready
 
-from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
-from app.models.enterprise_agent_team import EnterpriseAgentTeam
+from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, PaymentRequiredError
+from app.models.billing_ledger import BillingOrder, BillingPaymentEvent
+from app.models.enterprise_agent_team import EnterpriseAgentTeam, EnterpriseAgentTeamTask
 from app.models.enterprise_chat import EnterpriseAssistantRun
-from app.models.enterprise_org import Enterprise, EnterpriseGroup
+from app.models.enterprise_org import Enterprise, EnterpriseGroup, EnterpriseMember
 from app.models.user import User
 from app.services import auth_service, user_service
+from app.services import billing_checkout_service as checkout
 from app.services import enterprise_agent_team_runtime_service as runtime
 from app.services import enterprise_assistant_runtime_service as parent_runtime
+from app.services import enterprise_assistant_service as assistant_service
 from app.services import enterprise_org_service as org
 
 fresh_chain = chain.fresh_chain
 fresh_chain_url = chain.fresh_chain_url
+
+
+def _ready(monkeypatch):
+    _base_ready(monkeypatch)
+    monkeypatch.setattr(checkout, "enterprise_subscription_status_current", lambda *_args, **_kwargs: "active")
 
 
 def _pause_after_run_lock(engine, worker_id, held, release):
@@ -40,7 +49,7 @@ def test_group_revocation_wins_before_team_membership_lock(fresh_chain, monkeypa
     _ready(monkeypatch)
     monkeypatch.setattr(parent_runtime, '_live_role_snapshot', real_snapshot)
     factory = sessionmaker(bind=fresh_chain, autoflush=False, expire_on_commit=False)
-    company, group, owner, users, tasks, teams = _seed(factory)
+    company, group, owner, users, tasks, teams = _seed(factory, ordinary_message_indexes={1})
     _install_live_snapshots(factory, company, teams, legacy=True)
     held, release, revoked = Event(), Event(), Event()
     worker_id = []
@@ -84,7 +93,7 @@ def test_team_cancel_and_worker_take_parent_before_company(fresh_chain, monkeypa
     _ready(monkeypatch)
     monkeypatch.setattr(parent_runtime, '_live_role_snapshot', real_snapshot)
     factory = sessionmaker(bind=fresh_chain, autoflush=False, expire_on_commit=False)
-    company, _group, owner, _users, tasks, teams = _seed(factory)
+    company, _group, owner, _users, tasks, teams = _seed(factory, ordinary_message_indexes={1})
     _install_live_snapshots(factory, company, teams, legacy=True)
     held, release, started = Event(), Event(), Event()
     worker_id, cancel_cid = [], []
@@ -143,7 +152,7 @@ def test_real_retry_and_team_do_not_invert_parent_company_locks(fresh_chain, mon
     _ready(monkeypatch)
     monkeypatch.setattr(parent_runtime, '_live_role_snapshot', real_snapshot)
     factory = sessionmaker(bind=fresh_chain, autoflush=False, expire_on_commit=False)
-    company, _group, _owner, users, tasks, teams = _seed(factory)
+    company, _group, _owner, users, tasks, teams = _seed(factory, ordinary_message_indexes={1})
     _install_live_snapshots(factory, company, teams, legacy=True)
     with factory() as db:
         team_row = db.get(EnterpriseAgentTeam, teams[0])
@@ -214,7 +223,7 @@ def test_real_retry_first_does_not_deadlock_team(fresh_chain, monkeypatch):
     _ready(monkeypatch)
     monkeypatch.setattr(parent_runtime, '_live_role_snapshot', real_snapshot)
     factory = sessionmaker(bind=fresh_chain, autoflush=False, expire_on_commit=False)
-    company, _group, _owner, users, tasks, teams = _seed(factory)
+    company, _group, _owner, users, tasks, teams = _seed(factory, ordinary_message_indexes={1})
     _install_live_snapshots(factory, company, teams, legacy=True)
     with factory() as db:
         team_row = db.get(EnterpriseAgentTeam, teams[0])
@@ -278,6 +287,77 @@ def test_real_retry_first_does_not_deadlock_team(fresh_chain, monkeypatch):
         event.remove(fresh_chain, 'before_cursor_execute', before)
 
 
+def test_team_billing_rejects_refund_committed_before_company_lock(fresh_chain, monkeypatch):
+    """An owner/admin team cannot use a pre-refund RR snapshot after taking the company lock."""
+    current_subscription_status = checkout.enterprise_subscription_status_current
+    require_subscription = assistant_service._require_subscription
+    _ready(monkeypatch)
+    monkeypatch.setattr(checkout, "enterprise_subscription_status_current", current_subscription_status)
+    monkeypatch.setattr(assistant_service, "_require_subscription", require_subscription)
+    factory = sessionmaker(bind=fresh_chain, autoflush=False, expire_on_commit=False)
+    company, _group, owner, users, tasks, teams = _seed(factory, ordinary_message_indexes={1})
+    now = runtime._now()
+    with factory.begin() as db:
+        company_row = db.get(Enterprise, company)
+        db.query(EnterpriseMember).filter_by(
+            enterprise_id=company, user_id=users[0],
+        ).one().role = "admin"
+        order_no = company_row.paid_order_id
+        db.add(BillingOrder(
+            order_no=order_no,
+            user_id=owner,
+            enterprise_id=company,
+            product="enterprise_create",
+            amount_fen=20_700,
+            quantity=3,
+            channel="alipay",
+            status="paid",
+            payment_status="paid",
+            enterprise_name=company_row.name,
+            paid_at=now,
+        ))
+        db.add(BillingPaymentEvent(
+            channel="alipay",
+            trade_id=f"team-billing-auth-{company}",
+            order_no=order_no,
+            amount_fen=20_700,
+            verified_at=now,
+        ))
+        period = checkout._new_period(
+            db, owner_type="enterprise", owner_id=company, product="enterprise",
+            order_no=order_no, seats=3, paid_at=now,
+        )
+        assert checkout.activate_due_period(db, period.id, now=now)
+    _install_live_snapshots(factory, company, teams, legacy=True)
+
+    with factory.begin() as db:
+        refund = checkout.request_refund(
+            db, order_no=order_no, requester_id=owner, reason="团队订阅竞态测试",
+        )
+        refund_no = refund.refund_no
+    stale = factory()
+    stale.query(EnterpriseAgentTeamTask.id).filter_by(id=tasks[0]).one()
+    assert checkout.enterprise_subscription_status(stale, company) == "active"
+    with factory.begin() as db:
+        checkout.review_manual_refund(
+            db, refund_no=refund_no, admin_id=users[1], decision="approve", reason="团队订阅竞态测试",
+        )
+
+    try:
+        assert checkout.enterprise_subscription_status(stale, company) == "active"
+        context = runtime._lock_live_context(
+            stale,
+            enterprise_id=company,
+            task_id=tasks[0],
+            require_active_billing=False,
+        )
+        with pytest.raises(PaymentRequiredError, match="企业订阅已到期"):
+            runtime._require_active_billing(stale, context)
+    finally:
+        stale.rollback()
+        stale.close()
+
+
 @pytest.mark.parametrize('change', [
     'remove_member', 'disable_company', 'disable_user', 'disable_group', 'logout_user',
 ])
@@ -287,7 +367,7 @@ def test_team_first_fences_revocation_and_next_execution_rechecks(fresh_chain, m
     _ready(monkeypatch)
     monkeypatch.setattr(parent_runtime, '_live_role_snapshot', real_snapshot)
     factory = sessionmaker(bind=fresh_chain, autoflush=False, expire_on_commit=False)
-    company, group, owner, users, tasks, teams = _seed(factory)
+    company, group, owner, users, tasks, teams = _seed(factory, ordinary_message_indexes={1})
     _install_live_snapshots(factory, company, teams, legacy=True)
     held, release, started, finished = Event(), Event(), Event(), Event()
     writer_cid = []

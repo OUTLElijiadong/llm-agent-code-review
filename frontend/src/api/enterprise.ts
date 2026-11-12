@@ -44,6 +44,11 @@ export interface EnterpriseConversation {
   participant_low_id: number | null
   participant_high_id: number | null
   create_time: string
+  last_message_id?: number | null
+  last_message_preview?: string | null
+  last_message_at?: string | null
+  last_message_sender_id?: number | null
+  last_message_sender_type?: 'human' | 'assistant' | null
 }
 
 /** 仅为当前登录者提供预计归属，不代表付款或执行授权。 */

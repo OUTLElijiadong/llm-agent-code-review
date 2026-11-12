@@ -162,16 +162,14 @@ def bind_owned_project(
                       .with_for_update().first())
     if active_pentest is not None:
         raise ConflictError("项目存在已授权或执行中的个人渗透测试，请先取消或结束后再绑定企业")
-    # This staging guard is deliberately disabled until every personal-pentest
-    # worker, child call and sandbox completion path writes durable evidence.
-    from app.services import pentest_service
+    # The durable execution path is not enabled for new runs yet, so every
+    # previously started legacy engagement must remain unknown until reviewed.
+    # Never let the feature flag decide whether project scope changes are safe.
+    from app.services import pentest_execution_service
 
-    if pentest_service._DURABLE_PENTEST_STAGING:
-        from app.services import pentest_execution_service
-
-        evidence = pentest_execution_service.project_execution_evidence(db, project_id=project_id)
-        if evidence != "clear":
-            raise ConflictError("个人渗透执行仍在停止或缺少终止证据，请先核查后再绑定企业")
+    evidence = pentest_execution_service.project_execution_evidence(db, project_id=project_id)
+    if evidence != "clear":
+        raise ConflictError("个人渗透执行仍在停止或缺少终止证据，请先核查后再绑定企业")
     existing = db.query(EnterpriseProject).filter_by(project_id=project_id).first()
     if existing is not None:
         raise ConflictError("项目已绑定企业，不能重复归属")

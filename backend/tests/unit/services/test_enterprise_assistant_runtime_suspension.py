@@ -493,7 +493,11 @@ def test_suspending_enterprise_blocks_next_model_attempt_before_reservation(monk
         state = db.query(EnterpriseAssistantRuntimeState).filter_by(assistant_run_id=run.id).one()
 
     monkeypatch.setattr(runtime, "_live_role_snapshot", lambda *_args, **_kwargs: {})
-    monkeypatch.setattr(runtime.billing_checkout_service, "enterprise_subscription_status", lambda *_: "active")
+    monkeypatch.setattr(
+        runtime.billing_checkout_service,
+        "enterprise_subscription_status",
+        lambda *_args, **_kwargs: "active",
+    )
     monkeypatch.setattr(runtime.assistant_service, "_require_active_limit", lambda *_args, **_kwargs: None)
     reservations = []
     monkeypatch.setattr(billing_runtime_gate.ledger, "reserve", lambda *_args, **_kwargs: reservations.append(True))
@@ -609,7 +613,11 @@ def test_group_leader_retry_is_revalidated_before_each_billing_reservation(monke
         db.add(state)
 
     monkeypatch.setattr(runtime, "_live_role_snapshot", lambda *_args, **_kwargs: {})
-    monkeypatch.setattr(runtime.billing_checkout_service, "enterprise_subscription_status", lambda *_: "active")
+    monkeypatch.setattr(
+        runtime.billing_checkout_service,
+        "enterprise_subscription_status",
+        lambda *_args, **_kwargs: "active",
+    )
     monkeypatch.setattr(runtime.assistant_service, "_require_active_limit", lambda *_args, **_kwargs: None)
     controller_active = {"value": True}
     controller_checks = []

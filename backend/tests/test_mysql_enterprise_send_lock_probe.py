@@ -139,12 +139,10 @@ async def test_mysql_member_send_lock_can_indirectly_block_unrelated_member(fres
         server_thread.join(timeout=5)
 
 
-def test_mysql_company_shared_lock_does_not_fence_real_subscription_refund(fresh_chain):
-    """An actual refund review can revoke access despite a held company share lock.
+def test_mysql_company_authorization_lock_serializes_real_subscription_refund(fresh_chain):
+    """A real refund review must serialize behind the company's send authorization lock."""
+    import time
 
-    No reservation is created and no payment provider is contacted; this only
-    tests the suggested company-row locking boundary, not full billing behavior.
-    """
     from app.models.enterprise_org import Enterprise
     from app.services import billing_checkout_service as checkout
 
@@ -163,8 +161,12 @@ def test_mysql_company_shared_lock_does_not_fence_real_subscription_refund(fresh
         assert refund.status == "manual_review"
         company, refund_no, reviewer_id, executor_id = order.enterprise_id, refund.refund_no, reviewer.id, executor.id
 
+    started, connection_ids = threading.Event(), {}
+
     def approve_then_prepare():
         with factory.begin() as db:
+            connection_ids["writer"] = db.execute(text("SELECT CONNECTION_ID()")).scalar_one()
+            started.set()
             result = checkout.review_manual_refund(db, refund_no=refund_no, admin_id=reviewer_id,
                                                    decision="approve", reason="并发测试")
             assert result.status == "approved"
@@ -172,20 +174,39 @@ def test_mysql_company_shared_lock_does_not_fence_real_subscription_refund(fresh
             result, _ = checkout.prepare_refund(db, refund_no=refund_no, admin_id=executor_id)
             assert result.status == "processing"
 
-    with factory.begin() as guard:
-        assert (guard.query(Enterprise).filter_by(id=company).populate_existing().with_for_update(read=True).one()
-                .status == "active")
-        with factory() as verify:
-            assert not checkout.enterprise_subscription_refund_pending(verify, company)
-        # A timeout is a failure here, but the scope eventually releases the guard.
-        pool = ThreadPoolExecutor(max_workers=1)
-        try:
+    def waiting_table(connection_id):
+        with fresh_chain.connect() as connection:
+            return connection.execute(text(
+                "SELECT l.OBJECT_NAME FROM performance_schema.data_lock_waits w "
+                "JOIN performance_schema.threads t ON t.THREAD_ID=w.REQUESTING_THREAD_ID "
+                "JOIN performance_schema.data_locks l ON l.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID "
+                "WHERE t.PROCESSLIST_ID=:cid LIMIT 1"
+            ), {"cid": connection_id}).scalar_one_or_none()
+
+    def wait_for_company_lock(connection_id):
+        for _ in range(150):
+            table = waiting_table(connection_id)
+            if table:
+                return table
+            time.sleep(0.02)
+        return None
+
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        with factory.begin() as guard:
+            assert (guard.query(Enterprise).filter_by(id=company).populate_existing().with_for_update().one()
+                    .status == "active")
+            with factory() as verify:
+                assert not checkout.enterprise_subscription_refund_pending(verify, company)
             task = pool.submit(approve_then_prepare)
-            task.result(timeout=5)
-        finally:
-            pool.shutdown(wait=False, cancel_futures=True)
+            assert started.wait(5)
+            assert wait_for_company_lock(connection_ids["writer"]) == "enterprise"
+            assert not task.done()
         with factory() as verify:
+            task.result(timeout=5)
             assert checkout.enterprise_subscription_refund_pending(verify, company)
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
 
 
 @pytest.mark.asyncio
@@ -333,13 +354,15 @@ async def test_mysql_sync_lock_wait_blocks_same_event_loop_http_even_with_thread
         server_thread.join(timeout=5)
 
 
-def test_mysql_future_subscription_refund_can_start_after_real_reservation_and_shared_guard(
+def test_mysql_future_subscription_refund_waits_for_company_authorization_lock(
     fresh_chain, verified_model_catalog,
 ):
-    """A future renewal refund bypasses a company-share-only send guard.
+    """A future renewal refund serializes on the company row without revoking current work.
 
     The reservation is real, but no model or payment provider is contacted.
     """
+    import time
+
     from app.models.billing_ledger import BillingReservation
     from app.models.enterprise_org import Enterprise
     from app.services import billing_checkout_service as checkout
@@ -379,8 +402,12 @@ def test_mysql_future_subscription_refund_can_start_after_real_reservation_and_s
         )
         assert reservation.status == "reserved"
 
+    started, connection_ids = threading.Event(), {}
+
     def approve_then_prepare():
         with factory.begin() as db:
+            connection_ids["writer"] = db.execute(text("SELECT CONNECTION_ID()")).scalar_one()
+            started.set()
             result = checkout.review_manual_refund(db, refund_no=refund_no, admin_id=reviewer_id,
                                                    decision="approve", reason="未来周期测试")
             assert result.status == "approved"
@@ -388,18 +415,38 @@ def test_mysql_future_subscription_refund_can_start_after_real_reservation_and_s
             result, _ = checkout.prepare_refund(db, refund_no=refund_no, admin_id=executor_id)
             assert result.status == "processing"
 
-    with factory.begin() as guard:
-        guard.query(Enterprise).filter_by(id=company).populate_existing().with_for_update(read=True).one()
-        snapshot = billing_group.capture(guard, enterprise_id=company, user_id=buyer_id,
-                                         conversation_id=room, lock_company=False)
-        assert snapshot.group_id is None
-        with factory() as verify:
-            assert not checkout.enterprise_subscription_refund_pending(verify, company)
-        pool = ThreadPoolExecutor(max_workers=1)
-        try:
-            pool.submit(approve_then_prepare).result(timeout=5)
-        finally:
-            pool.shutdown(wait=False, cancel_futures=True)
+    def waiting_table(connection_id):
+        with fresh_chain.connect() as connection:
+            return connection.execute(text(
+                "SELECT l.OBJECT_NAME FROM performance_schema.data_lock_waits w "
+                "JOIN performance_schema.threads t ON t.THREAD_ID=w.REQUESTING_THREAD_ID "
+                "JOIN performance_schema.data_locks l ON l.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID "
+                "WHERE t.PROCESSLIST_ID=:cid LIMIT 1"
+            ), {"cid": connection_id}).scalar_one_or_none()
+
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        with factory.begin() as guard:
+            guard.query(Enterprise).filter_by(id=company).populate_existing().with_for_update().one()
+            snapshot = billing_group.capture(guard, enterprise_id=company, user_id=buyer_id,
+                                             conversation_id=room, lock_company=False)
+            assert snapshot.group_id is None
+            with factory() as verify:
+                assert not checkout.enterprise_subscription_refund_pending(verify, company)
+            task = pool.submit(approve_then_prepare)
+            assert started.wait(5)
+            observed = None
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                observed = waiting_table(connection_ids["writer"])
+                if observed:
+                    break
+                time.sleep(0.02)
+            assert observed == "enterprise"
+            assert not task.done()
+        task.result(timeout=5)
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
         with factory() as verify:
             assert checkout.enterprise_subscription_refund_pending(verify, company)
             assert verify.query(BillingReservation).filter_by(request_key=request_key).one().status == "reserved"

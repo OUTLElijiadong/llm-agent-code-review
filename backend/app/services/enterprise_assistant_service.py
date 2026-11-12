@@ -34,6 +34,7 @@ from app.services import billing_ledger_service as ledger
 from app.services.ai_usage_context import usage_tokens
 from app.services.billing_runtime_gate import billing_scope
 from app.services.deepseek_responses_runtime import COMPLETED, _extract_output_text
+from app.services.enterprise_assistant_billing_group import BillingAttributionUnavailable
 from app.utils.api_resolver import resolve_api_config
 
 _MAX_INPUT_TOKENS = 50_000
@@ -123,7 +124,8 @@ def _check_scope(db: Session, enterprise_id: int, user_id: int, conversation_id:
 
 
 def _require_subscription(db: Session, enterprise_id: int) -> None:
-    if billing_checkout_service.enterprise_subscription_status(db, enterprise_id) not in _SUPPORTED_SUBSCRIPTIONS:
+    status = billing_checkout_service.enterprise_subscription_status_current(db, enterprise_id)
+    if status not in _SUPPORTED_SUBSCRIPTIONS:
         raise PaymentRequiredError("企业订阅已到期，请续费后再使用企业小菱")
 
 
@@ -291,10 +293,12 @@ def _finalize_output(factory, *, public_id: str, enterprise_id: int, user_id: in
 
 async def run_for_message(db: Session, *, enterprise_id: int, user_id: int,
                           conversation_id: int, source_message_id: int) -> dict:
-    """Create an idempotent enterprise-scoped answer and persist it as a chat message.
+    """Legacy read-only answer path; cross-scope new sends require the versioned runtime.
 
     No user-scoped Agent tool executor is reused. This first runtime can only answer
     from the current visible conversation and text entries in the same enterprise.
+    Existing completed/output-ready runs remain readable or recoverable, but new
+    company/direct model requests must use the current runtime's frozen attribution.
     """
     factory = _session_factory(db)
     run_public_id = ""
@@ -368,6 +372,10 @@ async def run_for_message(db: Session, *, enterprise_id: int, user_id: int,
             else:
                 raise ServiceUnavailableError("这条消息的小菱任务等待对账或已经产生费用，不能重复调用模型")
         if not resume_output:
+            if room.kind in {"company", "direct"}:
+                raise BillingAttributionUnavailable(
+                    "企业会话计费归属正在验证，旧版问答入口暂不支持公司群或私聊新请求"
+                )
             _require_subscription(work, enterprise_id)
             _require_active_limit(
                 work, enterprise_id=enterprise_id, group_id=room.group_id if room.kind == "group" else None,

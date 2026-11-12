@@ -1,5 +1,5 @@
-from datetime import timedelta
 import runpy
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -17,6 +17,7 @@ from app.models.enterprise_chat import EnterpriseAssistantRun, EnterpriseChatMes
 from app.models.enterprise_org import Enterprise, EnterpriseMember
 from app.models.user import User
 from app.services import enterprise_assistant_clarification_service as clarification
+from app.services import enterprise_assistant_runtime_service as runtime
 
 
 @pytest.fixture
@@ -51,9 +52,15 @@ def records_db():
                                prompt_sha256="a" * 64, status="running"),
     ])
     db.flush()
+    room = db.query(EnterpriseConversation).filter_by(id=30).one()
+    frozen_messages = (db.query(EnterpriseChatMessage)
+                       .filter_by(enterprise_id=10, conversation_id=30, sender_type="human")
+                       .order_by(EnterpriseChatMessage.id).all())
+    snapshot = runtime._role_snapshot(db, enterprise_id=10, room=room, messages=frozen_messages, initiator_id=3)
     db.add(EnterpriseAssistantRuntimeState(id=300, assistant_run_id=200, enterprise_id=10, conversation_id=30,
                                           initiator_user_id=3, source_message_id=101, status="running",
-                                          permission_snapshot_json="{}", permission_snapshot_sha256="b" * 64))
+                                          permission_snapshot_json=runtime._json(snapshot),
+                                          permission_snapshot_sha256=runtime._digest(snapshot)))
     db.commit()
     yield db
     db.close()
@@ -65,11 +72,41 @@ def _request(db, **overrides):
                    action="create_registered_enterprise_agent_team", target={"team": "new"},
                    arguments={"title": "团队"}, expires_at=clarification._now() + timedelta(hours=1))
     options.update(overrides)
+    if int(options["conversation_id"]) == 30:
+        message = db.get(EnterpriseChatMessage, 100)
+        if message is not None and "@小菱" not in str(message.content or ""):
+            message.content = "@小菱 先不要创建团队"
+            db.flush()
     return clarification.create_request(db, **options)
 
 
+def _set_prior_directive(db):
+    db.get(EnterpriseChatMessage, 100).content = "@小菱 先不要创建团队"
+    db.flush()
+
+
 def test_request_binds_exact_action_and_is_idempotent(records_db):
+    _set_prior_directive(records_db)
     first = _request(records_db)
+    run = records_db.query(EnterpriseAssistantRun).filter_by(id=200).one()
+    _room, candidates, rows, _fingerprint, superseded = clarification._context(records_db, run)
+    assert not superseded
+    source = rows[int(run.source_message_id)]
+    source_message = records_db.get(EnterpriseChatMessage, int(run.source_message_id))
+    legacy_fingerprint = clarification._digest({
+        "initiator_rank": int(source["rank"]),
+        "initiator_role": source.get("member_role"),
+        "initiator_group_role": source.get("group_role"),
+        "source_content": clarification._digest({"text": source_message.content}),
+        "messages": [{
+            "id": int(message.id), "author": int(message.sender_id),
+            "rank": int(rows[int(message.id)]["rank"]),
+            "member_role": rows[int(message.id)].get("member_role"),
+            "group_role": rows[int(message.id)].get("group_role"),
+            "content": clarification._digest({"text": message.content}),
+        } for message in candidates],
+    })
+    assert first.authority_sha256 == legacy_fingerprint
     records_db.commit()
     replay = _request(records_db)
     assert replay.id == first.id
@@ -78,6 +115,7 @@ def test_request_binds_exact_action_and_is_idempotent(records_db):
 
 
 def test_request_uses_current_real_message_authors_not_other_rooms(records_db):
+    _set_prior_directive(records_db)
     request = _request(records_db)
     records_db.commit()
     decisions = records_db.query(EnterpriseAssistantClarificationDecision).filter_by(request_id=request.id).all()
@@ -85,6 +123,7 @@ def test_request_uses_current_real_message_authors_not_other_rooms(records_db):
 
 
 def test_only_author_or_current_higher_authority_can_decide(records_db):
+    _set_prior_directive(records_db)
     request = _request(records_db)
     records_db.commit()
     with pytest.raises(ForbiddenError):
@@ -97,13 +136,14 @@ def test_only_author_or_current_higher_authority_can_decide(records_db):
 
 
 def test_expiry_or_new_higher_message_invalidates_prior_decision(records_db):
+    _set_prior_directive(records_db)
     request = _request(records_db)
     records_db.commit()
     clarification.decide(records_db, enterprise_id=10, conversation_id=30, request_id=request.id,
                          source_message_id=100, user_id=2, decision="allow")
     records_db.commit()
     records_db.add(EnterpriseChatMessage(id=103, enterprise_id=10, conversation_id=30, sender_id=1,
-                                        sender_type="human", client_message_id="new", content="先暂停"))
+                                        sender_type="human", client_message_id="new", content="@小菱 先暂停"))
     records_db.commit()
     assert clarification.status(records_db, enterprise_id=10, conversation_id=30, request_id=request.id) == "stale"
     request.expires_at = clarification._now() - timedelta(seconds=1)
@@ -112,13 +152,13 @@ def test_expiry_or_new_higher_message_invalidates_prior_decision(records_db):
 
 
 def test_changed_authority_creates_new_version_and_preserves_old_decisions(records_db):
+    _set_prior_directive(records_db)
     first = _request(records_db)
     records_db.commit()
     clarification.decide(records_db, enterprise_id=10, conversation_id=30, request_id=first.id,
                          source_message_id=100, user_id=2, decision="allow")
     records_db.commit()
-    records_db.add(EnterpriseChatMessage(id=103, enterprise_id=10, conversation_id=30, sender_id=1,
-                                        sender_type="human", client_message_id="new", content="先暂停"))
+    records_db.get(EnterpriseChatMessage, 100).content = "@小菱 改变旧指令"
     records_db.commit()
     second = _request(records_db)
     records_db.commit()
@@ -131,6 +171,7 @@ def test_changed_authority_creates_new_version_and_preserves_old_decisions(recor
 
 
 def test_repeating_same_author_decision_is_idempotent(records_db):
+    _set_prior_directive(records_db)
     request = _request(records_db)
     records_db.commit()
     for _ in range(2):
@@ -141,6 +182,7 @@ def test_repeating_same_author_decision_is_idempotent(records_db):
 
 
 def test_decider_losing_authority_invalidates_decision(records_db):
+    _set_prior_directive(records_db)
     request = _request(records_db)
     records_db.commit()
     clarification.decide(records_db, enterprise_id=10, conversation_id=30, request_id=request.id,
@@ -152,6 +194,7 @@ def test_decider_losing_authority_invalidates_decision(records_db):
 
 
 def test_missing_source_decision_never_becomes_ready(records_db):
+    _set_prior_directive(records_db)
     request = _request(records_db)
     records_db.commit()
     records_db.query(EnterpriseAssistantClarificationDecision).filter_by(request_id=request.id).delete()
@@ -160,6 +203,7 @@ def test_missing_source_decision_never_becomes_ready(records_db):
 
 
 def test_modified_action_payload_never_becomes_ready(records_db):
+    _set_prior_directive(records_db)
     request = _request(records_db)
     records_db.commit()
     clarification.decide(records_db, enterprise_id=10, conversation_id=30, request_id=request.id,
@@ -170,6 +214,7 @@ def test_modified_action_payload_never_becomes_ready(records_db):
 
 
 def test_changed_initiating_message_invalidates_decision(records_db):
+    _set_prior_directive(records_db)
     request = _request(records_db)
     records_db.commit()
     clarification.decide(records_db, enterprise_id=10, conversation_id=30, request_id=request.id,

@@ -127,7 +127,7 @@ def _lock_live_context(
         raise ForbiddenError("企业 Agent 团队父运行授权状态不存在")
 
     company = enterprise_org_service._company(db, int(enterprise_id), lock=lock_company)
-    # In the real path the role snapshot locks the company. Do it before
+    # In the real path the role snapshot shares the company lock before
     # membership rows, after the parent locks, to match organization writers
     # and parent recovery without weakening the existing authorization fence.
     from app.services import enterprise_assistant_runtime_service as parent_runtime
@@ -1278,10 +1278,10 @@ def metered_team_call(
             # request returns. A cancel/revoke operation therefore either wins
             # before send (and releases the hold) or waits for the active call.
             with session_factory.begin() as db:
-                # The current role snapshot holds the company row, in addition
-                # to member/group/run/task rows, until the provider returns.
-                # This fences organization changes but serializes same-company
-                # work; narrowing that lock requires a separate safe protocol.
+                # The current role snapshot holds a shared company row, in
+                # addition to member/group/run/task rows, until the provider
+                # returns. Organization writers still wait, while independent
+                # members can send concurrently.
                 live = _lock_live_context(
                     db,
                     enterprise_id=enterprise_id,

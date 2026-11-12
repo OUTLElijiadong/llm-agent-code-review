@@ -113,7 +113,11 @@ def _allow_runtime_guard(monkeypatch):
     # This suite isolates persisted billing checkpoints without organization/chat tables.
     monkeypatch.setattr(runtime, "_require_model_send_clearance", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(runtime, "_validate_checkpoint_attachments", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(runtime.billing_checkout_service, "enterprise_subscription_status", lambda *_args: "active")
+    monkeypatch.setattr(
+        runtime.billing_checkout_service,
+        "enterprise_subscription_status",
+        lambda *_args, **_kwargs: "active",
+    )
     monkeypatch.setattr(runtime.assistant_service, "_require_active_limit", lambda *_args, **_kwargs: None)
 
 

@@ -60,6 +60,45 @@ def enterprise_subscription_refund_pending(db: Session, enterprise_id: int) -> b
     ).first() is not None
 
 
+def enterprise_subscription_status_current(db: Session, enterprise_id: int, *, now: datetime | None = None) -> str:
+    """Read subscription/refund authorization from a fresh MySQL snapshot.
+
+    Call this only after the caller has locked the enterprise row. Enterprise
+    subscription refund writers use that same row, so this fresh nonlocking
+    read observes the transaction which won the serialization point without
+    taking order/refund locks in the opposite direction.
+    """
+    with org._billing_authorization_session(db) as current:
+        return enterprise_subscription_status(current, enterprise_id, now=now)
+
+
+def order_refund_pending_current(db: Session, order_no: str) -> bool:
+    """Read a paid order's refund gate from a fresh MySQL snapshot."""
+    with org._billing_authorization_session(db) as current:
+        return current.query(BillingRefund.id).filter(
+            BillingRefund.order_no == order_no,
+            pending_access_expression(),
+        ).first() is not None
+
+
+def enterprise_has_active_reservations_current(db: Session, enterprise_id: int) -> bool:
+    """Whether any company call remains reserved or financially unknown."""
+    with org._billing_authorization_session(db) as current:
+        return current.query(BillingReservation.id).filter(
+            BillingReservation.enterprise_id == enterprise_id,
+            BillingReservation.status.in_({"reserved", "unknown"}),
+        ).first() is not None
+
+
+def enterprise_refund_is_current_period_current(
+    db: Session, enterprise_id: int, order_no: str, *, now: datetime,
+) -> bool:
+    """Whether refunding this order would remove the period currently authorizing work."""
+    with org._billing_authorization_session(db) as current:
+        period = enterprise_subscription_period(current, enterprise_id, now=now)
+        return period is not None and period.order_no == order_no
+
+
 def _now():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -233,10 +272,7 @@ def activate_due_period(db: Session, period_id: int, *, now: datetime | None = N
               .populate_existing().with_for_update().one())
     if period.granted_at is not None or not period.starts_at <= now < period.ends_at:
         return False
-    if db.query(BillingRefund.id).filter(
-        BillingRefund.order_no == period.order_no,
-        BillingRefund.order_no.in_(_pending_refund_orders(db)),
-    ).first():
+    if order_refund_pending_current(db, period.order_no):
         return False
     order = db.query(BillingOrder).filter_by(order_no=period.order_no, status="paid").first()
     event = db.query(BillingPaymentEvent).filter_by(order_no=period.order_no).first()
@@ -563,12 +599,14 @@ def _manual_refund_context(db: Session, order: BillingOrder, *, expected_refund_
     return batch, period
 
 
-def _lock_refund_and_order(db: Session, refund_no: str) -> tuple[BillingRefund, BillingOrder]:
-    """Lock payment state in the same order used by refund requests: order, then refund.
+def _lock_refund_order_scope(db: Session, refund_no: str) -> tuple[str, BillingOrder]:
+    """Lock order, then its enterprise row, before locking mutable refund state.
 
-    The first read only discovers the immutable order number. Both records are then
-    current locking reads, so REPEATABLE READ snapshots cannot return stale status
-    and concurrent refund operations cannot invert the order/refund lock sequence.
+    The order number is immutable and is read only to locate its current row. The
+    order, enterprise and refund are then current locking reads. The enterprise
+    row is the shared authorization serialization point already used by runtime
+    sends; taking it before the refund row keeps every subscription-refund writer
+    ordered as order -> enterprise -> refund -> wallet.
     """
     candidate_order_no = db.query(BillingRefund.order_no).filter_by(refund_no=refund_no).scalar()
     if not candidate_order_no:
@@ -576,9 +614,22 @@ def _lock_refund_and_order(db: Session, refund_no: str) -> tuple[BillingRefund, 
     order = db.query(BillingOrder).filter_by(order_no=candidate_order_no).populate_existing().with_for_update().first()
     if order is None:
         raise ledger.BillingError("退款单对应的支付订单不存在")
+    if (order.product in {"enterprise_create", "enterprise_renew"}
+            and order.enterprise_id is not None):
+        org._company(db, int(order.enterprise_id), lock=True)
+    return candidate_order_no, order
+
+
+def _lock_refund_record(db: Session, refund_no: str, order_no: str) -> BillingRefund:
     refund = db.query(BillingRefund).filter_by(refund_no=refund_no).populate_existing().with_for_update().first()
-    if refund is None or refund.order_no != order.order_no:
+    if refund is None or refund.order_no != order_no:
         raise ledger.BillingError("退款单与支付订单关系已变化")
+    return refund
+
+
+def _lock_refund_and_order(db: Session, refund_no: str) -> tuple[BillingRefund, BillingOrder]:
+    order_no, order = _lock_refund_order_scope(db, refund_no)
+    refund = _lock_refund_record(db, refund_no, order_no)
     return refund, order
 
 
@@ -654,14 +705,27 @@ def _refund_reconciliation_claim_times(db: Session, now: datetime | None):
 
 
 def review_manual_refund(db: Session, *, refund_no: str, admin_id: int, decision: str, reason: str,
-                         now: datetime | None = None) -> BillingRefund:
+                         now: datetime | None = None,
+                         reviewer_token_version: int | None = None) -> BillingRefund:
     """Platform-admin review for refunds which cannot use the automatic full-unused-credit path."""
     if decision not in {"approve", "reject"}:
         raise ledger.BillingError("退款审核决定仅支持 approve 或 reject")
     reason = reason.strip() if isinstance(reason, str) else ""
     if not reason or len(reason) > 500:
         raise ledger.BillingError("退款审核原因必须为 1 至 500 个字符")
-    refund, order = _lock_refund_and_order(db, refund_no)
+    order_no, order = _lock_refund_order_scope(db, refund_no)
+    if reviewer_token_version is not None:
+        # Enterprise send paths lock company before a member account. Acquire
+        # the same company scope before locking the platform reviewer identity,
+        # otherwise a reviewer who is also an enterprise member can deadlock a
+        # send holding company -> user. The live role/grant check remains in
+        # this transaction and is not trusted from the API's auth snapshot.
+        from app.services import billing_refund_reviewer_service
+
+        billing_refund_reviewer_service.require_reviewer(
+            db, admin_id, reviewer_token_version,
+        )
+    refund = _lock_refund_record(db, refund_no, order_no)
     if refund_requires_reconciliation(refund):
         raise ledger.BillingError("退款状态证据不完整，必须先查单核对")
     legacy_approved = (
@@ -713,6 +777,13 @@ def review_manual_refund(db: Session, *, refund_no: str, admin_id: int, decision
         return refund
 
     batch, _period = _manual_refund_context(db, order, expected_refund_lock=None if legacy_approved else 0)
+    if (order.product in {"enterprise_create", "enterprise_renew"}
+            and order.enterprise_id is not None
+            and enterprise_refund_is_current_period_current(
+                db, int(order.enterprise_id), order.order_no, now=observed_at,
+            )
+            and enterprise_has_active_reservations_current(db, int(order.enterprise_id))):
+        raise ledger.BillingError("企业仍有未结算或待核对的小菱调用，暂不能批准退款")
     if batch is not None:
         if batch.remaining_milli != batch.issued_milli:
             raise ledger.BillingError("周期积分已有已结算用量，不能批准全额退款")
@@ -727,14 +798,20 @@ def review_manual_refund(db: Session, *, refund_no: str, admin_id: int, decision
     return refund
 
 
-def request_refund(db: Session, *, order_no: str, requester_id: int, reason: str,
-                   enterprise_admin_authorized: bool = False) -> BillingRefund:
+def request_refund(db: Session, *, order_no: str, requester_id: int, reason: str) -> BillingRefund:
     reason = reason.strip() if isinstance(reason, str) else ""
     if not reason or len(reason) > 500:
         raise ledger.BillingError("退款原因必须为 1 至 500 个字符")
     order = db.query(BillingOrder).filter_by(order_no=order_no).populate_existing().with_for_update().first()
-    if (order is None or (order.user_id != requester_id and
-                          not (enterprise_admin_authorized and order.enterprise_id is not None))):
+    if order is None:
+        raise ledger.BillingError("支付订单不存在")
+    if order.enterprise_id is not None:
+        # Revalidate the caller after acquiring the same company lock as role
+        # changes. An API-layer permission result can become stale while this
+        # transaction waits for the order/company locks.
+        org._company(db, int(order.enterprise_id), lock=True)
+        org.require_enterprise_admin(db, int(order.enterprise_id), requester_id, lock=True)
+    elif order.user_id != requester_id:
         raise ledger.BillingError("支付订单不存在")
     if (order.status != "paid" or order.payment_status != "paid"
             or db.query(BillingPaymentEvent).filter_by(order_no=order_no).first() is None):
@@ -807,10 +884,6 @@ def update_refund_result(db: Session, *, refund_no: str, result: dict, now: date
                          reconciliation_token: str | None = None, attempt_no: int | None = None,
                          create_response_verified: bool = False):
     refund, order = _lock_refund_and_order(db, refund_no)
-    if order.product in {"enterprise_create", "enterprise_renew"} and order.enterprise_id is not None:
-        # A confirmed enterprise refund can change the company's seats/status.
-        # Lock it before the wallet, matching activation and quota changes.
-        org._company(db, int(order.enterprise_id), lock=True)
     observed_at = _refund_reconciliation_clock(db, now)
     if create_response_verified and (verified_provider_query or attempt_no is None):
         raise ledger.BillingError("退款创建响应缺少有效代次")

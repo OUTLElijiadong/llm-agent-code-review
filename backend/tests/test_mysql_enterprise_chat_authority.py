@@ -6,6 +6,8 @@ from uuid import uuid4
 
 import pytest
 import test_fresh_database_chain as chain
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import sessionmaker
 
 from app.core.exceptions import ForbiddenError
@@ -14,13 +16,13 @@ from app.models.enterprise_chat import EnterpriseAssistantRun, EnterpriseChatMes
 from app.models.enterprise_org import Enterprise, EnterpriseGroup, EnterpriseGroupMember, EnterpriseMember
 from app.models.user import User
 from app.services import enterprise_assistant_runtime_service as runtime
-from app.services import enterprise_assistant_service, enterprise_org_service
+from app.services import enterprise_assistant_service, enterprise_chat_service, enterprise_org_service
 
 fresh_chain = chain.fresh_chain
 fresh_chain_url = chain.fresh_chain_url
 
 
-def _seed(engine):
+def _seed(engine, *, prior_authority_before_source=False):
     sessions = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     key = uuid4().hex[:12]
     with sessions.begin() as db:
@@ -68,6 +70,7 @@ def _seed(engine):
             sender_type="human",
             client_message_id="source",
             content="@小菱 回答",
+            sender_authority_rank=1,
         )
         earlier = EnterpriseChatMessage(
             enterprise_id=company.id,
@@ -75,12 +78,20 @@ def _seed(engine):
             sender_id=author.id,
             sender_type="human",
             client_message_id="prior",
-            content="原管理员指令",
+            content="@小菱 原管理员指令" if prior_authority_before_source else "原管理员指令",
+            sender_authority_rank=3 if prior_authority_before_source else None,
         )
-        db.add_all([source, earlier])
+        if prior_authority_before_source:
+            db.add(earlier)
+            db.flush()
+            db.add(source)
+            snapshot_messages = [earlier, source]
+        else:
+            db.add_all([source, earlier])
+            snapshot_messages = [source, earlier]
         db.flush()
         snapshot = runtime._role_snapshot(
-            db, enterprise_id=company.id, room=room, messages=[source, earlier], initiator_id=actor.id
+            db, enterprise_id=company.id, room=room, messages=snapshot_messages, initiator_id=actor.id
         )
         run = EnterpriseAssistantRun(
             public_id=f"chat-{key}",
@@ -135,6 +146,88 @@ def _change(db, kind, enterprise_id, group_id, owner_id, author_id):
     else:
         db.query(User).filter_by(id=author_id).one().status = 0
         db.flush()
+
+
+def test_mysql_directive_snapshot_is_required_and_message_is_immutable(fresh_chain):
+    sessions, enterprise_id, _group_id, _owner_id, author_id, room_id, _run_id = _seed(fresh_chain)
+    with sessions.begin() as db:
+        directive = enterprise_chat_service.send_message(
+            db, enterprise_id, author_id, room_id, "immutable-directive", "@小菱 请暂停并核对",
+        )
+        directive_id = int(directive.id)
+        assert directive.sender_authority_rank == 3
+    with sessions() as db:
+        directive = db.get(EnterpriseChatMessage, directive_id)
+        params = {
+            "id": directive_id,
+            "enterprise_id": enterprise_id,
+            "conversation_id": room_id,
+            "sender_id": author_id,
+            "client_message_id": directive.client_message_id,
+            "content": directive.content,
+            "rank": directive.sender_authority_rank,
+        }
+
+    invalid_writes = [
+        (
+            "INSERT INTO enterprise_chat_message "
+            "(enterprise_id, conversation_id, sender_id, sender_type, client_message_id, content, "
+            "create_time, update_time) VALUES (:enterprise_id, :conversation_id, :sender_id, 'human', "
+            "'missing-rank', '@小菱 缺少发送时快照', UTC_TIMESTAMP(), UTC_TIMESTAMP())",
+            params,
+        ),
+        (
+            "UPDATE enterprise_chat_message SET content='普通消息' WHERE id=:id",
+            params,
+        ),
+        (
+            "UPDATE enterprise_chat_message SET sender_authority_rank=2 WHERE id=:id",
+            params,
+        ),
+        (
+            "DELETE FROM enterprise_chat_message WHERE id=:id",
+            params,
+        ),
+        (
+            "REPLACE INTO enterprise_chat_message "
+            "(id, enterprise_id, conversation_id, sender_id, sender_type, client_message_id, content, "
+            "sender_authority_rank, create_time, update_time) VALUES (:id, :enterprise_id, :conversation_id, "
+            ":sender_id, 'human', :client_message_id, '@小菱 覆盖消息', :rank, UTC_TIMESTAMP(), UTC_TIMESTAMP())",
+            params,
+        ),
+    ]
+    for statement, values in invalid_writes:
+        with pytest.raises(DBAPIError):
+            with fresh_chain.begin() as connection:
+                connection.execute(text(statement), values)
+
+    with sessions() as db:
+        persisted = db.get(EnterpriseChatMessage, directive_id)
+        assert persisted.content == "@小菱 请暂停并核对"
+        assert persisted.sender_authority_rank == 3
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("content", "@小菱 请暂停 abc"),
+        ("client_message_id", "IMMUTABLE-DIRECTIVE"),
+    ],
+)
+def test_mysql_directive_identity_uses_byte_comparison(fresh_chain, field, value):
+    sessions, enterprise_id, _group_id, _owner_id, author_id, room_id, _run_id = _seed(fresh_chain)
+    with sessions.begin() as db:
+        directive = enterprise_chat_service.send_message(
+            db, enterprise_id, author_id, room_id, "immutable-directive", "@小菱 请暂停 ABC",
+        )
+        directive_id = int(directive.id)
+
+    with pytest.raises(DBAPIError):
+        with fresh_chain.begin() as connection:
+            connection.execute(
+                text(f"UPDATE enterprise_chat_message SET {field}=:value WHERE id=:id"),
+                {"id": directive_id, "value": value},
+            )
 
 
 @pytest.mark.parametrize("kind", ["group", "member", "role", "disabled"])

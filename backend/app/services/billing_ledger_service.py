@@ -386,17 +386,28 @@ def grant(db: Session, *, wallet_id: int, grant_key: str, kind: str,
     return batch
 
 
+def _wallet_credit_batches(db: Session, wallet_id: int):
+    return (db.query(BillingCreditBatch).filter(
+        BillingCreditBatch.wallet_id == wallet_id,
+    ).with_hint(
+        BillingCreditBatch.__table__, "FORCE INDEX (ix_billing_batch_wallet_expiry)", "mysql",
+    ))
+
+
 def available_milli(db: Session, wallet_id: int, now=None, *, lock: bool = False) -> int:
     now = _naive_utc(now) if now is not None else _now()
-    query = db.query(BillingCreditBatch).filter(
-        BillingCreditBatch.wallet_id == wallet_id,
-        or_(BillingCreditBatch.expires_at.is_(None), BillingCreditBatch.expires_at > now),
-    ).order_by(BillingCreditBatch.id)
+    query = _wallet_credit_batches(db, wallet_id).order_by(BillingCreditBatch.id)
     if lock:
         # Callers first lock the wallet. A MySQL RR snapshot and already-loaded
-        # ORM instances must not hide a committed hold on that wallet.
+        # ORM instances must not hide a committed hold on that wallet. Force
+        # the wallet-leading index: for a small batch table MySQL may otherwise
+        # scan PRIMARY to satisfy ordering and lock another wallet's row.
         query = query.populate_existing().with_for_update()
-    return sum(max(0, b.remaining_milli - b.reserved_milli - b.refund_reserved_milli) for b in query.all())
+    return sum(
+        max(0, batch.remaining_milli - batch.reserved_milli - batch.refund_reserved_milli)
+        for batch in query.all()
+        if batch.expires_at is None or batch.expires_at > now
+    )
 
 
 def _limits(db, enterprise_id, group_id, user_id, now, usage_kind, enterprise_wallet_id,
@@ -521,12 +532,13 @@ def reserve(db: Session, *, request_key: str, model_name: str, user_id: int | No
     for wallet_id, amount in ((enterprise_wallet_id, company_amount), (personal_wallet_id, personal_amount)):
         if not amount:
             continue
-        batches = (db.query(BillingCreditBatch).filter(
-            BillingCreditBatch.wallet_id == wallet_id,
-            or_(BillingCreditBatch.expires_at.is_(None), BillingCreditBatch.expires_at > now),
-        ).order_by(case((BillingCreditBatch.expires_at.is_(None), 1), else_=0),
-                   BillingCreditBatch.expires_at, BillingCreditBatch.id).populate_existing().with_for_update().all())
+        batches = (_wallet_credit_batches(db, wallet_id)
+                   .order_by(case((BillingCreditBatch.expires_at.is_(None), 1), else_=0),
+                             BillingCreditBatch.expires_at, BillingCreditBatch.id)
+                   .populate_existing().with_for_update().all())
         for batch in batches:
+            if batch.expires_at is not None and batch.expires_at <= now:
+                continue
             take = min(amount, batch.remaining_milli - batch.reserved_milli - batch.refund_reserved_milli)
             if take <= 0:
                 continue
@@ -627,12 +639,13 @@ def reserve_tool(db: Session, *, request_key: str, tool_name: str, user_id: int,
             raise IdempotencyConflict("工具调用键已由并发请求创建，禁止再次外呼") from exc
         raise
     remaining = price
-    batches = (db.query(BillingCreditBatch).filter(
-        BillingCreditBatch.wallet_id == enterprise_wallet_id,
-        or_(BillingCreditBatch.expires_at.is_(None), BillingCreditBatch.expires_at > at),
-    ).order_by(case((BillingCreditBatch.expires_at.is_(None), 1), else_=0),
-               BillingCreditBatch.expires_at, BillingCreditBatch.id).populate_existing().with_for_update().all())
+    batches = (_wallet_credit_batches(db, enterprise_wallet_id)
+               .order_by(case((BillingCreditBatch.expires_at.is_(None), 1), else_=0),
+                         BillingCreditBatch.expires_at, BillingCreditBatch.id)
+               .populate_existing().with_for_update().all())
     for batch in batches:
+        if batch.expires_at is not None and batch.expires_at <= at:
+            continue
         take = min(remaining, batch.remaining_milli - batch.reserved_milli - batch.refund_reserved_milli)
         if take <= 0:
             continue

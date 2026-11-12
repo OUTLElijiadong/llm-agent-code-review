@@ -28,7 +28,7 @@ def test_083_remains_in_the_single_chain_and_links_to_082():
 
     script = ScriptDirectory.from_config(config)
     heads = script.get_heads()
-    assert heads == ["118_clarification_authority"]
+    assert heads == ["119_chat_message_authority"]
     assert any(revision.revision == module.revision for revision in script.iterate_revisions(heads, "base"))
     assert script.get_revision("088_enterprise_kb_attach").down_revision == "087_enterprise_remote_project"
     assert script.get_revision("087_enterprise_remote_project").down_revision == "086_server_tool_usage"

@@ -69,7 +69,7 @@ afterEach(() => {
 
 describe('企业沟通', () => {
   it.each([
-    [40360, '小菱暂不可用'],
+    [40360, '小菱计费尚未就绪'],
     [40361, '请联系管理员设置默认小组'],
   ])('归属状态 %s 时发送的聊天消息保留且不退出企业空间', async (code, message) => {
     vi.stubGlobal('crypto', { randomUUID: () => 'gated-message',
@@ -97,6 +97,30 @@ describe('企业沟通', () => {
       expect(wrapper.text()).toContain(message)
       expect(wrapper.text()).toContain('甲公司')
       expect(wrapper.find('#message-content').exists()).toBe(true)
+    } finally { wrapper.unmount() }
+  })
+
+  it('最近会话显示真实消息摘要和时间，不重复显示会话类型', async () => {
+    mock.listEnterpriseConversations.mockResolvedValueOnce({ items: [{
+      id: 92, enterprise_id: 10, kind: 'direct', group_id: null,
+      participant_low_id: 1, participant_high_id: 2, create_time: '2026-11-08T08:00:00',
+      last_message_id: 500, last_message_preview: '较早的消息',
+      last_message_at: '2026-11-09T08:00:00', last_message_sender_id: 2, last_message_sender_type: 'human',
+    }, {
+      id: 91, enterprise_id: 10, kind: 'direct', group_id: null,
+      participant_low_id: 1, participant_high_id: 2, create_time: '2026-11-08T08:00:00',
+      last_message_id: 501, last_message_preview: '请看一下这次发布结果',
+      last_message_at: '2026-11-09T09:10:00', last_message_sender_id: 2, last_message_sender_type: 'human',
+    }], assistant_available: false })
+    const wrapper = mount(EnterpriseCommunication)
+    try {
+      await flushPromises()
+      const row = wrapper.findAll('.room-row')[0]
+      expect(row.text()).toContain('请看一下这次发布结果')
+      expect(row.text()).toContain('乙：请看一下这次发布结果')
+      expect(row.text()).not.toContain('企业成员私聊')
+      expect(row.find('.room-kind').exists()).toBe(false)
+      expect(row.find('time').attributes('datetime')).toBe('2026-11-09T09:10:00')
     } finally { wrapper.unmount() }
   })
 
