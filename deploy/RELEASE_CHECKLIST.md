@@ -35,6 +35,7 @@ cd /path/to/project/deploy
 - [ ] 前后端使用同一提交发布；脚本拒绝单独发布 backend/frontend，避免接口版本漂移。
 - [ ] 目标 Alembic 链含 `119_chat_message_authority` 或其后继时，已核对 `code_review` 的所有 Compose 外 Backend、worker 和其他数据库写进程，确认已停止后再使用 `--confirm-no-external-chat-writers`。脚本只枚举/停止当前 Compose Backend，不能替代外部写入者盘点。
 - [ ] 首次迁移 119 前已确认 Compose 外所有写入者停止；脚本在读取到目标迁移链关系后停止并核实 Compose Backend，再复核 revision、实际列、与迁移定义完全匹配的三个触发器及目标镜像能力。结构探针必须以 `utf8mb4` 读取触发器定义，避免 MySQL CLI 的默认 `latin1` 将中文字面量替换后误判。未知额外触发器、119 门内数据库 revision/schema 无法核实、部分完成或不一致时，保持停写并按前向修复处理；候选版本图解析失败或与 119 已知不兼容时，在数据库迁移和应用切换前拒绝发布并保留当前 Backend。
+- [ ] 若发布变更了 `deploy/prism_sandbox_executor.py` 协议，须把该 SHA 的跟踪文件和 root-only 环境配置放入独立 release snapshot，运行该 snapshot 的 `deploy/sandbox/install.sh --apply`；确认 systemd `ExecStart` 指向目标 SHA，UDS `/health` 与 `browser_blackbox` 均 ready，再启动依赖该协议的 Backend。Compose 发布不会自动更新 host systemd executor。
 - [ ] 目标 head 早于 119 时也须通过 revision/schema 预检；数据库领先旧目标、revision/schema 查询失败、revision 不唯一、部分结构或旧 revision 下已出现 119 结构时不得切换旧镜像。该旧目标预检遇查询失败时拒绝本次发布并保留现运行版本；多 revision、可查询出的部分结构及 revision/schema 不一致会先尝试停止 Compose Backend。
 - [ ] 数据库迁移只执行 `alembic upgrade head`；发布脚本重新生成并验证本次备份。
 - [ ] Backend `/healthz`、`/readyz`、version、release 标识和日志通过后，脚本才切换前端。
