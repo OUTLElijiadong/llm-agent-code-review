@@ -9,8 +9,8 @@ import test_fresh_database_chain as chain
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-pytest_plugins = ("test_fresh_database_chain",)
 fresh_chain = chain.fresh_chain
+fresh_chain_url = chain.fresh_chain_url
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "deploy/lib"))
 from chat_authority_schema_compatibility import classify_schema, expected_triggers  # noqa: E402

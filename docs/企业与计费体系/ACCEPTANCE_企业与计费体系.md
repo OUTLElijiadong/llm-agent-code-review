@@ -1,5 +1,13 @@
 # 验收记录：企业与计费体系
 
+## 2026-11-12：f558f301 云端全量回归与 fixture 修复
+
+- PR #4 的 SHA `f558f301d6cf2b07039f073005a6752145e2c02a` 云端后端任务运行 2,594.72 秒后以失败结束：**11,807 passed、5 xfailed、21 errors**，13 条警告，覆盖率 **85%**（82,681 statements、12,225 missed）。21 项均为测试 setup 错误，不是业务断言失败：一个 MySQL schema probe 缺 `fresh_chain_url` fixture，渗透证据能力测试的 20 个参数化用例缺 `scenario` fixture；失败后 Ruff/compile 与 pip-audit 步骤未运行。
+- 同 SHA 的前端测试/构建、部署回归、Python 与 JavaScript/TypeScript CodeQL job 通过；GitHub Advanced Security 聚合 CodeQL 仍失败，18 条注解（2 critical、16 high），均在 `deploy/prism_sandbox_executor.py`。之前的只读比对发现与 `main` 同文件已有对应告警；正式 triage 未完成，未关闭或忽略告警。
+- 已依据云端 traceback 复现 fixture 注册问题：完整收集时把同时被 pytest 收集的测试模块当插件，导致共享 fixture 不可见。修复为将证据场景移入独立、非测试插件模块，并在 MySQL schema probe 显式别名化 `fresh_chain` 与 `fresh_chain_url`。
+- 修复后的受影响模块本机 **32 passed、95 skipped**；95 项需显式 MySQL，本机未设置时按约定跳过。schema probe 在一次性、回环绑定 MySQL 8.0.45 上另行 **1 passed**。新改动 Ruff、Python 编译和 `git diff --check` 通过；修复提交及新 SHA 云端回归待执行。
+- 生产仍未部署，公开 `/readyz` 最新复核为 `ready / 4.1.42 / a165f94ed4c208fb05251e4c7d12accb427c8ba3`。迁移 119 的 Compose 外写入者盘点与停写、生产备份隔离恢复、兼容回滚/前向恢复、维护窗口和业务冒烟证据仍未取得。
+
 ## 2026-11-12：提交前全量回归与生产发布门复核
 
 - 修正 CI 的验证配置：PR 分支不再同时触发 `push` 与 `pull_request` 两套完整工作流；后端作业超时从 35 分钟提高到 120 分钟；MySQL 启用 `performance_schema`，供真实锁等待用例读取 `data_lock_waits`。PR、手动和定时触发仍保留。

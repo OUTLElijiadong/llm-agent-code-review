@@ -1,5 +1,12 @@
 # 待办：企业与计费体系
 
+## 2026-11-12 最新状态：云端 fixture 错误修复待提交
+
+- PR #4 SHA `f558f301d6cf2b07039f073005a6752145e2c02a` 的 GitHub 后端回归：**11,807 passed、5 xfailed、21 setup errors**，85% 覆盖率；1 个 MySQL schema probe 缺少 `fresh_chain_url`，20 个渗透证据能力用例缺少 `scenario`。云端日志证明为 pytest fixture 注册问题，非业务断言失败。
+- 已把证据场景 fixture 移到 pytest 不会自动收集的共享插件，并给 MySQL schema probe 显式提供两个 fixture 别名。修复后受影响模块 **32 passed、95 skipped**；一次性 MySQL 8.0.45 schema probe **1 passed**；目标 Ruff、编译、`git diff --check` 通过。改动尚未提交；推送后需等新 SHA 云端全量回归。
+- 前端、部署、Python 与 JS/TS CodeQL jobs 在 f558 SHA 通过；聚合 CodeQL 仍失败（同执行器文件 18 条注解，2 critical、16 high），正式 triage 未完成。
+- 生产最新公开 `/readyz` 为 `ready / 4.1.42 / a165f94ed4c208fb05251e4c7d12accb427c8ba3`，本轮未部署。迁移 119 外部写入者盘点/停写、生产备份隔离恢复、兼容回滚/前向恢复、维护窗口和业务冒烟仍待完成；这些证据未具备前不能上线。
+
 ## 2026-11-12 最新续验：MySQL 全量回归与提交前状态
 
 - 在一次性 MySQL 8.0.45 数据库运行全部 `tests/test_mysql_*.py`：**633 passed、5 xfailed、0 failed**，377 条警告，用时 366.77 秒；全新数据库迁移链 **94 passed**。这轮补齐了前一条记录中未完成的 MySQL 验收。
