@@ -1067,10 +1067,12 @@ def test_base_agent_http_is_cancelled_from_persisted_team_state(team_execution, 
     thread = Thread(target=worker, daemon=True)
     thread.start()
     try:
-        # 等待启动留调度余量；取消后的 2 秒边界单独核验。
+        # 启动等待留调度余量；撤权后先单独验证 HTTP 清理的 2 秒边界，
+        # 再给同步 worker 的数据库回滚与线程收尾更宽的有界时间。
         assert started.wait(15), (outcome, errors, sync_client.call_count)
         _revoke(team_execution, reason)
-        assert finished.wait(2), "BaseAgent HTTP did not stop after persisted revocation"
+        assert closed.wait(2), "BaseAgent HTTP stream did not close after persisted revocation"
+        assert finished.wait(10), "team worker did not finish bounded cancellation cleanup"
         assert closed.is_set() and all(client.is_closed for client in clients)
         assert outcome == [{"success": False}] and errors == [] and continued == []
         sync_client.assert_not_called()
