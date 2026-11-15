@@ -1,6 +1,20 @@
 # 验收记录：企业与计费体系
 
-## 2026-11-16：生产当前快照与本地续验
+## 2026-11-16：4.1.46 生产发布验收（T+60 已通过）
+
+- **合并与 CI**：PR [#8](https://github.com/OUTLElijiadong/llm-agent-code-review/pull/8) 已 squash 合并，生产 SHA `09408361d6859ab16c4d06068c518652ed8d1f1a`，版本 `4.1.46`。PR 测试 SHA `d7b05ace9225fdba0f93cedf7a444414a17c12d8` 与合并 SHA 的 Git tree 均为 `07343adf9636ebf7de0a9b5fc9ddea9eb83b461a`。PR 工作流 `43735035873` 全绿：后端 **11,842 passed、5 xfailed、13 warnings，覆盖率 85%**；前端测试/静态检查/构建、部署执行器与故障注入回归、Ruff、编译和依赖审计通过。PR CodeQL 工作流 `43735035838` 的 Python、JavaScript/TypeScript 和聚合检查通过；合并后主分支工作流 `43738941338`（CodeQL）与 `43738941420`（业务回归）也已通过。
+- **生产发布**：成功发布流程的首条服务端日志为 `2026-11-15 17:07:01 UTC`；发布账本 `DEPLOYED_AT_UTC` 为 `17:24:15Z`，脚本完成日志及观察 T0 为 `17:24:48 UTC`（台北时间 `2026-11-16 01:24:48`）。执行命令为 `deploy.sh all --revision 09408361d6859ab16c4d06068c518652ed8d1f1a --confirm-no-external-chat-writers`。Backend、Frontend 镜像均绑定该 SHA，后端 `APP_RELEASE` 一致；decoy 镜像为 `4.1.46`。Alembic current/head 均为 `119_chat_message_authority`，本次无新迁移。
+- **备份与恢复**：发布前备份 `code_review_20261115T170703Z_09408361d685.sql.gz` 的 gzip 与 SHA-256 校验通过；隔离恢复库验证 **177 张表**，revision 为 `119_chat_message_authority`。恢复库已由发布脚本清理。T+1 分钟与 T+15 分钟两次 `ops-check` 均为 `status=ok`、无阻断项；T+15 的磁盘占用 73%、内存占用 27%。
+- **线上冒烟**：HTTPS 证书校验有效；HTTP 返回 308，HTTPS 首页、`/healthz`、`/readyz` 返回 200。健康与就绪响应均报告版本 `4.1.46`、release SHA `09408361d6859ab16c4d06068c518652ed8d1f1a`。公网首页引用的新哈希资源可读取。公网 `/docs`、`/redoc`、`/openapi.json` 响应实际与 SPA 首页字节相同；直连后端三个路径均为 404，没有返回 API 文档或 schema。
+- **T+15 稳定性**：`2026-11-15 17:40:29 UTC` 的复核中，MySQL、Redis、ClamAV、Backend、Frontend、decoy 均 healthy，重启数均为 0；后端近 15 分钟 `ERROR`/`Traceback`/`CRITICAL` 行计数为 0。Backend 237 MiB/768 MiB、Frontend 6.6 MiB/128 MiB、decoy 3.8 MiB/128 MiB、MySQL 714 MiB/1.25 GiB、Redis 4.6 MiB/128 MiB、ClamAV 959 MiB/2.15 GiB。
+- **T+30 稳定性**：自动 `prism-ops-check.service` 于 `2026-11-15 17:54:36 UTC` 完成并为 `status=ok`；手动 `./ops-check.sh` 输出的 `checked_at_utc=2026-11-15T17:55:35Z`、`status=ok`，无阻断项。MySQL、Redis、ClamAV、Backend、Frontend、decoy 全部 healthy，重启数均为 0；后端 `healthz`/`readyz` 返回 4.1.46 和 release SHA `09408361d6859ab16c4d06068c518652ed8d1f1a`。两个 systemd 执行器均 active，近 30 分钟后端 `ERROR`/`Traceback`/`CRITICAL` 行计数为 0；磁盘 73%、内存 27%。公网首页、登录页、health、ready 均 HTTP 200 且 TLS 校验通过。登录页仅证明页面可达，不代表账号登录或业务流验收。
+- **T+60 稳定性**：`2026-11-15 18:25:36 UTC` 手动 `./ops-check.sh` 输出 `status=ok`、无阻断项；发布账本、版本/SHA、镜像一致，MySQL、Redis、ClamAV、Backend、Frontend 均 healthy，Alembic current/head 为 `119_chat_message_authority`，磁盘 73%、内存 27%。最新备份 `code_review_20261115T181709Z_nogit.sql.gz` 的 gzip 与 SHA-256 校验通过。六个容器重启数均为 0，两个 systemd 执行器 active，后端近 15 分钟 `ERROR`/`Traceback`/`CRITICAL` 行计数为 0。公网首页、`/healthz`、`/readyz` 均 TLS 校验通过并返回 200。
+- **浏览器验收边界**：普通浏览器可打开生产登录页；当前 IAB 的旧会话显示“token非法或已过期”。未提交账号、未登录、未创建生产数据；因此真实登录后的个人用户、审查员、企业管理员、组长、员工权限与业务链尚未验收。按 T+5 清单要求的项目/上传/审查、EICAR fail-closed、Agent 参数和 API Key 写入用例未执行。
+- **收费边界**：本次生产发布与自动化通过不等于可开始收费。支付宝沙箱商户凭据与下单/退款对账、微信 APIv3 受控小额生产交易/退款、真实模型供应商账单和支付/基础设施全量成本仍待验收；生产运行时收费计量配置未读取，销售开关状态不能仅按源码推断。未完成这些外部验收前不得开售或开放企业跨会话计费。
+- **安全告警**：本轮 PR CodeQL 未新增告警。GitHub API 当前显示 **55 条 open**（8 critical、47 high）和 11 条 fixed；其中 9 条（#9/#10/#11/#32/#66/#67/#69/#84/#85）于 `2026-11-15 17:07:32 UTC` 自动识别为 fixed，#77/#91 于 `2026-11-12` 已 fixed；11 条均无 `dismissed_at`，未手动 dismiss。仍开放的 55 条须由安全责任人逐项复核；扫描通过不代表告警已清零。
+- **观察窗口**：T+15、T+30、T+60 均通过；T+60 手动复核在 T0 后 60 分 48 秒完成。不得把前一版本发布后的观察结果移用到本次发布。
+
+## 2026-11-16：发布前复查快照（历史记录；当时 64 条告警 open）
 
 - **生产 HTTPS**：本次直读 `/healthz` 与 `/readyz` 均 HTTP 200，分别报告 `ok` 与 `ready`；版本/SHA 仍为 `4.1.45 / 1cb8e2dd07667040e2485b38038dbd1f9f5021b6`。没有 SSH、生产数据库、容器或 `ops-check` 新证据；本轮未部署或写入生产。
 - **工作树状态**：当前独立续验分支基于 `main` 的 `347a38713e0cc2d1946f117d572f259869172602`；本轮改动尚未合并或部署，不属于生产版本。生产状态不包含下列本地修复。

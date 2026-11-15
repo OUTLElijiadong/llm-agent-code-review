@@ -1,6 +1,12 @@
 # 阶段交付报告：企业与计费体系
 
-## 2026-11-16 续验状态（PR #8，记录时）
+## 2026-11-16 续验修复合并并发布 4.1.46（T+60 已通过）
+
+PR [#8](https://github.com/OUTLElijiadong/llm-agent-code-review/pull/8) 合并 SHA `09408361d6859ab16c4d06068c518652ed8d1f1a` 已部署生产，版本 `4.1.46`。PR SHA 与合并 SHA 的 Git tree 完全相同；PR 必需 CI、CodeQL 和合并后 main 工作流全部通过，后端全量回归 11,842 项通过、5 项预期失败、覆盖率 85%。发布前备份已完成 gzip/SHA 校验并在隔离库恢复 177 张表；Alembic current/head 为 `119_chat_message_authority`。Backend、Frontend 与 decoy 健康，公网 HTTPS/health/ready 返回目标版本和 SHA；T+15、T+30、T+60 ops-check 与稳定性复核全部通过。
+
+**交付范围**：本次是 4.1.45 生产版本的安全与计费补充修复，已合并并发布；不是企业计费的完整商业验收。T+15/T+30/T+60 生产观察均通过；真实多角色账号业务链、商户支付/退款、供应商账单、全成本核算和生产收费计量运行态仍未验证。详细证据和未结项见[验收记录](ACCEPTANCE_企业与计费体系.md)与[待办](TODO_企业与计费体系.md)。
+
+## 2026-11-16 发布前续验快照（PR #8，记录时）
 
 生产公开 `/healthz`、`/readyz` 仍报告 `4.1.45 / 1cb8e2dd07667040e2485b38038dbd1f9f5021b6`。候选 `4.1.46` 已提交到 `codex/enterprise-acceptance-followup-20261115`，核心修复提交为 `1ef81f3dbc111b39c3b05d83bbb4ba427423b971`；PR [#8](https://github.com/OUTLElijiadong/llm-agent-code-review/pull/8) 已打开。记录时该 PR SHA 的 GitHub CI/CodeQL 正在运行，尚未合并或部署。本地定向回归为 290、报告 API 51、ops 执行器 69 项通过，支付宝模式筛选 5 项通过（其中转发 2 项计入 290）。本轮修复四处既有 ReDoS、数值正则长输入告警、ops 文件读取边界、Alipay sandbox endpoint、报告错误响应的信息暴露/JSON 序列化；具体见[验收记录](ACCEPTANCE_企业与计费体系.md)。这不是可收费验收：真实角色浏览器、商户渠道、供应商账单与完整成本、生产运行时计量配置和新版本生产发布仍未核验。
 
