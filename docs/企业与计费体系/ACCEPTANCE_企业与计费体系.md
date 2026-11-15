@@ -1,5 +1,19 @@
 # 验收记录：企业与计费体系
 
+## 2026-11-12：生产发布 4.1.45
+
+> 本文件更早的同日记录是发布前各检查点的历史快照；若与本节当前生产状态冲突，以本节最终 SHA 和复核结果为准。
+
+- **生产已发布**：PR #4 企业与计费体系合并至 `0de2e3415eb5d796ece00d4b564684b44c99c3e6`（4.1.43）；PR #5 UTF-8 探针修复合并至 `92c25d30e8e22b8a72ffaa9d67ce6a88ec8deaf5`（4.1.44）；PR #6 安全续发修复合并至 `1cb8e2dd07667040e2485b38038dbd1f9f5021b6`（4.1.45）。生产 Backend 与 Frontend 均以最终 SHA 构建运行，发布账本、默认 Compose 环境与镜像一致。
+- **发布故障及修复**：4.1.43 首次迁移已把生产 Alembic 从 `065_review_rule_lang_severity` 前向升级到 `119_chat_message_authority`，结构探针因 MySQL CLI 默认 `latin1` 将触发器中文字面量误读，发布门正确保持 Backend 停止且没有 downgrade/restore。4.1.44 明确 MySQL CLI 使用 `utf8mb4`；续发时又发现部署预检无法识别上一轮安全停机留下的 exited Backend。4.1.45 仅接受与发布账本镜像摘要/版本匹配、Compose service 标签正确且 `oneoff=False` 的唯一常驻 exited 容器；不启动旧 Backend，不削弱 `ops-check` 的运行态要求。
+- **备份与数据库**：发布备份 `/opt/code-review/backups/code_review_20261112T103521Z_1cb8e2dd0766.sql.gz`，1,070,226,806 字节，SHA-256 `47c0b6cdb1d54e4eece79cbf1485f13f93324a082da58bc57661320302c9a8f7`。`.sha256` 与 `.meta` 一致；发布脚本在独立 `cr_testdb` 恢复验证通过，177 张表、唯一 Alembic revision `119_chat_message_authority`，临时验证库清理。此次验证是最新生产备份的隔离恢复，不等同于完整异地灾难恢复演练。
+- **线上检查**：HTTPS `/`、`/healthz`、`/readyz` 均 HTTP 200；健康/就绪报告版本 `4.1.45` 与 SHA `1cb8e2dd…`。`ops-check` 状态 `ok`，release、containers、disk、memory、backup、maintenance、restore_verification、alembic、https 子项均 `ok`；线上 `alembic_version` 唯一值为 119。Backend、Frontend、MySQL、Redis、ClamAV 健康。systemd 运维执行器已绑定 `/opt/code-review/deploy`；沙箱执行器 active，继续运行 4.1.44 的 immutable snapshot（4.1.45 没有修改执行器协议）。
+- **T+15 分钟观察**：首轮复查 `ops-check=ok`、`/healthz` 与 `/readyz` 均 200 且版本/SHA 未漂移；Backend/Frontend/MySQL/ClamAV 均 healthy、RestartCount=0；最近 15 分钟 Backend 日志中 `ERROR/CRITICAL/Traceback` 计数为 0。T+30 与 T+60 观察尚未完成。
+- **非阻断项**：可选 `decoy` 镜像构建的 `apk add python3` 因上游下载超过 20 分钟无进度而终止；部署脚本按设计记录增强项失败并继续，旧 `prism-decoy:4.1.42` 容器保持 healthy。它不是本次 Backend/Frontend 发布镜像。
+- **云端 CI**：PR #6 的后端全量回归、部署/执行器/故障注入、前端测试/静态检查/构建、Python 与 JavaScript/TypeScript CodeQL 单语言任务均通过；CodeQL 聚合检查显示 skipping。PR #4 同一产品代码后端全量为 **11,828 passed、5 xfailed**；PR #5、#6 的改动仅涉及发布/部署脚本和文档，不修改后端业务实现。之前 18 条基线告警未关闭或篡改，正式 triage 仍待完成。
+- **验收边界**：本次完成生产代码发布、迁移状态核对、备份恢复验证和基础线上运维检查。没有使用真实企业/组长/员工多账号完成浏览器业务流程；没有进行支付宝/微信商户沙箱收款、退款及资金/手续费对账；没有获得真实供应商账单/完整成本上界。销售硬锁与企业群/私聊跨会话计费门继续关闭，不据此宣称已可收费开售。
+- **UX/DX/AX**：服务恢复优先且不启动与 119 不兼容的旧 Backend；同一发布脚本能从经校验的安全停机状态继续，巡检仍拒绝将 stopped 服务当健康；版本、数据库结构、账本、容器身份和备份证据保持一致、可审计。
+
 ## 2026-11-12：d9a692d8 云端 CI 终态与生产发布阻塞
 
 - PR #4 SHA `d9a692d8a561d0e08f0bdfc422d271fdee137d42` 的 GitHub 后端全量回归通过：**11,828 passed、5 xfailed、0 errors**，13 条警告，用时 3,205.82 秒；覆盖率 **85%**（82,681 statements、12,221 missed）。Ruff、字节码编译通过；`pip-audit` 报告无已知漏洞。上个 SHA 的 21 个 fixture setup errors 未再出现。
