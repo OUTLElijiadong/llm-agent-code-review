@@ -53,6 +53,12 @@ def test_extracts_chinese_negation_scope_and_numeric_constraints() -> None:
     assert any("并发人数设为 2" in fact for fact in facts)
 
 
+def test_numeric_constraint_accepts_comparator_and_decimal_spacing() -> None:
+    text = "调用预算达到   ≥   2.5 天"
+
+    assert extract_protected_facts(text) == [text]
+
+
 def test_keeps_long_restricted_object_after_negation_marker() -> None:
     tail = "目标账号的会话历史、附件内容以及派生摘要"
     text = "不得" + ("任何其他说明文字" * 20) + tail + "。"
@@ -198,6 +204,28 @@ def test_time_window_scan_stays_fast_on_long_sentence_without_boundary() -> None
     facts = extract_protected_facts("x" * 100_000)
 
     assert facts == []
+    assert time.perf_counter() - started < 2.0
+
+
+def test_numeric_and_duration_scans_stay_fast_on_long_unmatched_candidates() -> None:
+    inputs = (
+        "达到" + " " * 50_000 + "x",
+        "0" * 50_000,
+    )
+
+    for text in inputs:
+        started = time.perf_counter()
+        assert extract_protected_facts(text) == []
+        assert time.perf_counter() - started < 2.0
+
+
+def test_numeric_scan_stays_fast_on_long_digit_runs_after_a_constraint() -> None:
+    text = "额度设置为" + "0" * 50_000
+
+    started = time.perf_counter()
+    facts = extract_protected_facts(text)
+
+    assert facts
     assert time.perf_counter() - started < 2.0
 
 

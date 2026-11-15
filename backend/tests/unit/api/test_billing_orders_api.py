@@ -1,5 +1,6 @@
 from datetime import timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -85,6 +86,58 @@ def test_checkout_uses_server_price_reuses_order_and_returns_own_code_only(db, m
     with pytest.raises(HTTPException) as error:
         billing.order_detail(first["order_no"], db=db, user=outsider)
     assert error.value.status_code == 404
+
+
+def test_alipay_sandbox_mode_is_forwarded_to_preorder_and_never_uses_arbitrary_url(monkeypatch, tmp_path):
+    _enable_fake_sales(monkeypatch, tmp_path)
+    monkeypatch.setattr(settings, "alipay_gateway_mode", "sandbox")
+    from app.services import billing_payment_gateway
+
+    captured = {}
+
+    def fake_preorder(**kwargs):
+        captured.update(kwargs)
+        return {"payment_code_url": "https://qr.alipay.com/test", "provider_order_id": "sandbox-order"}
+
+    monkeypatch.setattr(billing_payment_gateway, "create_alipay_preorder", fake_preorder)
+    order = SimpleNamespace(channel="alipay", product="personal_credits", order_no="sandbox-order", amount_fen=400)
+
+    result = billing._provider_order(order)
+
+    assert result["provider_order_id"] == "sandbox-order"
+    assert captured["sandbox"] is True
+    assert "gateway" not in captured
+
+
+def test_alipay_sandbox_mode_is_forwarded_to_reconciliation_and_refund_calls(monkeypatch, tmp_path):
+    _enable_fake_sales(monkeypatch, tmp_path)
+    monkeypatch.setattr(settings, "alipay_gateway_mode", "sandbox")
+    from app.services import billing_payment_gateway
+
+    calls = []
+
+    def fake_call(name):
+        def capture(**kwargs):
+            calls.append((name, kwargs))
+            return {"state": "UNKNOWN"}
+        return capture
+
+    for name in (
+        "query_alipay_trade", "close_alipay_trade", "create_alipay_refund", "query_alipay_refund",
+    ):
+        monkeypatch.setattr(billing_payment_gateway, name, fake_call(name))
+
+    order = SimpleNamespace(channel="alipay", product="personal_credits", order_no="sandbox-order", amount_fen=400)
+    refund = SimpleNamespace(refund_no="sandbox-refund", amount_fen=100, reason="test")
+    billing._provider_trade_query(order)
+    billing._provider_close_trade(order)
+    billing._provider_refund(order, refund)
+    billing._provider_refund_query(order, refund)
+
+    assert [name for name, _kwargs in calls] == [
+        "query_alipay_trade", "close_alipay_trade", "create_alipay_refund", "query_alipay_refund",
+    ]
+    assert all(kwargs["sandbox"] is True for _name, kwargs in calls)
 
 
 def test_checkout_does_not_retry_provider_order_with_same_idempotency_key(db, monkeypatch, tmp_path):

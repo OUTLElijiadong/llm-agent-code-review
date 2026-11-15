@@ -4,7 +4,7 @@ FastAPI应用核心配置模块
 """
 
 from pathlib import Path
-from typing import List
+from typing import List, Literal
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -67,6 +67,8 @@ class Settings(BaseSettings):
     billing_entitlement_enforcement_ready: bool = False
     # 未进入可信计费账本的平台模型/远端服务调用默认拒绝；仅兼容旧部署时显式接受未计量成本才开启。
     billing_allow_unmetered_external_calls: bool = False
+    # Use a separate Alipay sandbox app/key and isolated non-production database when selected.
+    alipay_gateway_mode: Literal["production", "sandbox"] = "production"
     alipay_app_id: str = ""
     alipay_seller_id: str = ""
     alipay_private_key_path: str = ""
@@ -405,6 +407,8 @@ class Settings(BaseSettings):
             problems.append("JWT_SECRET 仍为默认/空值,请设置为足够随机的字符串")
         if self.deepseek_api_key in _INSECURE_API_KEYS:
             problems.append("DEEPSEEK_API_KEY 未正确配置")
+        if self.alipay_gateway_mode == "sandbox" and self.app_env.lower() in {"prod", "production"}:
+            problems.append("ALIPAY_GATEWAY_MODE=sandbox 不得在生产环境启用")
         if self.beta_registration_enabled:
             beta_pepper = self.beta_code_pepper.strip()
             if len(beta_pepper) < 32 or beta_pepper.lower().startswith(("change_me", "please-change-me")):

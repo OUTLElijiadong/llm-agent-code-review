@@ -34,6 +34,18 @@ def test_unmetered_external_provider_calls_are_disabled_by_default():
     assert configured.billing_allow_unmetered_external_calls is False
 
 
+def test_alipay_gateway_defaults_to_production_and_rejects_unknown_modes():
+    assert Settings(_env_file=None).alipay_gateway_mode == "production"
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, alipay_gateway_mode="custom-url")
+
+
+@pytest.mark.parametrize("app_env", ["prod", "production"])
+def test_alipay_sandbox_gateway_is_rejected_in_production(app_env):
+    with pytest.raises(ValidationError, match="ALIPAY_GATEWAY_MODE=sandbox"):
+        Settings(_env_file=None, app_env=app_env, alipay_gateway_mode="sandbox")
+
+
 @pytest.mark.parametrize(
     "overrides",
     [

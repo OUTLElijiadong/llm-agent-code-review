@@ -27,6 +27,9 @@ DEFAULT_MIN_WEIGHT = 0.5      # 低于此权重不注入
 DEFAULT_TOP_K = 3
 
 _NORM_RE = re.compile(r"[\d\W_]+", re.UNICODE)
+_STRING_LITERAL_RE = re.compile(
+    r"""(?:"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*')"""
+)
 _DECIDED = ("fixed", "ignored")
 
 
@@ -197,5 +200,5 @@ def _desensitize(snippet: str, max_len: int = 400) -> str:
     """
     if not snippet:
         return ""
-    s = re.sub(r"([\"'])(?:\\.|(?!\1).)*\1", r"\1***\1", snippet)
+    s = _STRING_LITERAL_RE.sub(lambda match: f"{match.group(0)[0]}***{match.group(0)[0]}", snippet)
     return s[:max_len]

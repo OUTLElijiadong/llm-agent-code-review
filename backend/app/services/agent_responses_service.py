@@ -549,10 +549,8 @@ _SENSITIVE_TEXT_ASSIGNMENT = re.compile(
 )
 _BEARER_SECRET = re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE)
 _API_KEY_SECRET = re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b", re.IGNORECASE)
-_PRIVATE_KEY_BLOCK = re.compile(
-    r"-----BEGIN [^-\r\n]*PRIVATE KEY-----[\s\S]*?-----END [^-\r\n]*PRIVATE KEY-----",
-    re.IGNORECASE,
-)
+_PRIVATE_KEY_BEGIN = re.compile(r"-----BEGIN [^-\r\n]*PRIVATE KEY-----", re.IGNORECASE)
+_PRIVATE_KEY_END = re.compile(r"-----END [^-\r\n]*PRIVATE KEY-----", re.IGNORECASE)
 
 
 class DatabaseCheckpointStore:
@@ -4737,9 +4735,38 @@ def _redact_sensitive_text(value: str) -> str:
     return _redact_sensitive_text_unbounded(value)
 
 
+def _redact_private_key_blocks(value: str) -> str:
+    """用单次线性扫描替代对每个 BEGIN 标记反复搜索 END 标记。"""
+    begins = iter(_PRIVATE_KEY_BEGIN.finditer(value))
+    ends = iter(_PRIVATE_KEY_END.finditer(value))
+    begin = next(begins, None)
+    end = next(ends, None)
+    active_start: int | None = None
+    copied_until = 0
+    parts: list[str] = []
+
+    while begin is not None or end is not None:
+        if end is None or (begin is not None and begin.start() < end.start()):
+            if active_start is None:
+                active_start = begin.start()
+            begin = next(begins, None)
+            continue
+
+        if active_start is not None:
+            parts.extend((value[copied_until:active_start], "[REDACTED PRIVATE KEY]"))
+            copied_until = end.end()
+            active_start = None
+        end = next(ends, None)
+
+    if copied_until == 0:
+        return value
+    parts.append(value[copied_until:])
+    return "".join(parts)
+
+
 def _redact_sensitive_text_unbounded(value: str) -> str:
     """脱敏用户可见长文本，但不套用工具事件的长度上限。"""
-    redacted = _PRIVATE_KEY_BLOCK.sub("[REDACTED PRIVATE KEY]", value)
+    redacted = _redact_private_key_blocks(value)
     redacted = _SENSITIVE_TEXT_ASSIGNMENT.sub(
         lambda match: f"{match.group('prefix')}[REDACTED]",
         redacted,

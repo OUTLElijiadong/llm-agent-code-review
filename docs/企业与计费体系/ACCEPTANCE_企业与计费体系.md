@@ -1,5 +1,30 @@
 # 验收记录：企业与计费体系
 
+## 2026-11-16：生产当前快照与本地续验
+
+- **生产 HTTPS**：本次直读 `/healthz` 与 `/readyz` 均 HTTP 200，分别报告 `ok` 与 `ready`；版本/SHA 仍为 `4.1.45 / 1cb8e2dd07667040e2485b38038dbd1f9f5021b6`。没有 SSH、生产数据库、容器或 `ops-check` 新证据；本轮未部署或写入生产。
+- **工作树状态**：当前独立续验分支基于 `main` 的 `347a38713e0cc2d1946f117d572f259869172602`；本轮改动尚未合并或部署，不属于生产版本。生产状态不包含下列本地修复。
+- **候选版本**：仓库根目录 `VERSION` 已更新为 `4.1.46`；生产仍运行 `4.1.45`，候选版本尚未合并、构建或发布。
+- **CodeQL 状态**：GitHub `main` 现有 64 条开放告警（8 critical、55 high、1 medium）；主分支最新 CodeQL 扫描通过，但这些告警仍开放。分支本轮曾发现 3 条新增告警：context_fidelity 数值模式已将数字长度限制为 64 位；ops 文件读取改为从固定根目录逐段无符号链接打开；报告接口改为返回固定业务消息并继续用 JSONResponse 编码。工作树另有 #66/#67/#84/#85 四处 ReDoS 修复和日志有界读取加固。除报告接口之外，CodeQL 将一条受控 ValueError 文本视为堆栈信息；接口已不再回显异常内容。其余 #1 是 E2E 测试对子串噪声过滤过宽，#2 是本机源码台账生成脚本的检查/写入竞态；ops executor 的 33 条路径/命令告警经权限和数据流审阅未发现普通公网请求可利用路径，但仍需按告警流程留存处置。分支最终 SHA 的新 CodeQL 检查待执行，没有关闭或抑制告警。
+- **回归结果**：后端独立定向集合 290 项通过；报告 API 全文件 51 项通过；ops 执行器 69 项通过。支付宝沙箱模式转发用例 2 项通过（包含在 290 项内，不应重复相加）。改动 Python 文件 Ruff、编译及 `git diff --check` 通过；部署测试文件的 6 条超行告警与 HEAD 基线相同，没有新增。
+- **复现命令**（在仓库根目录执行；后端定向集合从 `backend/` 目录执行）：
+  - `cd backend && .venv/bin/pytest -q tests/unit/services/test_agent_responses_integration.py tests/unit/services/test_context_fidelity.py tests/unit/services/test_experience_service.py tests/unit/services/test_billing_payment_gateway.py tests/unit/core/test_config_security.py tests/unit/api/test_billing_orders_api.py tests/unit/services/test_server_ops_service.py`（290 passed）
+  - `cd backend && .venv/bin/pytest -q tests/test_report_api.py`（51 passed）
+  - `backend/.venv/bin/pytest -q deploy/tests/test_prism_ops_executor.py`（69 passed）
+  - `cd backend && .venv/bin/pytest -q tests/unit/core/test_config_security.py tests/unit/api/test_billing_orders_api.py -k 'alipay_gateway or alipay_sandbox'`（5 passed；其中 2 项覆盖沙箱配置转发）
+- **未结项**：真实多角色账号、支付宝沙箱商户凭据、微信 APIv3 受控小额实单与退款、真实模型账单和完整成本、完整生产运维复查仍未完成。销售源码硬锁为 false，生产运行时计量配置未核验。
+
+## 2026-11-15：截至当日的生产复查与合并后状态
+
+- **生产公开页面**：普通 Safari 标签页打开 `https://www.lijiadong.cn/`、`/healthz`、`/readyz` 均 HTTP 200。健康端点返回 `status=ok`，就绪端点返回 `status=ready`；两者版本为 `4.1.45`、release 为 `1cb8e2dd07667040e2485b38038dbd1f9f5021b6`。独立复核也得到同样结果。本次没有 SSH 容器、数据库或 `ops-check` 证据；11 月 12 日的运维及恢复结果仍是该日时点的证据。
+- **Safari 业务页面**：登录页在当前已认证浏览器会话中转到管理员运维页面；本次只读浏览、未执行写操作。该浏览器只有当前管理员角色证据，没有普通用户、审查员、企业管理员、组长和员工的独立账号验收。
+- **文档合并与 CI**：PR #7 已于 `2026-11-15T15:34:59Z` 合并，merge SHA `347a38713e0cc2d1946f117d572f259869172602`。PR 必需的后端、前端、部署/故障注入、Python/JavaScript CodeQL 及聚合 CodeQL 检查全部通过。合并后主分支 CodeQL 工作流 `43730690244` 已通过；重复的主分支业务回归 `43730690185` 在 `15:39 UTC` 仍运行中。
+- **安全告警当前快照**：GitHub 默认分支现有 **64 条开放 CodeQL 告警**：8 critical、55 high、1 medium；创建时间为 `2026-09-18` 至 `2026-10-21`，均早于本次企业计费合并。最新扫描通过，但告警仍开放；这只是时间和状态对照，不能替代逐条代码流分诊，也不表示告警已修复。本次没有关闭或抑制告警。
+- **模型与新 API 成本**：已将官方价目页更新至 11 月 15 日观察。模型直采价格仍为 Flash 高峰未命中输入 `$0.30/百万 Token`、输出 `$1.20/百万 Token`；供应商 11 月 13 日新增的文件/OCR、语音和服务端搜索能力有独立费用，现有收费上界没有为这些能力定价。源码收费作用域拒绝未计价服务端工具和文件/音频/视频输入；新能力未接入平台计费。完整成本分析见[模型成本核对](模型成本核对.md)。
+- **发布后时间窗**：11 月 12 日发布后的 T+30/T+60 观察没有留存证据，时间窗现已过去，不能补写为通过。11 月 15 日公开健康检查是新的当前快照，不等价于 T+30/T+60，也不包含容器、数据库、备份和运维巡检。
+- **商业验收边界**：支付宝官方提供沙箱，但沙箱交易、退款与资金对账尚未验收；微信支付 APIv3 [官方文档](https://pay.wechatpay.cn/doc/v3/merchant/4012073699)说明没有独立沙箱，因此其签名/状态机先用模拟响应验证；真实渠道闭环必须另安排小额生产交易与退款。源码 `BILLING_SALES_CODE_GATE_OPEN=False`，但本次未读生产运行时计量配置；企业群/私聊跨会话计费未获商业验收，不得据代码默认值宣称线上运行态已确认。
+- **Alipay 沙箱实现差距**：续验分支增加了 `ALIPAY_GATEWAY_MODE=production|sandbox` 固定网关映射，默认 `production`；`APP_ENV=prod|production` 时拒绝启动 sandbox 配置。沙箱地址 `https://openapi-sandbox.dl.alipaydev.com/gateway.do` 与[支付宝官方 SDK 沙箱请求测试](https://github.com/alipay/alipay-sdk-nodejs-all/blob/master/test/alipay.exec.test.ts)一致。该配置只切网关，不自动切换商户凭据；必须同时加载沙箱 app ID、应用私钥和支付宝公钥，并使用独立非生产数据库。预下单有签名 HTTP mock，查单/关单/退款/退款查单有模式转发测试；仍未用商户沙箱凭据实测，改动尚未合并或部署。
+
 ## 2026-11-12：生产发布 4.1.45
 
 > 本文件更早的同日记录是发布前各检查点的历史快照；若与本节当前生产状态冲突，以本节最终 SHA 和复核结果为准。
