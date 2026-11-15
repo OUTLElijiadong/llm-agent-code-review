@@ -1,5 +1,9 @@
 # 阶段交付报告：企业与计费体系
 
+## 2026-11-16 生产站匿名浏览器补验
+
+真实浏览器确认线上登录与注册页面已加载并显示表单，注册流程要求内测码；没有注册或写入生产业务数据。线上健康接口报告版本 `4.1.46`、SHA `09408361d6859ab16c4d06068c518652ed8d1f1a`。历史合并后主线有一次 Agent 撤权测试 2 秒超时，后续相同后端 tree 的完整 CI 通过，且该参数组合本机连续 6 次通过；历史失败可能与全量回归负载下的调度时序有关，但根因尚未证实。企业角色、支付退款、成本和生产计量仍未完成验收，见[待办](TODO_企业与计费体系.md)。
+
 ## 2026-11-16 续验修复合并并发布 4.1.46（T+60 已通过）
 
 PR [#8](https://github.com/OUTLElijiadong/llm-agent-code-review/pull/8) 合并 SHA `09408361d6859ab16c4d06068c518652ed8d1f1a` 已部署生产，版本 `4.1.46`。PR SHA 与合并 SHA 的 Git tree 完全相同；PR 必需 CI、CodeQL 和合并后 main 工作流全部通过，后端全量回归 11,842 项通过、5 项预期失败、覆盖率 85%。发布前备份已完成 gzip/SHA 校验并在隔离库恢复 177 张表；Alembic current/head 为 `119_chat_message_authority`。Backend、Frontend 与 decoy 健康，公网 HTTPS/health/ready 返回目标版本和 SHA；T+15、T+30、T+60 ops-check 与稳定性复核全部通过。
