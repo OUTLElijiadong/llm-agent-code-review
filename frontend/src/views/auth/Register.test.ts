@@ -39,6 +39,18 @@ beforeEach(() => {
 })
 
 describe('Register 选填邮箱', () => {
+  it('注册页只保留品牌、必需字段和注册入口', async () => {
+    const wrapper = mount(Register, { global: { plugins: [ElementPlus] } })
+    await flushPromises()
+    expect(wrapper.get('h1').text()).toBe('创建账号')
+    expect(wrapper.text()).toContain('Prism · 棱镜')
+    expect(wrapper.text()).toContain('昵称（选填）')
+    expect(wrapper.text()).toContain('邮箱（选填）')
+    expect(wrapper.text()).not.toMatch(/TEAM ONBOARDING|质量、安全、性能问题|报告与 AI 修复提示词|NEW ACCOUNT|© 2026|密码长度 ·/)
+    expect(wrapper.find('.captcha-hint').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('显示位图挑战，题目或字符不作为可复制文本展示', async () => {
     const wrapper = mount(Register, { global: { plugins: [ElementPlus] } })
     await flushPromises()

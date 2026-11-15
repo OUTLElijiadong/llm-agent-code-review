@@ -11,7 +11,6 @@ const ElementPlus = (createRequire(import.meta.url)('element-plus') as { default
 vi.mock('@/stores/user', () => ({ useUserStore: () => user }))
 vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: messages }))
 
-import { APP_DISPLAY_VERSION } from '@/constants/buildInfo'
 import Login from './Login.vue'
 
 let wrapper: VueWrapper
@@ -48,19 +47,20 @@ afterEach(() => {
 })
 
 describe('登录真实反馈', () => {
-  it('复用构建版本，移除未经证实的速度和在线声明，保留注册说明', async () => {
-    vi.stubEnv('VITE_APP_VERSION', APP_DISPLAY_VERSION)
+  it('入口只保留品牌、登录表单和注册路径', async () => {
     await renderLogin()
-    expect(wrapper.text()).toContain(APP_DISPLAY_VERSION)
-    expect(wrapper.text()).not.toMatch(/快\s*10\s*倍|DeepSeek V4 在线|v1\.0|替你读完每一行/)
-    expect(wrapper.text()).toContain('还没有账号')
+    expect(wrapper.text()).toContain('Prism · 棱镜')
+    expect(wrapper.get('h1').text()).toBe('登录')
+    expect(wrapper.text()).not.toMatch(/AI CODE REVIEW|折射真相|代码审查 · 问题跟踪|构建版本|© 2026/)
+    expect(wrapper.text()).toContain('没有账号？')
     expect(wrapper.get('a.link').attributes('href')).toBe('/register')
   })
 
-  it('未注入构建版本时不把常量的后备值当作已确认的发布版本', async () => {
+  it('无论构建注入与否都不在登录表单显示版本脚注', async () => {
+    vi.stubEnv('VITE_APP_VERSION', '4.1.46')
     await renderLogin()
-    expect(wrapper.text()).toContain('构建版本未提供')
-    expect(wrapper.text()).not.toContain(APP_DISPLAY_VERSION)
+    expect(wrapper.text()).not.toContain('4.1.46')
+    expect(wrapper.text()).not.toContain('构建版本')
   })
 
   it('真实表单校验阻止空提交并展示必填错误', async () => {
@@ -85,21 +85,17 @@ describe('登录真实反馈', () => {
     expect(wrapper.get('[role="status"]').text()).toContain('登录成功')
   })
 
-  it('登录成功时显示光球与节点对勾，状态对读屏可读', async () => {
+  it('登录成功状态对读屏可读，不展示装饰性成功动画', async () => {
     const router = await renderLogin()
     let finishNavigation!: () => void
     vi.spyOn(router, 'replace').mockReturnValue(new Promise<void>((resolve) => { finishNavigation = resolve }))
     await fillCredentials()
     await wrapper.get('form').trigger('submit')
-    await vi.waitFor(() => expect(wrapper.get('.btn-login').classes()).toContain('is-success'))
+    await vi.waitFor(() => expect(wrapper.get('[role="status"]').text()).toContain('登录成功'))
 
     const button = wrapper.get('.btn-login')
-    expect(button.text()).toContain('登录成功')
-    expect(button.attributes('data-shape')).toBe('orb')
-    expect(button.classes()).toContain('is-success')
-    expect(wrapper.get('.login-action-slot').attributes('data-success')).toBe('true')
-    expect(button.find('.login-success-mark').attributes('aria-hidden')).toBe('true')
-    expect(button.find('.login-success-node svg').attributes('focusable')).toBe('false')
+    expect(button.text()).toContain('正在登录')
+    expect(wrapper.find('.login-success-mark').exists()).toBe(false)
     expect(wrapper.get('[role="status"]').text()).toContain('登录成功')
     expect(button.attributes('aria-busy')).toBe('true')
 

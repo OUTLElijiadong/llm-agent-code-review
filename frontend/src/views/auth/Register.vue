@@ -2,16 +2,14 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
-import { Check, Key, Lock, Message, Refresh, User, UserFilled } from '@element-plus/icons-vue'
+import { Refresh } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { getCaptcha } from '@/api/auth'
 import { ElMessage } from 'element-plus/es/components/message/index'
-import { APP_DISPLAY_VERSION } from '@/constants/buildInfo'
 
 const router = useRouter()
 const userStore = useUserStore()
-const buildVersion = import.meta.env.VITE_APP_VERSION?.trim() ? APP_DISPLAY_VERSION : null
 
 const formRef = ref<FormInstance>()
 const loading = ref(false)
@@ -60,19 +58,6 @@ async function refreshCaptcha(): Promise<void> {
 }
 
 onMounted(refreshCaptcha)
-
-/**
- * 密码长度提示，不要求大小写、数字或符号组合。
- * @returns 强度等级与中文标签
- */
-const passwordStrength = computed<{ level: 0 | 1 | 2 | 3; label: string }>(() => {
-  const v = form.password
-  if (!v) return { level: 0, label: '' }
-  const length = Array.from(v).length
-  if (length < 15) return { level: 1, label: '至少需要 15 个字符' }
-  if (length < 24) return { level: 2, label: '达到最低长度' }
-  return { level: 3, label: '较长' }
-})
 
 /**
  * 校验确认密码是否与密码一致
@@ -167,93 +152,37 @@ function goLogin(): void {
 
 <template>
   <div class="register-page">
-    <aside class="register-brand">
-      <header class="brand-top">
-        <span class="prism-mark"></span>
-        <span class="brand-name font-display">Prism · 棱镜</span>
-      </header>
-
-      <div class="brand-center">
-        <div class="brand-eyebrow font-mono">AI CODE REVIEW · TEAM ONBOARDING</div>
-        <h1 class="brand-title font-display">
-          创建账号，<br>
-          把代码审查接入<br>
-          <em>棱镜工作流。</em>
-        </h1>
-        <p class="brand-sub">
-          注册后即可进入项目空间，上传代码文件，发起多 Agent 审查，并沉淀团队可追踪的质量报告。
-        </p>
-
-        <div class="value-list">
-          <div class="value-item">
-            <span class="value-icon"><el-icon><Check /></el-icon></span>
-            <span>项目、代码、审查任务统一管理</span>
-          </div>
-          <div class="value-item">
-            <span class="value-icon"><el-icon><Check /></el-icon></span>
-            <span>质量、安全、性能问题自动归档</span>
-          </div>
-          <div class="value-item">
-            <span class="value-icon"><el-icon><Check /></el-icon></span>
-            <span>报告与 AI 修复提示词随审查沉淀</span>
-          </div>
-        </div>
-      </div>
-
-      <footer class="brand-bottom font-mono">
-        <span>PRISM · 棱镜</span>
-        <span v-if="buildVersion">{{ buildVersion }}</span>
-      </footer>
-    </aside>
-
     <main class="form-wrap">
       <section class="form-panel" aria-label="注册账号">
-        <div class="mobile-brand">
+        <div class="auth-brand">
           <span class="prism-mark sm on-light"></span>
-          <span class="mobile-brand-text font-display">Prism · 棱镜</span>
+          <span class="auth-brand-name font-display">Prism · 棱镜</span>
         </div>
-
-        <div class="form-eyebrow font-mono">NEW ACCOUNT</div>
-        <h2 class="form-title font-display">创建棱镜账号</h2>
+        <h1 class="form-title font-display">创建账号</h1>
         <p class="form-sub">
-          已经有账号？
-          <button type="button" class="text-link" @click="goLogin">立即登录 →</button>
+          已有账号？<button type="button" class="text-link" @click="goLogin">登录</button>
         </p>
 
         <el-form
           ref="formRef"
           :model="form"
           :rules="rules"
+          :aria-busy="loading"
           class="prism-form"
           label-position="top"
           @keyup.enter="handleRegister"
         >
-          <div class="form-grid">
-            <el-form-item prop="username" label="账号">
-              <el-input
-                v-model="form.username"
-                placeholder="请输入用户名"
-                :prefix-icon="User"
-                size="large"
-                autocomplete="username"
-              />
-            </el-form-item>
-            <el-form-item prop="nickname" label="昵称">
-              <el-input
-                v-model="form.nickname"
-                placeholder="选填"
-                :prefix-icon="UserFilled"
-                size="large"
-                autocomplete="name"
-              />
-            </el-form-item>
-          </div>
+          <el-form-item prop="username" label="账号">
+            <el-input v-model="form.username" size="large" autocomplete="username" />
+          </el-form-item>
 
-          <el-form-item prop="email" label="邮箱">
+          <el-form-item prop="nickname" label="昵称（选填）">
+            <el-input v-model="form.nickname" size="large" autocomplete="name" />
+          </el-form-item>
+
+          <el-form-item prop="email" label="邮箱（选填）">
             <el-input
               v-model="form.email"
-              placeholder="选填，用于接收审查通知"
-              :prefix-icon="Message"
               size="large"
               autocomplete="email"
               inputmode="email"
@@ -265,8 +194,7 @@ function goLogin(): void {
             <el-input
               v-model="form.password"
               type="password"
-              placeholder="至少 15 个字符，最多 64 个字符"
-              :prefix-icon="Lock"
+              placeholder="15–64 个字符"
               size="large"
               show-password
               maxlength="64"
@@ -274,19 +202,11 @@ function goLogin(): void {
             />
           </el-form-item>
 
-          <div v-if="form.password" class="pwd-strength" :data-level="passwordStrength.level">
-            <span class="pwd-bar"></span>
-            <span class="pwd-bar"></span>
-            <span class="pwd-bar"></span>
-            <span class="pwd-strength-label font-mono">密码长度 · {{ passwordStrength.label }}</span>
-          </div>
-
           <el-form-item prop="confirmPassword" label="确认密码">
             <el-input
               v-model="form.confirmPassword"
               type="password"
-              placeholder="请再次输入密码"
-              :prefix-icon="Lock"
+              placeholder="再次输入密码"
               size="large"
               show-password
               autocomplete="new-password"
@@ -296,9 +216,7 @@ function goLogin(): void {
           <el-form-item v-if="captcha.beta_registration_enabled" prop="beta_code" label="内测码">
             <el-input
               v-model="form.beta_code"
-              placeholder="PRISM-XXXXX-XXXXX-XXXXX-XXXXX"
-              :prefix-icon="Key"
-              size="large"
+              placeholder="管理员提供的内测码"
               autocomplete="off"
               maxlength="29"
               class="beta-code-input"
@@ -306,7 +224,7 @@ function goLogin(): void {
             />
           </el-form-item>
 
-          <el-form-item prop="captcha_answer" label="人机验证">
+          <el-form-item prop="captcha_answer" label="验证码">
             <div class="captcha-row">
               <div class="captcha-q" :class="{ loading: captchaLoading }">
                 <img v-if="captchaImage && !captchaImageFailed" :src="captchaImage" alt="注册验证码图片" width="168" height="56" @error="captchaImageFailed = true" />
@@ -314,7 +232,7 @@ function goLogin(): void {
               </div>
               <el-input
                 v-model="form.captcha_answer"
-                placeholder="图片中的6位字符"
+                placeholder="验证码"
                 aria-label="验证码，不区分大小写"
                 maxlength="6"
                 :disabled="!captchaReady"
@@ -330,231 +248,89 @@ function goLogin(): void {
                 @click="refreshCaptcha"
               />
             </div>
-            <p class="captcha-hint">不区分大小写；看不清可刷新图片。</p>
           </el-form-item>
 
           <button
             type="button"
             class="btn-register font-display"
-            :class="{ loading }"
             :disabled="loading || !captchaReady"
             @click="handleRegister"
           >
-            <span v-if="!loading">创建账号</span>
-            <span v-else class="think-dots"><span></span><span></span><span></span></span>
-            <span v-if="!loading" class="arrow font-mono">→</span>
+            {{ loading ? '正在创建…' : '创建账号' }}
           </button>
         </el-form>
-
-        <div class="footer-mini font-mono">© 2026 Prism · 棱镜智能代码审查</div>
       </section>
     </main>
   </div>
 </template>
 
 <style scoped lang="scss">
-.captcha-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  flex-wrap: wrap;
-}
-.captcha-answer { flex: 1; min-width: 100px; }
-.captcha-hint { width: 100%; margin: 6px 0 0; color: var(--gray-600, #606266); font-size: 12px; }
-.captcha-q {
-  flex-shrink: 0;
-  width: 168px;
-  height: 56px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--gray-100, #f5f7fa);
-  border-radius: 8px;
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 1px;
-  color: var(--gray-800, #303133);
-  user-select: none;
-  overflow: hidden;
-  img { display: block; width: 168px; height: 56px; }
-
-  &.loading { opacity: 0.5; }
-}
-
 .register-page {
-  display: grid;
-  grid-template-columns: 1fr 560px;
   min-height: 100vh;
-  width: 100%;
-  background: #fff;
-  overflow-x: hidden;
-}
-
-.register-brand {
-  position: relative;
-  overflow: hidden;
-  background: linear-gradient(165deg, #1A1E2C 0%, #161A24 55%, #1F1A3A 100%);
-  color: #fff;
-  padding: 48px 64px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-
-  /* 棱镜光晕（与登录页一致） */
-  &::before {
-    content: '';
-    position: absolute;
-    width: 720px;
-    height: 720px;
-    right: -180px;
-    top: -200px;
-    background: conic-gradient(from 220deg,
-      #6B7CFF, #4B9BFF, #2BBFB9, #4FB87A,
-      #D4A53A, #E08648, #E25C73, #B85AC4, #6B7CFF);
-    filter: blur(80px);
-    opacity: 0.45;
-    border-radius: 50%;
-    pointer-events: none;
-  }
-
-  /* 光束（与登录页一致） */
-  &::after {
-    content: '';
-    position: absolute;
-    width: 2px;
-    height: 60vh;
-    left: 30%;
-    top: 20%;
-    background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.6), transparent);
-    transform: rotate(15deg);
-    filter: blur(0.5px);
-    pointer-events: none;
-  }
-}
-
-.register-brand > * {
-  position: relative;
-  z-index: 2;
-}
-
-.brand-top,
-.mobile-brand {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.brand-name {
-  font-size: 18px;
-  font-weight: 600;
-  color: #fff;
-}
-
-.brand-center {
-  max-width: 560px;
-}
-
-.brand-eyebrow,
-.form-eyebrow {
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.brand-eyebrow {
-  color: var(--brand-300);
-}
-
-.brand-title {
-  font-size: 50px;
-  line-height: 1.08;
-  font-weight: 600;
-  letter-spacing: 0;
-  margin: 16px 0 22px;
-  color: #fff;
-
-  em {
-    font-style: normal;
-    background: linear-gradient(120deg, #8E88F5, #54CCDE 50%, #E25C73 90%);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-  }
-}
-
-.brand-sub {
-  max-width: 500px;
-  margin: 0;
-  font-size: 15px;
-  line-height: 1.78;
-  color: rgba(255, 255, 255, 0.72);
-}
-
-.value-list {
-  display: grid;
-  gap: 12px;
-  margin-top: 34px;
-}
-
-.value-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: fit-content;
-  max-width: 100%;
-  padding: 10px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.78);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.value-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: rgba(79, 184, 122, 0.16);
-  color: var(--status-fixed);
-  flex-shrink: 0;
-}
-
-.brand-bottom {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.42);
-}
-
-.online-dot {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-
-  &::before {
-    content: '';
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--status-fixed);
-    box-shadow: 0 0 8px var(--status-fixed);
-  }
+  min-height: 100dvh;
+  background: var(--app-bg-soft, #f7f8fa);
 }
 
 .form-wrap {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 32px 20px;
+}
+
+.form-panel {
+  width: min(100%, 460px);
+  padding: 32px;
+  border: 1px solid var(--gray-200, #e5e7eb);
+  border-radius: 16px;
+  background: #fff;
+}
+
+.auth-brand {
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 48px;
-  background:
-    linear-gradient(180deg, #fff 0%, var(--app-bg-soft) 68%, var(--app-bg) 100%);
-  overflow-y: auto;
+  gap: 10px;
+  margin-bottom: 28px;
+}
+
+.auth-brand-name {
+  color: var(--gray-900, #1f2937);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.form-title {
+  margin: 0;
+  color: var(--gray-900, #1f2937);
+  font-size: 28px;
+  font-weight: 600;
+}
+
+.form-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 24px;
+  color: var(--gray-600, #606266);
+  font-size: 14px;
+}
+
+.text-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--brand-600, #514be2);
+  font: inherit;
+  cursor: pointer;
+}
+
+.text-link:hover { text-decoration: underline; }
+
+.text-link:focus-visible,
+.btn-register:focus-visible {
+  outline: 3px solid var(--brand-400, #8e88f5);
+  outline-offset: 3px;
 }
 
 .beta-code-input :deep(input) {
@@ -562,268 +338,90 @@ function goLogin(): void {
   text-transform: uppercase;
 }
 
-.form-panel {
-  width: 100%;
-  max-width: 460px;
-}
-
-.mobile-brand {
-  display: none;
-  margin-bottom: 26px;
-}
-
-.mobile-brand-text {
-  font-size: 16px;
-  font-weight: 650;
-  color: var(--gray-900);
-}
-
-.form-eyebrow {
-  color: var(--brand-500);
-}
-
-.form-title {
-  margin: 12px 0 8px;
-  color: var(--gray-900);
-  font-size: 32px;
-  font-weight: 600;
-  letter-spacing: 0;
-}
-
-.form-sub {
-  margin: 0 0 28px;
-  color: var(--gray-500);
-  font-size: 14px;
-}
-
-.text-link {
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--brand-500);
-  font: inherit;
-  cursor: pointer;
-
-  &:hover {
-    text-decoration: underline;
-  }
-}
-
-.form-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 14px;
-}
-
-/* 密码强度指示条 */
-.pwd-strength {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin: -8px 0 16px;
-}
-
-.pwd-bar {
-  flex: 1;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--gray-200);
-  transition: background 0.2s ease;
-}
-
-.pwd-strength-label {
-  flex: none;
-  margin-left: 4px;
-  font-size: 11px;
-  color: var(--gray-400);
-  letter-spacing: 0.02em;
-}
-
-.pwd-strength[data-level='1'] {
-  .pwd-bar:nth-child(1) { background: #E25C73; }
-  .pwd-strength-label { color: #E25C73; }
-}
-
-.pwd-strength[data-level='2'] {
-  .pwd-bar:nth-child(-n + 2) { background: #D4A53A; }
-  .pwd-strength-label { color: #D4A53A; }
-}
-
-.pwd-strength[data-level='3'] {
-  .pwd-bar:nth-child(-n + 3) { background: var(--status-fixed); }
-  .pwd-strength-label { color: var(--status-fixed); }
-}
-
 .prism-form {
-  :deep(.el-form-item) {
-    margin-bottom: 18px;
-  }
+  :deep(.el-form-item) { margin-bottom: 16px; }
 
   :deep(.el-form-item__label) {
-    padding-bottom: 6px;
-    color: var(--gray-600);
-    font-size: 12px;
-    font-weight: 500;
+    padding-bottom: 5px;
+    color: var(--gray-700, #4b5563);
+    font-size: 13px;
     line-height: 1.4;
   }
 
   :deep(.el-input__wrapper) {
     height: 44px;
     padding: 4px 12px;
-    border-radius: 10px;
-    box-shadow: 0 0 0 1px var(--gray-200) inset;
-    transition: all 0.15s ease;
+    border-radius: 9px;
+    box-shadow: 0 0 0 1px var(--gray-200, #e5e7eb) inset;
   }
 
   :deep(.el-input__wrapper:hover) {
-    box-shadow: 0 0 0 1px var(--gray-300) inset;
+    box-shadow: 0 0 0 1px var(--gray-300, #d1d5db) inset;
   }
 
   :deep(.el-input__wrapper.is-focus) {
-    box-shadow: 0 0 0 1px var(--brand-400) inset, 0 0 0 4px rgba(91, 88, 232, 0.12);
+    box-shadow: 0 0 0 1px var(--brand-400, #8e88f5) inset, 0 0 0 3px rgba(91, 88, 232, 0.12);
   }
 }
 
-.btn-register {
-  position: relative;
+.captcha-row {
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 10px;
   width: 100%;
+}
+
+.captcha-q {
+  display: grid;
+  flex: 0 0 144px;
+  place-items: center;
+  width: 144px;
   height: 48px;
-  margin-top: 4px;
   overflow: hidden;
-  border: none;
-  border-radius: 10px;
-  background: var(--gray-900);
+  border-radius: 8px;
+  background: var(--gray-100, #f5f7fa);
+  color: var(--gray-700, #4b5563);
+  font-size: 13px;
+  user-select: none;
+}
+
+.captcha-q img { display: block; width: 144px; height: 48px; }
+.captcha-q.loading { opacity: 0.55; }
+.captcha-answer { flex: 1; min-width: 80px; }
+
+.btn-register {
+  width: 100%;
+  min-height: 46px;
+  margin-top: 4px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--gray-900, #1f2937);
   color: #fff;
   font-size: 15px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s ease;
-
-  &::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: -100%;
-    width: 60%;
-    background: linear-gradient(90deg, transparent, rgba(143, 136, 245, 0.4), transparent);
-    transform: skewX(-20deg);
-    transition: left 0.6s ease;
-  }
-
-  &:hover:not(:disabled) {
-    background: var(--brand-600);
-    transform: translateY(-1px);
-    box-shadow: 0 8px 24px -8px rgba(91, 88, 232, 0.5);
-  }
-
-  &:hover:not(:disabled)::after {
-    left: 120%;
-  }
-
-  &:disabled {
-    cursor: not-allowed;
-    opacity: 0.7;
-  }
+  transition: background-color 120ms ease;
 }
 
-.think-dots {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+.btn-register:hover:not(:disabled) { background: var(--brand-600, #514be2); }
+.btn-register:disabled { cursor: not-allowed; opacity: 0.65; }
 
-  span {
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: currentColor;
-    animation: dotPulse 0.9s ease-in-out infinite;
-  }
-
-  span:nth-child(2) {
-    animation-delay: 0.12s;
-  }
-
-  span:nth-child(3) {
-    animation-delay: 0.24s;
-  }
+@media (max-width: 480px) {
+  .form-panel { padding: 24px 20px; }
+  .captcha-row { gap: 8px; }
+  .captcha-q { flex-basis: 128px; width: 128px; height: 44px; }
+  .captcha-q img { width: 128px; height: 44px; }
 }
 
-@keyframes dotPulse {
-  0%, 100% {
-    opacity: 0.38;
-    transform: translateY(0);
-  }
-
-  50% {
-    opacity: 1;
-    transform: translateY(-2px);
-  }
+@media (max-width: 360px) {
+  .form-panel { padding: 20px 16px; }
+  .captcha-row { gap: 6px; }
+  .captcha-q { flex-basis: 104px; width: 104px; height: 40px; }
+  .captcha-q img { width: 104px; height: 40px; }
+  .captcha-answer { min-width: 64px; }
 }
 
-.footer-mini {
-  margin-top: 30px;
-  text-align: center;
-  color: var(--gray-400);
-  font-size: 12px;
-}
-
-@media (max-width: 1280px) {
-  .register-page {
-    grid-template-columns: 1fr 480px;
-  }
-
-  .register-brand {
-    padding: 42px 48px;
-  }
-
-  .brand-title {
-    font-size: 44px;
-  }
-}
-
-@media (max-width: 900px) {
-  .register-page {
-    display: block;
-    min-height: 100vh;
-  }
-
-  .register-brand {
-    display: none;
-  }
-
-  .form-wrap {
-    align-items: flex-start;
-    min-height: 100vh;
-    padding: 76px 24px 32px;
-  }
-
-  .form-panel {
-    max-width: 460px;
-    margin: 0 auto;
-  }
-
-  .mobile-brand {
-    display: inline-flex;
-  }
-}
-
-@media (max-width: 520px) {
-  .form-wrap {
-    padding: 62px 22px 28px;
-  }
-
-  .form-title {
-    font-size: 28px;
-  }
-
-  .form-grid {
-    grid-template-columns: 1fr;
-    gap: 0;
-  }
+@media (prefers-reduced-motion: reduce) {
+  .btn-register { transition: none !important; }
 }
 </style>

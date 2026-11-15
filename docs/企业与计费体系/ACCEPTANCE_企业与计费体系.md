@@ -1,5 +1,12 @@
 # 验收记录：企业与计费体系
 
+## 2026-11-16：生产站真实浏览器补验与历史 CI 失败复核
+
+- 生产站真实 IAB 打开 `https://www.lijiadong.cn/` 后跳转到 `/login?redirect=/`；登录页标题、账号/密码字段、登录按钮及注册入口均能呈现。直接打开 `/register` 后显示注册表单；首次读取时验证码仍在加载，随后重新读取时验证码图片已显示，刷新按钮已启用、验证码输入框可编辑。
+- 注册页在服务端开启内测注册时要求内测码。没有提交表单、没有猜测/绕过内测码、没有创建生产账号或业务数据；因此本次只证明匿名页面可用，不证明账号注册、登录及登录后的企业/计费功能。线上页面显示 `v4.1.46`；本轮 `/healthz`、`/readyz` HTTPS 检查返回 200、TLS 校验通过，并报告 release SHA `09408361d6859ab16c4d06068c518652ed8d1f1a`。
+- 复核合并后主线工作流 `43752250766`：后端全量回归报告 `1 failed, 11841 passed, 5 xfailed`。唯一失败为 `test_base_agent_http_is_cancelled_from_persisted_team_state[lease_replace-headers-call_json]`，在持久化撤权后等待 worker 于 2 秒内退出时超时。后续工作流 `43759376049` 对相同后端 Git tree 完成 `11842 passed, 5 xfailed`；本机使用项目 `.venv` 对该参数组合单次带覆盖运行通过，并连续无覆盖重复 5 次通过。历史失败可能与全量回归负载下的调度时序有关，但根因尚未证实；失败记录仍保留，不能写成所有历史 CI 均通过。
+- **UX/DX/AX 复核**：匿名访问路径短且能到登录页；线上注册要求内测码，用户无法自行完成开放注册。测试结论可复现并链接到确切工作流/测试参数，Agent 也可据此区分页面可达与业务验收；登录后业务角色、企业权限及支付链仍未被验证。
+
 ## 2026-11-16：4.1.46 生产发布验收（T+60 已通过）
 
 - **合并与 CI**：PR [#8](https://github.com/OUTLElijiadong/llm-agent-code-review/pull/8) 已 squash 合并，生产 SHA `09408361d6859ab16c4d06068c518652ed8d1f1a`，版本 `4.1.46`。PR 测试 SHA `d7b05ace9225fdba0f93cedf7a444414a17c12d8` 与合并 SHA 的 Git tree 均为 `07343adf9636ebf7de0a9b5fc9ddea9eb83b461a`。PR 工作流 `43735035873` 全绿：后端 **11,842 passed、5 xfailed、13 warnings，覆盖率 85%**；前端测试/静态检查/构建、部署执行器与故障注入回归、Ruff、编译和依赖审计通过。PR CodeQL 工作流 `43735035838` 的 Python、JavaScript/TypeScript 和聚合检查通过；合并后主分支工作流 `43738941338`（CodeQL）与 `43738941420`（业务回归）也已通过。
