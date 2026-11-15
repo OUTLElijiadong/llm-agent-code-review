@@ -605,7 +605,7 @@ def test_delete_builtin_template_returns_400(admin_client):
     response = client.delete(f"/api/reports/templates/{builtin_id}")
     assert response.status_code == 400
     body = response.json()
-    assert body["message"] == f"内置模板 '#{builtin_id}'({builtin.name})不可删除"
+    assert body["message"] == "内置模板不可删除"
 
 
 # ============ 异常场景测试 ============

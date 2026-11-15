@@ -5,10 +5,10 @@
 - **生产 HTTPS**：本次直读 `/healthz` 与 `/readyz` 均 HTTP 200，分别报告 `ok` 与 `ready`；版本/SHA 仍为 `4.1.45 / 1cb8e2dd07667040e2485b38038dbd1f9f5021b6`。没有 SSH、生产数据库、容器或 `ops-check` 新证据；本轮未部署或写入生产。
 - **工作树状态**：当前独立续验分支基于 `main` 的 `347a38713e0cc2d1946f117d572f259869172602`；本轮改动尚未合并或部署，不属于生产版本。生产状态不包含下列本地修复。
 - **候选版本**：仓库根目录 `VERSION` 已更新为 `4.1.46`；生产仍运行 `4.1.45`，候选版本尚未合并、构建或发布。
-- **CodeQL 状态**：GitHub `main` 现有 64 条开放告警（8 critical、55 high、1 medium）；主分支最新 CodeQL 扫描通过，但这些告警仍开放。工作树本地修复了 #66/#67/#84/#85 四处 ReDoS，并加固 ops 日志文件有界读取；报告模板的 #69 堆栈告警没有堆栈数据流，但已复现并修复同一错误分支的 JSON 序列化缺陷。其余 #1 是 E2E 测试对子串噪声过滤过宽，#2 是本机源码台账生成脚本的检查/写入竞态；ops executor 的 33 条路径/命令告警经权限和数据流审阅未发现普通公网请求可利用路径，但仍需按告警流程留存处置。没有关闭或抑制告警；分支 CodeQL 结果尚未生成。
-- **回归结果**：后端独立定向集合 289 项通过；报告 API 全文件 51 项通过；ops 执行器 69 项通过。支付宝沙箱模式转发用例 2 项通过（包含在 289 项内，不应重复相加）。改动 Python 文件 Ruff、编译及 `git diff --check` 通过；部署测试文件的 6 条超行告警与 HEAD 基线相同，没有新增。
+- **CodeQL 状态**：GitHub `main` 现有 64 条开放告警（8 critical、55 high、1 medium）；主分支最新 CodeQL 扫描通过，但这些告警仍开放。分支本轮曾发现 3 条新增告警：context_fidelity 数值模式已将数字长度限制为 64 位；ops 文件读取改为从固定根目录逐段无符号链接打开；报告接口改为返回固定业务消息并继续用 JSONResponse 编码。工作树另有 #66/#67/#84/#85 四处 ReDoS 修复和日志有界读取加固。除报告接口之外，CodeQL 将一条受控 ValueError 文本视为堆栈信息；接口已不再回显异常内容。其余 #1 是 E2E 测试对子串噪声过滤过宽，#2 是本机源码台账生成脚本的检查/写入竞态；ops executor 的 33 条路径/命令告警经权限和数据流审阅未发现普通公网请求可利用路径，但仍需按告警流程留存处置。分支最终 SHA 的新 CodeQL 检查待执行，没有关闭或抑制告警。
+- **回归结果**：后端独立定向集合 290 项通过；报告 API 全文件 51 项通过；ops 执行器 69 项通过。支付宝沙箱模式转发用例 2 项通过（包含在 290 项内，不应重复相加）。改动 Python 文件 Ruff、编译及 `git diff --check` 通过；部署测试文件的 6 条超行告警与 HEAD 基线相同，没有新增。
 - **复现命令**（在仓库根目录执行；后端定向集合从 `backend/` 目录执行）：
-  - `cd backend && .venv/bin/pytest -q tests/unit/services/test_agent_responses_integration.py tests/unit/services/test_context_fidelity.py tests/unit/services/test_experience_service.py tests/unit/services/test_billing_payment_gateway.py tests/unit/core/test_config_security.py tests/unit/api/test_billing_orders_api.py tests/unit/services/test_server_ops_service.py`（289 passed）
+  - `cd backend && .venv/bin/pytest -q tests/unit/services/test_agent_responses_integration.py tests/unit/services/test_context_fidelity.py tests/unit/services/test_experience_service.py tests/unit/services/test_billing_payment_gateway.py tests/unit/core/test_config_security.py tests/unit/api/test_billing_orders_api.py tests/unit/services/test_server_ops_service.py`（290 passed）
   - `cd backend && .venv/bin/pytest -q tests/test_report_api.py`（51 passed）
   - `backend/.venv/bin/pytest -q deploy/tests/test_prism_ops_executor.py`（69 passed）
   - `cd backend && .venv/bin/pytest -q tests/unit/core/test_config_security.py tests/unit/api/test_billing_orders_api.py -k 'alipay_gateway or alipay_sandbox'`（5 passed；其中 2 项覆盖沙箱配置转发）

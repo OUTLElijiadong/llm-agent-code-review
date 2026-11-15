@@ -407,12 +407,14 @@ def _read_text_file(params: dict[str, Any]) -> dict[str, Any]:
 
 def _open_text_file_without_symlinks(path: Path) -> int:
     """Open every absolute path component without following symlinks."""
+    if not path.is_absolute():
+        raise ValueError("目标路径必须是绝对路径")
     required_flags = ("O_DIRECTORY", "O_NOFOLLOW")
     if any(not hasattr(os, flag) for flag in required_flags) or os.open not in os.supports_dir_fd:
         raise RuntimeError("当前平台不支持安全的无符号链接文件打开")
     directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
     file_flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
-    directory_fd = os.open(path.anchor, directory_flags)
+    directory_fd = os.open("/", directory_flags)
     try:
         components = path.parts[1:]
         if not components:

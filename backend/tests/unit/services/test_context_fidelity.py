@@ -219,6 +219,16 @@ def test_numeric_and_duration_scans_stay_fast_on_long_unmatched_candidates() -> 
         assert time.perf_counter() - started < 2.0
 
 
+def test_numeric_scan_stays_fast_on_long_digit_runs_after_a_constraint() -> None:
+    text = "额度设置为" + "0" * 50_000
+
+    started = time.perf_counter()
+    facts = extract_protected_facts(text)
+
+    assert facts
+    assert time.perf_counter() - started < 2.0
+
+
 def test_extracts_risk_tier_review_decisions() -> None:
     text = "低风险和中风险自动通过，高风险需要询问。"
 
