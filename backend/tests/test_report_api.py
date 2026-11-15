@@ -594,15 +594,18 @@ def test_delete_custom_template_success(admin_client):
 def test_delete_builtin_template_returns_400(admin_client):
     """删除系统内置模板失败,返回 400。"""
     client, db, task_id = admin_client
-    # 获取内置模板 ID(simple 类型)
-    list_resp = client.get("/api/reports/templates", params={"template_type": "simple"})
-    builtin_id = list_resp.json()["data"][0]["id"]
+    builtin = db.query(ReportTemplate).filter(
+        ReportTemplate.type == "simple", ReportTemplate.is_builtin == 1,
+    ).first()
+    builtin.name = '内置"模板\n二行'
+    db.commit()
+    builtin_id = builtin.id
 
     # 尝试删除内置模板
     response = client.delete(f"/api/reports/templates/{builtin_id}")
     assert response.status_code == 400
     body = response.json()
-    assert "不可删除" in body["message"] or "内置" in body["message"]
+    assert body["message"] == f"内置模板 '#{builtin_id}'({builtin.name})不可删除"
 
 
 # ============ 异常场景测试 ============

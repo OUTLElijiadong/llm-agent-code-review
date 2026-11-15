@@ -1,4 +1,5 @@
 """单元测试: 经验记忆服务(自进化 L1)"""
+import time
 from datetime import datetime, timedelta, timezone
 
 from app.services import experience_service as es
@@ -31,6 +32,20 @@ def test_decay_weight_halves_after_one_halflife():
 
 def test_decay_weight_penalizes_rejections():
     assert es.decay_weight(3, 3, None, lam=1.0) == 0.0
+
+
+def test_desensitize_redacts_quoted_literals_with_escapes():
+    snippet = r'''const token = "secret\\\"value"; const name = 'private';'''
+
+    assert es._desensitize(snippet) == '''const token = "***"; const name = '***';'''
+
+
+def test_desensitize_handles_long_unclosed_escaped_quote_linearly():
+    snippet = '"' + r"\a" * 50_000
+    started = time.perf_counter()
+
+    assert es._desensitize(snippet) == snippet[:400]
+    assert time.perf_counter() - started < 2.0
 
 
 # ── DB 路径 ──

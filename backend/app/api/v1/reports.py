@@ -30,7 +30,7 @@ from io import BytesIO
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -524,9 +524,8 @@ def delete_template(
         )
     except ValueError as e:
         # 内置模板不可删除,返回 400(而非全局 500)
-        return Response(
-            content='{"code": 40000, "message": "' + str(e) + '", "data": null}',
-            media_type="application/json",
+        return JSONResponse(
+            content={"code": 40000, "message": str(e), "data": None},
             status_code=400,
         )
     return Resp(data=None)

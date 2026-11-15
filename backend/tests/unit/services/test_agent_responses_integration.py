@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any, Mapping
@@ -1703,7 +1704,6 @@ def test_long_visible_output_and_tool_ledger_are_not_silently_cut() -> None:
         status="success", result_json=json.dumps({"status": "success", "output": persisted}),
     )
     assert PrismToolExecutor._recorded_execution(execution).output["analysis"].endswith(tail)
-
     messages = [
         {"type": "message", "role": "assistant",
          "content": [{"type": "output_text", "text": f"第 {index} 条"}]}
@@ -1711,6 +1711,38 @@ def test_long_visible_output_and_tool_ledger_are_not_silently_cut() -> None:
     ]
     assert len(service_module._public_response_output(messages)) == 101
     assert len(api_module._public_response_envelope({"output": messages})["output"]) == 101
+
+
+def test_private_key_redaction_handles_repeated_unclosed_headers_linearly() -> None:
+    text = "-----BEGIN PRIVATE KEY-----" * 8_000
+    started = time.perf_counter()
+
+    assert service_module.redact_agent_output_text(text) == text
+    assert time.perf_counter() - started < 2.0
+
+
+def test_private_key_redaction_preserves_complete_block_redaction() -> None:
+    text = (
+        "before\n-----BEGIN RSA PRIVATE KEY-----\nprivate material\n"
+        "-----END RSA PRIVATE KEY-----\nafter"
+    )
+
+    assert service_module.redact_agent_output_text(text) == "before\n[REDACTED PRIVATE KEY]\nafter"
+
+
+def test_private_key_redaction_pairs_multiple_blocks_and_ignores_stray_end() -> None:
+    text = (
+        "-----END PRIVATE KEY-----before"
+        "-----BEGIN RSA PRIVATE KEY-----first"
+        "-----BEGIN PRIVATE KEY-----nested"
+        "-----END PRIVATE KEY-----middle"
+        "-----BEGIN EC PRIVATE KEY-----last"
+        "-----END EC PRIVATE KEY-----after"
+    )
+
+    assert service_module.redact_agent_output_text(text) == (
+        "-----END PRIVATE KEY-----before[REDACTED PRIVATE KEY]middle[REDACTED PRIVATE KEY]after"
+    )
 
 
 def test_public_terminal_response_drops_non_message_output_items() -> None:

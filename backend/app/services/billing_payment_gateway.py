@@ -20,6 +20,7 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from app.services.billing_payment_verification import _verify
 
 ALIPAY_GATEWAY = "https://openapi.alipay.com/gateway.do"
+ALIPAY_SANDBOX_GATEWAY = "https://openapi-sandbox.dl.alipaydev.com/gateway.do"
 WECHAT_GATEWAY = "https://api.mch.weixin.qq.com"
 PAYMENT_TIMEOUT_SECONDS = 10.0
 
@@ -69,6 +70,7 @@ def create_alipay_preorder(
     subject: str,
     client: httpx.Client | None = None,
     now: datetime | None = None,
+    sandbox: bool = False,
 ) -> dict[str, str]:
     """Call `alipay.trade.precreate` and return its QR payload after validation."""
     if (
@@ -85,7 +87,7 @@ def create_alipay_preorder(
         public_key_pem=public_key_pem,
         biz_content={"out_trade_no": order_no, "total_amount": f"{amount_fen // 100}.{amount_fen % 100:02d}",
                      "subject": subject, "timeout_express": "15m"},
-        client=client, now=now, notify_url=notify_url,
+        client=client, now=now, notify_url=notify_url, sandbox=sandbox,
     )
     if result.get("code") != "10000":
         raise PaymentGatewayError("支付宝未接受预下单请求")
@@ -209,7 +211,8 @@ def _alipay_response(body: bytes, response_name: str, public_key_pem: bytes) -> 
 
 def _alipay_call(*, method: str, app_id: str, private_key_pem: bytes, public_key_pem: bytes,
                  biz_content: dict, client: httpx.Client | None = None,
-                 now: datetime | None = None, notify_url: str | None = None) -> dict:
+                 now: datetime | None = None, notify_url: str | None = None,
+                 sandbox: bool = False) -> dict:
     if not all(isinstance(value, str) and value.strip() for value in (method, app_id)):
         raise PaymentGatewayError("支付宝接口配置无效")
     observed_at = _utc(now) if now is not None else datetime.now(timezone.utc)
@@ -227,7 +230,10 @@ def _alipay_call(*, method: str, app_id: str, private_key_pem: bytes, public_key
         params["notify_url"] = notify_url
     canonical = "&".join(f"{key}={params[key]}" for key in sorted(params)).encode("utf-8")
     params["sign"] = _sign(private_key_pem, canonical)
-    response = _post(client, ALIPAY_GATEWAY, data=params, headers={"Accept": "application/json"})
+    if type(sandbox) is not bool:
+        raise PaymentGatewayError("支付宝环境配置无效")
+    endpoint = ALIPAY_SANDBOX_GATEWAY if sandbox else ALIPAY_GATEWAY
+    response = _post(client, endpoint, data=params, headers={"Accept": "application/json"})
     if response.status_code != 200:
         raise PaymentGatewayError("支付宝接口请求失败；结果需要查询确认")
     response_name = method.replace(".", "_") + "_response"
@@ -236,13 +242,13 @@ def _alipay_call(*, method: str, app_id: str, private_key_pem: bytes, public_key
 
 def query_alipay_trade(*, app_id: str, private_key_pem: bytes, public_key_pem: bytes,
                        order_no: str, amount_fen: int, client: httpx.Client | None = None,
-                       now: datetime | None = None) -> dict:
+                       now: datetime | None = None, sandbox: bool = False) -> dict:
     if (not isinstance(order_no, str) or not order_no or len(order_no) > 64
             or type(amount_fen) is not int or amount_fen <= 0):
         raise PaymentGatewayError("支付宝查单参数无效")
     result = _alipay_call(method="alipay.trade.query", app_id=app_id,
                           private_key_pem=private_key_pem, public_key_pem=public_key_pem,
-                          biz_content={"out_trade_no": order_no}, client=client, now=now)
+                          biz_content={"out_trade_no": order_no}, client=client, now=now, sandbox=sandbox)
     if result.get("sub_code") == "ACQ.TRADE_NOT_EXIST":
         return {"state": "NOT_FOUND", "order_no": order_no}
     if result.get("code") != "10000":
@@ -271,10 +277,10 @@ def query_alipay_trade(*, app_id: str, private_key_pem: bytes, public_key_pem: b
 
 def close_alipay_trade(*, app_id: str, private_key_pem: bytes, public_key_pem: bytes,
                        order_no: str, client: httpx.Client | None = None,
-                       now: datetime | None = None) -> dict:
+                       now: datetime | None = None, sandbox: bool = False) -> dict:
     result = _alipay_call(method="alipay.trade.close", app_id=app_id,
                           private_key_pem=private_key_pem, public_key_pem=public_key_pem,
-                          biz_content={"out_trade_no": order_no}, client=client, now=now)
+                          biz_content={"out_trade_no": order_no}, client=client, now=now, sandbox=sandbox)
     if result.get("code") != "10000" or result.get("out_trade_no") != order_no:
         raise PaymentGatewayError("支付宝未确认关单")
     return {"state": "CLOSED", "order_no": order_no, "trade_id": result.get("trade_no")}
@@ -282,7 +288,8 @@ def close_alipay_trade(*, app_id: str, private_key_pem: bytes, public_key_pem: b
 
 def create_alipay_refund(*, app_id: str, private_key_pem: bytes, public_key_pem: bytes,
                          order_no: str, refund_no: str, amount_fen: int, reason: str,
-                         client: httpx.Client | None = None, now: datetime | None = None) -> dict:
+                         client: httpx.Client | None = None, now: datetime | None = None,
+                         sandbox: bool = False) -> dict:
     if (not isinstance(refund_no, str) or not refund_no or len(refund_no) > 64
             or type(amount_fen) is not int or amount_fen <= 0):
         raise PaymentGatewayError("支付宝退款参数无效")
@@ -291,7 +298,7 @@ def create_alipay_refund(*, app_id: str, private_key_pem: bytes, public_key_pem:
                           biz_content={"out_trade_no": order_no,
                                        "refund_amount": f"{amount_fen // 100}.{amount_fen % 100:02d}",
                                        "refund_reason": reason[:200], "out_request_no": refund_no},
-                          client=client, now=now)
+                          client=client, now=now, sandbox=sandbox)
     if result.get("code") != "10000" or result.get("out_trade_no") != order_no:
         raise PaymentGatewayError("支付宝未受理退款")
     if result.get("fund_change") == "Y":
@@ -302,14 +309,14 @@ def create_alipay_refund(*, app_id: str, private_key_pem: bytes, public_key_pem:
 def query_alipay_refund(*, app_id: str, private_key_pem: bytes, public_key_pem: bytes,
                         order_no: str, refund_no: str, amount_fen: int, total_fen: int,
                         client: httpx.Client | None = None,
-                        now: datetime | None = None) -> dict:
+                        now: datetime | None = None, sandbox: bool = False) -> dict:
     if (not order_no or not refund_no or type(amount_fen) is not int or type(total_fen) is not int
             or amount_fen <= 0 or total_fen <= 0 or amount_fen > total_fen):
         raise PaymentGatewayError("支付宝退款查单参数无效")
     result = _alipay_call(method="alipay.trade.fastpay.refund.query", app_id=app_id,
                           private_key_pem=private_key_pem, public_key_pem=public_key_pem,
                           biz_content={"out_trade_no": order_no, "out_request_no": refund_no},
-                          client=client, now=now)
+                          client=client, now=now, sandbox=sandbox)
     if result.get("code") != "10000" or result.get("out_trade_no") != order_no:
         raise PaymentGatewayError("支付宝退款查单未返回确定结果")
     request_no = result.get("out_request_no")

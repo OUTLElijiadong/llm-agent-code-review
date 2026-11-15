@@ -725,6 +725,7 @@ def _provider_trade_query(order: BillingOrder) -> dict:
             private_key_pem=_read_key(settings.alipay_private_key_path, "支付宝商户私钥"),
             public_key_pem=_read_key(settings.alipay_public_key_path, "支付宝公钥"),
             order_no=order.order_no, amount_fen=order.amount_fen,
+            sandbox=settings.alipay_gateway_mode == "sandbox",
         )
     result = gateway.query_wechat_trade(
         mchid=settings.wechat_pay_mchid, merchant_serial=settings.wechat_pay_merchant_serial,
@@ -746,6 +747,7 @@ def _provider_close_trade(order: BillingOrder) -> dict:
             app_id=settings.alipay_app_id,
             private_key_pem=_read_key(settings.alipay_private_key_path, "支付宝商户私钥"),
             public_key_pem=_read_key(settings.alipay_public_key_path, "支付宝公钥"), order_no=order.order_no,
+            sandbox=settings.alipay_gateway_mode == "sandbox",
         )
     return gateway.close_wechat_trade(
         mchid=settings.wechat_pay_mchid, merchant_serial=settings.wechat_pay_merchant_serial,
@@ -765,7 +767,7 @@ def _provider_refund(order: BillingOrder, refund: BillingRefund) -> dict:
             private_key_pem=_read_key(settings.alipay_private_key_path, "支付宝商户私钥"),
             public_key_pem=_read_key(settings.alipay_public_key_path, "支付宝公钥"),
             order_no=order.order_no, refund_no=refund.refund_no, amount_fen=refund.amount_fen,
-            reason=refund.reason,
+            reason=refund.reason, sandbox=settings.alipay_gateway_mode == "sandbox",
         )
     return gateway.create_wechat_refund(
         mchid=settings.wechat_pay_mchid, merchant_serial=settings.wechat_pay_merchant_serial,
@@ -787,6 +789,7 @@ def _provider_refund_query(order: BillingOrder, refund: BillingRefund) -> dict:
             public_key_pem=_read_key(settings.alipay_public_key_path, "支付宝公钥"),
             order_no=order.order_no, refund_no=refund.refund_no,
             amount_fen=refund.amount_fen, total_fen=order.amount_fen,
+            sandbox=settings.alipay_gateway_mode == "sandbox",
         )
     return gateway.query_wechat_refund(
         mchid=settings.wechat_pay_mchid, merchant_serial=settings.wechat_pay_merchant_serial,
@@ -816,6 +819,7 @@ def _provider_order(order: BillingOrder) -> dict[str, str]:
             public_key_pem=_read_key(settings.alipay_public_key_path, "支付宝公钥"),
             notify_url=settings.alipay_notify_url, order_no=order.order_no,
             amount_fen=order.amount_fen, subject=subject,
+            sandbox=settings.alipay_gateway_mode == "sandbox",
         )
     if order.channel == "wechat":
         return billing_payment_gateway.create_wechat_native_preorder(

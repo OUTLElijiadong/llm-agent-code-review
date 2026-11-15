@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import hmac
 import importlib.util
@@ -18,7 +19,7 @@ import sys
 import tempfile
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
@@ -54,6 +55,9 @@ READ_ONLY_ACTIONS = {
     "security_decoy_status",
 }
 MAX_TEXT_BYTES = 256 * 1024
+# Keep full-file SHA-256 semantics while bounding disk I/O per request.
+MAX_TEXT_HASH_BYTES = 16 * 1024 * 1024
+TEXT_HASH_CHUNK_BYTES = 64 * 1024
 MAX_DIRECTORY_ENTRIES = 500
 # 与 prism_security_block 同模块处理的只读溯源动作。
 SECURITY_MODULE_ACTIONS = frozenset({"security_ip_trace", "security_surface_audit", "security_traffic_summary",
@@ -345,7 +349,7 @@ def _list_directory(params: dict[str, Any]) -> dict[str, Any]:
             "type": "symlink" if item.is_symlink() else "directory" if item.is_dir() else "file",
             "size": info.st_size,
             "mode": format(stat.S_IMODE(info.st_mode), "04o"),
-            "modified_at": datetime.fromtimestamp(info.st_mtime, tz=timezone.utc).isoformat(),
+            "modified_at": datetime.fromtimestamp(info.st_mtime, tz=UTC).isoformat(),
             "sensitive": _is_sensitive_path(item),
         })
     return {"path": str(path), "entries": entries, "truncated": len(all_entries) > len(entries)}
@@ -356,8 +360,37 @@ def _read_text_file(params: dict[str, Any]) -> dict[str, Any]:
     requested_limit = int(params.get("max_bytes") or 64 * 1024)
     if requested_limit < 1 or requested_limit > MAX_TEXT_BYTES:
         raise ValueError(f"max_bytes 必须在 1 到 {MAX_TEXT_BYTES} 之间")
-    size = path.stat().st_size
-    raw = path.read_bytes()[:requested_limit]
+    descriptor = _open_text_file_without_symlinks(path)
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError("只允许读取普通文本文件")
+        if metadata.st_size > MAX_TEXT_HASH_BYTES:
+            raise ValueError(f"文本文件超过 SHA-256 哈希上限（{MAX_TEXT_HASH_BYTES} 字节）")
+        digest = hashlib.sha256()
+        content_bytes = bytearray()
+        remaining = metadata.st_size
+        while remaining:
+            chunk = os.read(descriptor, min(TEXT_HASH_CHUNK_BYTES, remaining))
+            if not chunk:
+                raise ValueError("文件在读取期间发生变化，已拒绝返回不完整哈希")
+            digest.update(chunk)
+            if len(content_bytes) < requested_limit:
+                content_bytes.extend(chunk[:requested_limit - len(content_bytes)])
+            remaining -= len(chunk)
+        after_read = os.fstat(descriptor)
+        if (
+            after_read.st_size != metadata.st_size
+            or after_read.st_mtime_ns != metadata.st_mtime_ns
+            or after_read.st_ctime_ns != metadata.st_ctime_ns
+        ):
+            raise ValueError("文件在读取期间发生变化，已拒绝返回不一致结果")
+        raw = bytes(content_bytes)
+        sha256 = digest.hexdigest()
+        size = metadata.st_size
+        mode = format(stat.S_IMODE(metadata.st_mode), "04o")
+    finally:
+        os.close(descriptor)
     try:
         content = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -365,11 +398,36 @@ def _read_text_file(params: dict[str, Any]) -> dict[str, Any]:
     return {
         "path": str(path),
         "size": size,
-        "sha256": _sha256_file(path),
-        "mode": format(stat.S_IMODE(path.stat().st_mode), "04o"),
+        "sha256": sha256,
+        "mode": mode,
         "truncated": size > len(raw),
         "content": _redact_text(content),
     }
+
+
+def _open_text_file_without_symlinks(path: Path) -> int:
+    """Open every absolute path component without following symlinks."""
+    required_flags = ("O_DIRECTORY", "O_NOFOLLOW")
+    if any(not hasattr(os, flag) for flag in required_flags) or os.open not in os.supports_dir_fd:
+        raise RuntimeError("当前平台不支持安全的无符号链接文件打开")
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    file_flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
+    directory_fd = os.open(path.anchor, directory_flags)
+    try:
+        components = path.parts[1:]
+        if not components:
+            raise ValueError("目标路径不是普通文件")
+        for component in components[:-1]:
+            next_fd = os.open(component, directory_flags, dir_fd=directory_fd)
+            os.close(directory_fd)
+            directory_fd = next_fd
+        return os.open(components[-1], file_flags, dir_fd=directory_fd)
+    except OSError as exc:
+        if exc.errno in {errno.ELOOP, errno.ENOTDIR}:
+            raise ValueError("读取文件路径包含符号链接或非目录组件") from exc
+        raise
+    finally:
+        os.close(directory_fd)
 
 
 def _journal_query(params: dict[str, Any]) -> dict[str, Any]:
@@ -777,14 +835,14 @@ def _backup_audit() -> dict[str, Any]:
     backup_dir = _configured_backup_dir()
     if not backup_dir.is_dir():
         return {"ok": False, "error": "备份目录不存在", "dir": str(backup_dir)}
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     rows: list[dict[str, Any]] = []
     total_gzip_bytes = 0
     for path in backup_dir.glob("*.sql.gz"):
         try:
             if not path.is_file() or path.is_symlink():
                 continue
-            modified = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+            modified = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
             size = path.stat().st_size
             total_gzip_bytes += size
             rows.append(
@@ -1147,14 +1205,6 @@ def _ip_attribution(params: dict[str, Any]) -> dict[str, Any]:
 
 
 
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _redact_text(value: str) -> str:
     redacted = re.sub(
         r"(?i)(password|passwd|token|secret|api[_-]?key|authorization)(\s*[:=]\s*)([^\s,;]+)",
@@ -1191,7 +1241,7 @@ def _write_host_audit(
         AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(AUDIT_LOG.parent, 0o700)
         record = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "request_id": request_id,
             "action": action,
             "params": _audit_params(action, params),
@@ -1458,7 +1508,7 @@ class Handler(BaseHTTPRequestHandler):
                         "action": action,
                         "params": _audit_params(action, params),
                         "status": "running",
-                        "started_at": datetime.now(timezone.utc).isoformat(),
+                        "started_at": datetime.now(UTC).isoformat(),
                     },
                 )
             started = time.monotonic()
@@ -1488,7 +1538,7 @@ class Handler(BaseHTTPRequestHandler):
                         "action": action,
                         "params": _audit_params(action, params),
                         "status": "success",
-                        "finished_at": datetime.now(timezone.utc).isoformat(),
+                        "finished_at": datetime.now(UTC).isoformat(),
                         "response": response,
                     },
                 )
@@ -1509,7 +1559,7 @@ class Handler(BaseHTTPRequestHandler):
                         "action": action,
                         "params": _audit_params(action, params),
                         "status": "failed",
-                        "finished_at": datetime.now(timezone.utc).isoformat(),
+                        "finished_at": datetime.now(UTC).isoformat(),
                         "error": error,
                     },
                 )

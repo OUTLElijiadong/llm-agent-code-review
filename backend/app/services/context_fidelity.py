@@ -39,7 +39,7 @@ _ACCOUNT_SCOPE_MARKER = re.compile(
     r"(?:互相|相互)?隔离|不互通|彼此独立|各自独立|"
     r"(?:只|仅)(?:能)?(?:查看|读取|访问)?自己的[^。！？!?；;\r\n]{0,12}(?:历史|聊天记录|会话记录))"
 )
-_TIME_DURATION_MARKER = re.compile(r"\d+(?:\.\d+)?\s*(?:秒|分钟|小时|天)")
+_TIME_DURATION_MARKER = re.compile(r"(?<!\d)\d+(?:\.\d+)?\s*(?:秒|分钟|小时|天)")
 _CONVERSATION_MARKER = re.compile(r"追问|禁言|对话|会话")
 _RISK_DECISION_MARKER = re.compile(
     r"(?:低风险|中风险|高风险|低危|中危|高危)"
@@ -69,7 +69,7 @@ _COUNT_WITH_UNIT = re.compile(
 )
 _NUMERIC_CONSTRAINT = re.compile(
     r"(?:达到|不少于|不低于|不超过|至多|最多|至少|上限|下限|设为|设置为|调整为|改为|"
-    r"限定为|限制为|改到|提高到|降低到)\s*[<>≤≥]?\s*\d+(?:\.\d+)?\s*"
+    r"限定为|限制为|改到|提高到|降低到)\s*(?:[<>≤≥]\s*)?\d+(?:\.\d+)?\s*"
     r"(?:%|％|百分比|项|个|人|次|秒|分钟|小时|天|页|文件|token|tokens|字节|KB|MB|GB)?"
     r"|(?:人数|数量|次数|并发|预算|额度|时长|期限|上限|下限|团队规模|team\s+size|"
     r"concurrency)[^。！？!?;；\r\n]{0,64}(?:设为|设置为|调整为|改为|限制为|限定为|"

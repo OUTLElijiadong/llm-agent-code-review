@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -155,6 +156,82 @@ def test_text_file_and_directory_reads_are_limited_to_operational_roots(tmp_path
         executor._read_text_file({"path": str(denied_file)})
     with pytest.raises(ValueError, match="允许范围"):
         executor._list_directory({"path": str(denied)})
+
+
+def test_text_file_reads_and_hashes_in_bounded_chunks(tmp_path: Path, monkeypatch) -> None:
+    allowed = tmp_path / "logs"
+    allowed.mkdir()
+    log_file = allowed / "service.log"
+    content = b"0123456789abcdef"
+    log_file.write_bytes(content)
+    monkeypatch.setattr(executor, "READABLE_TEXT_ROOTS", (allowed,))
+    monkeypatch.setattr(executor, "MAX_TEXT_HASH_BYTES", len(content))
+    monkeypatch.setattr(executor, "TEXT_HASH_CHUNK_BYTES", 3)
+    read_sizes: list[int] = []
+    original_read = os.read
+
+    def tracked_read(descriptor: int, size: int) -> bytes:
+        read_sizes.append(size)
+        return original_read(descriptor, size)
+
+    monkeypatch.setattr(executor.os, "read", tracked_read)
+
+    result = executor._read_text_file({"path": str(log_file), "max_bytes": 5})
+
+    assert result["content"] == "01234"
+    assert result["size"] == len(content)
+    assert result["truncated"] is True
+    assert result["sha256"] == hashlib.sha256(content).hexdigest()
+    assert len(read_sizes) > 1
+    assert max(read_sizes) == 3
+
+
+def test_text_file_hash_limit_rejects_before_reading(tmp_path: Path, monkeypatch) -> None:
+    allowed = tmp_path / "logs"
+    allowed.mkdir()
+    log_file = allowed / "oversized.log"
+    log_file.write_bytes(b"x" * 9)
+    monkeypatch.setattr(executor, "READABLE_TEXT_ROOTS", (allowed,))
+    monkeypatch.setattr(executor, "MAX_TEXT_HASH_BYTES", 8)
+    reads: list[int] = []
+    original_read = os.read
+
+    def tracked_read(descriptor: int, size: int) -> bytes:
+        reads.append(size)
+        return original_read(descriptor, size)
+
+    monkeypatch.setattr(executor.os, "read", tracked_read)
+
+    with pytest.raises(ValueError, match="哈希上限"):
+        executor._read_text_file({"path": str(log_file), "max_bytes": 4})
+
+    assert reads == []
+
+
+@pytest.mark.parametrize("symlink_target", ["file", "directory"])
+def test_text_file_open_rejects_symlink_even_after_path_validation(
+    tmp_path: Path, monkeypatch, symlink_target: str,
+) -> None:
+    allowed = tmp_path / "logs"
+    allowed.mkdir()
+    real_file = allowed / "real.log"
+    real_file.write_text("private", encoding="utf-8")
+    real_dir = allowed / "real-dir"
+    real_dir.mkdir()
+    (real_dir / "nested.log").write_text("private", encoding="utf-8")
+    if symlink_target == "file":
+        path = allowed / "linked.log"
+        path.symlink_to(real_file)
+    else:
+        linked_dir = allowed / "linked-dir"
+        linked_dir.symlink_to(real_dir, target_is_directory=True)
+        path = linked_dir / "nested.log"
+    monkeypatch.setattr(executor, "READABLE_TEXT_ROOTS", (allowed,))
+    # 模拟校验完成后路径被本地进程替换为符号链接，验证最终打开仍失败关闭。
+    monkeypatch.setattr(executor, "_safe_text_path", lambda *_args, **_kwargs: path)
+
+    with pytest.raises(ValueError, match="符号链接"):
+        executor._read_text_file({"path": str(path)})
 
 
 def test_directory_listing_allows_only_the_configured_backup_directory(tmp_path: Path, monkeypatch) -> None:

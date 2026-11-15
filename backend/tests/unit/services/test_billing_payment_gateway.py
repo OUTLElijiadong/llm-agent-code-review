@@ -71,6 +71,30 @@ def test_alipay_precreate_signs_server_priced_request_and_returns_only_provider_
     assert public_pem.startswith(b"-----BEGIN PUBLIC KEY-----")
 
 
+def test_alipay_sandbox_precreate_uses_fixed_sandbox_gateway_and_matching_signature():
+    private, private_pem, public_pem = _key_pair()
+
+    def handle(request: httpx.Request):
+        assert request.url == "https://openapi-sandbox.dl.alipaydev.com/gateway.do"
+        params = {key: values[0] for key, values in parse_qs(request.content.decode()).items()}
+        signed = "&".join(f"{key}={params[key]}" for key in sorted(params) if key != "sign")
+        private.public_key().verify(
+            base64.b64decode(params["sign"]), signed.encode(), padding.PKCS1v15(), hashes.SHA256()
+        )
+        result = {"code": "10000", "qr_code": "https://qr.alipay.com/sandbox-order"}
+        signature = _signed(private, json.dumps(result, separators=(",", ":")).encode())
+        return httpx.Response(200, json={"alipay_trade_precreate_response": result, "sign": signature})
+
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        result = create_alipay_preorder(
+            app_id="sandbox-app", seller_id="sandbox-seller", private_key_pem=private_pem,
+            public_key_pem=public_pem, notify_url="https://prism.example/sandbox-notify",
+            order_no="sandbox-order-1", amount_fen=400, subject="测试订单", client=client, sandbox=True,
+        )
+
+    assert result["payment_code_url"] == "https://qr.alipay.com/sandbox-order"
+
+
 def test_alipay_precreate_rejects_provider_error_and_untrusted_qr_scheme():
     private, private_pem, public_pem = _key_pair()
 
