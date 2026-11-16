@@ -50,6 +50,8 @@ def _checkpoint(marker):
 
 
 def test_model_send_without_conflicts_requires_exact_frozen_evidence(records_db):
+    # The administrator's prior message is from the previous author turn in this case.
+    records_db.get(EnterpriseChatMessage, 100).sender_id = 3
     run, state = _freeze(records_db)
     evidence = clarification.model_send_evidence(records_db, run)
     assert evidence["candidate_message_ids"] == []
@@ -59,7 +61,7 @@ def test_model_send_without_conflicts_requires_exact_frozen_evidence(records_db)
 
     runtime._require_model_send_clearance(records_db, run=run, state=state, checkpoint=_checkpoint(marker))
 
-    records_db.get(EnterpriseChatMessage, 100).content = "改过的历史会话指令"
+    records_db.get(EnterpriseChatMessage, 100).content = "改过的当前讨论消息"
     records_db.flush()
     with pytest.raises(ForbiddenError, match="权限意见已变化"):
         runtime._require_model_send_clearance(records_db, run=run, state=state, checkpoint=_checkpoint(marker))
@@ -80,7 +82,7 @@ def test_new_run_waits_for_higher_authority_directive_before_queueing(records_db
         BillingWallet(owner_type="enterprise", owner_id=10),
     ])
     records_db.get(EnterpriseChatMessage, 100).sender_id = 1
-    records_db.get(EnterpriseChatMessage, 100).content = "@小菱 先暂停当前操作"
+    records_db.get(EnterpriseChatMessage, 100).content = "先暂停当前操作"
     records_db.commit()
     monkeypatch.setattr(runtime, "_CROSS_SCOPE_ATTRIBUTION_VERIFIED", False)
     monkeypatch.setattr(runtime.settings, "billing_commercial_metering_ready", False)

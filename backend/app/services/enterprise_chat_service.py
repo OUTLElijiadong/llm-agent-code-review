@@ -246,8 +246,9 @@ def send_message(
                 row = EnterpriseChatMessage(
                     enterprise_id=enterprise_id, conversation_id=conversation_id, sender_id=user_id,
                     client_message_id=client_message_id, content=content,
-                    sender_authority_rank=(authority_rank(member.role, group_member.role if group_member else None,
-                                                         room.kind) if "@小菱" in content else None),
+                    sender_authority_rank=authority_rank(
+                        member.role, group_member.role if group_member else None, room.kind,
+                    ),
                 )
                 db.add(row)
                 db.flush()

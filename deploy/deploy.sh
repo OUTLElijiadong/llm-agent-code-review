@@ -75,6 +75,10 @@ release_dir="${RELEASE_STATE_DIR:-.releases}"
 current_state="$release_dir/current.env"
 previous_state="$release_dir/previous.env"
 pending_state="$release_dir/pending.env"
+f2_activation_state="$release_dir/xiaoling-f2-activation.env"
+current_release_version=""
+f2_already_active=0
+target_f2_required=0
 mkdir -p "$release_dir"
 chmod 700 "$release_dir"
 lock_dir="$(maintenance_lock_path)"
@@ -201,6 +205,7 @@ if [[ -f "$current_state" ]]; then
   load_release_environment "$current_state"
   assert_recorded_release_environment
   current_sha="$APP_RELEASE"
+  current_release_version="$APP_VERSION"
   current_backend="$BACKEND_RELEASE"
   current_frontend="$FRONTEND_RELEASE"
   write_bound_release_state "$previous_state" "$current_state"
@@ -218,6 +223,7 @@ else
     current_frontend="${frontend_image#prism-frontend:}"
     current_sha="$current_backend"
     current_version="$(resolve_release_version "$current_sha" "$current_backend" "$current_frontend")"
+    current_release_version="$current_version"
     export APP_RELEASE="$current_sha" APP_VERSION="$current_version"
     export BACKEND_RELEASE="$current_backend" FRONTEND_RELEASE="$current_frontend"
     BOUND_BACKEND_IMAGE_ID="$(release_image_id "$backend_image")"
@@ -228,6 +234,16 @@ else
       "$previous_state" "$current_sha" "$current_backend" "$current_frontend" \
       bootstrap none "$(current_alembic_revision)" "$current_version"
   fi
+fi
+
+if [[ -n "$current_release_version" ]] && app_version_at_least "$current_release_version" "4.1.49"; then
+  f2_already_active=1
+fi
+if [[ -e "$f2_activation_state" || -L "$f2_activation_state" ]]; then
+  f2_already_active=1
+fi
+if app_version_at_least "$app_version" "4.1.49"; then
+  target_f2_required=1
 fi
 
 case "$target" in
@@ -294,6 +310,13 @@ if [[ "$target" == "all" || "$target" == "backend" ]]; then
   compose build backend
   deploy_stage="migration_preflight"
   prepare_admin_alembic
+  if [[ "$f2_already_active" == "1" || "$target_f2_required" == "1" ]]; then
+    deploy_stage="xiaoling_f2_preflight"
+    target_backend_image_id="$(release_image_id "prism-backend:$desired_backend")" \
+      || fatal "无法绑定 F2 目标 Backend 镜像"
+    assert_xiaoling_f2_rollback_compatible \
+      "$current_release_version" "$f2_activation_state" 1 "$target_backend_image_id"
+  fi
   chat_target_119_relation="$(python3 "$repo_dir/deploy/lib/alembic_revision_compatibility.py" \
     "$repo_dir/backend/alembic/versions" "$MIGRATION_ALEMBIC_HEAD" "119_chat_message_authority")" \
     || fatal "无法确认目标 Alembic head 与 119 聊天权限迁移的关系"
@@ -422,6 +445,13 @@ if [[ "$target" == "all" || "$target" == "backend" ]]; then
   fi
   deployment_mutated=1
   deploy_stage="backend_switch"
+  if [[ "$f2_already_active" == "1" || "$target_f2_required" == "1" ]]; then
+    # Persist F2 activation before a compatible image can run. Keep the marker
+    # after success so later ordinary deploys cannot bypass the behavior probe.
+    local_marker_tmp="${f2_activation_state}.tmp"
+    (umask 077; printf 'APP_VERSION=%s\nRELEASE_SHA=%s\n' "$app_version" "$target_sha") > "$local_marker_tmp"
+    mv "$local_marker_tmp" "$f2_activation_state"
+  fi
   compose up -d --no-deps --no-build --pull never backend
   deploy_stage="backend_health"
   wait_for_service_health backend "${BACKEND_HEALTH_TIMEOUT:-240}" || deploy_fatal "Backend 未恢复健康"

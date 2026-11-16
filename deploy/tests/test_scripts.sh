@@ -76,6 +76,15 @@ file_sha256() {
   fi
 }
 
+file_sha256_or_missing() {
+  local file="$1"
+  if [[ -f "$file" ]]; then
+    file_sha256 "$file"
+  else
+    printf 'missing'
+  fi
+}
+
 # 写入通过生产强度门禁的独立 MySQL 测试凭据。
 # 参数: $1 目标 dotenv 路径。
 # 返回: 写入成功时返回 0。
@@ -261,7 +270,7 @@ alembic_revision="${FAKE_ALEMBIC_REVISION:-047_review_input_snapshot}"
   alembic_head="${FAKE_ALEMBIC_HEAD:-$alembic_revision}"
 image_digit=1
 case "$*" in
-  *bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb*) release_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb; release_version=3.8.4; image_digit=3 ;;
+  *bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb*) release_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb; release_version="${FAKE_TARGET_VERSION:-3.8.4}"; image_digit=3 ;;
 esac
 case "$*" in *prism-frontend*) image_digit=$((image_digit + 1)) ;; esac
 image_id="sha256:$(printf '%064d' 0 | tr 0 "$image_digit")"
@@ -395,7 +404,17 @@ case "${1:-}" in
     case "$*" in
       *'--entrypoint python'* )
         probe_body="$(cat)"
-        if [[ "$probe_body" == *'119_chat_message_authority compatibility probe'* ]]; then
+        if [[ "$probe_body" == *'Probe the Xiaoling F2 authority contract'* ]]; then
+          printf '%s\n' 'xiaoling_f2_probe_invoked' >> "${FAKE_DOCKER_LOG:?FAKE_DOCKER_LOG is required}"
+          [[ "${FAKE_XIAOLING_F2_PROBE_FAILURE:-0}" != 1 ]] || exit 75
+          if [[ -n "${FAKE_XIAOLING_F2_TARGET_IMAGE_ID:-}" && "$*" == *"$FAKE_XIAOLING_F2_TARGET_IMAGE_ID"* ]]; then
+            printf '%s\n' "${FAKE_XIAOLING_F2_TARGET_CAPABILITY:-supported}"
+          elif [[ -n "${FAKE_XIAOLING_F2_OLD_IMAGE_ID:-}" && "$*" == *"$FAKE_XIAOLING_F2_OLD_IMAGE_ID"* ]]; then
+            printf '%s\n' "${FAKE_XIAOLING_F2_OLD_CAPABILITY:-unsupported}"
+          else
+            printf '%s\n' "${FAKE_XIAOLING_F2_CAPABILITY:-supported}"
+          fi
+        elif [[ "$probe_body" == *'119_chat_message_authority compatibility probe'* ]]; then
           [[ "${FAKE_CHAT_AUTHORITY_PROBE_FAILURE:-0}" != 1 ]] || exit 74
           if [[ "$*" == *"$(printf '%064d' 0 | tr 0 1)"* ]]; then
             printf '%s\n' "${FAKE_CHAT_OLD_CAPABILITY:-unsupported}"
@@ -446,6 +465,7 @@ run_release_binding_case() {
   [[ ! -f lib/checkpoint_compatibility.py ]] || cp lib/checkpoint_compatibility.py "$workspace/deploy/lib/"
   [[ ! -f lib/project_member_compatibility.py ]] || cp lib/project_member_compatibility.py "$workspace/deploy/lib/"
   [[ ! -f lib/chat_authority_compatibility.py ]] || cp lib/chat_authority_compatibility.py "$workspace/deploy/lib/"
+  [[ ! -f lib/xiaoling_f2_compatibility.py ]] || cp lib/xiaoling_f2_compatibility.py "$workspace/deploy/lib/"
   [[ ! -f lib/chat_authority_schema_compatibility.py ]] || cp lib/chat_authority_schema_compatibility.py "$workspace/deploy/lib/"
   [[ ! -f lib/alembic_revision_compatibility.py ]] || cp lib/alembic_revision_compatibility.py "$workspace/deploy/lib/"
   cp -R ../backend/alembic/versions "$workspace/backend/alembic/"
@@ -646,7 +666,7 @@ PY
       fi
       assert_contains "$docker_log" "compose up -d --no-deps --no-build --pull never backend | release=$previous_sha version=3.8.2"
       assert_not_contains "$docker_log" "backend | release=$previous_sha version=3.8.4" ;;
-    rollback_ledger_compatible|rollback_ledger_empty_old|rollback_ledger_written_old|rollback_ledger_reference_without_schema|rollback_ledger_invalid_json|rollback_ledger_probe_failure|rollback_ledger_probe_unknown|rollback_ledger_db_failure|rollback_ledger_schema_unknown|rollback_ledger_legacy|rollback_member_supported|rollback_member_old|rollback_member_unknown|rollback_member_probe_failure|rollback_chat_authority_compatible|rollback_chat_authority_old_refused|rollback_chat_authority_absent_119_aware_refused|rollback_chat_authority_partial_refused|rollback_chat_authority_revision_mismatch|rollback_chat_authority_schema_unknown|rollback_chat_authority_multiple_revisions|rollback_chat_authority_graph_invalid)
+    rollback_ledger_compatible|rollback_ledger_empty_old|rollback_ledger_written_old|rollback_ledger_reference_without_schema|rollback_ledger_invalid_json|rollback_ledger_probe_failure|rollback_ledger_probe_unknown|rollback_ledger_db_failure|rollback_ledger_schema_unknown|rollback_ledger_legacy|rollback_member_supported|rollback_member_old|rollback_member_unknown|rollback_member_probe_failure|rollback_chat_authority_compatible|rollback_chat_authority_old_refused|rollback_chat_authority_absent_119_aware_refused|rollback_chat_authority_partial_refused|rollback_chat_authority_revision_mismatch|rollback_chat_authority_schema_unknown|rollback_chat_authority_multiple_revisions|rollback_chat_authority_graph_invalid|rollback_f2_downgrade_refused|rollback_f2_capable_allowed|rollback_f2_initial_baseline_allowed|rollback_f2_activation_pending_refused|rollback_f2_activation_marker_symlink_refused|rollback_f2_current_state_missing_refused|rollback_f2_lock_state_refresh)
       local expected_success=0 state_before
       case "$test_case" in
         rollback_ledger_compatible) export FAKE_CHECKPOINT_SCHEMA=1 FAKE_CHECKPOINT_REFERENCE=1 FAKE_CHECKPOINT_CAPABILITY=supported; expected_success=1 ;;
@@ -689,9 +709,75 @@ PY
           export FAKE_ALEMBIC_REVISION=119_chat_message_authority
           export FAKE_CHAT_AUTHORITY_SCHEMA_STATE=complete
           printf 'revision = (\n' > "$workspace/backend/alembic/versions/broken_graph_fixture.py" ;;
+        rollback_f2_downgrade_refused)
+          sed 's/^APP_VERSION=.*/APP_VERSION=4.1.49/' "$workspace/releases/current.env" > "$workspace/releases/current.new"
+          mv "$workspace/releases/current.new" "$workspace/releases/current.env"
+          sed 's/^APP_VERSION=.*/APP_VERSION=4.1.48/' "$workspace/releases/previous.env" > "$workspace/releases/previous.new"
+          mv "$workspace/releases/previous.new" "$workspace/releases/previous.env"
+          export FAKE_ALEMBIC_REVISION=119_chat_message_authority
+          export FAKE_CHAT_AUTHORITY_SCHEMA_STATE=complete FAKE_CHAT_OLD_CAPABILITY=supported
+          export FAKE_XIAOLING_F2_CAPABILITY=unsupported ;;
+        rollback_f2_capable_allowed)
+          sed 's/^APP_VERSION=.*/APP_VERSION=4.1.50/' "$workspace/releases/current.env" > "$workspace/releases/current.new"
+          mv "$workspace/releases/current.new" "$workspace/releases/current.env"
+          sed 's/^APP_VERSION=.*/APP_VERSION=4.1.49/' "$workspace/releases/previous.env" > "$workspace/releases/previous.new"
+          mv "$workspace/releases/previous.new" "$workspace/releases/previous.env"
+          export FAKE_ALEMBIC_REVISION=119_chat_message_authority
+          export FAKE_CHAT_AUTHORITY_SCHEMA_STATE=complete FAKE_CHAT_OLD_CAPABILITY=supported
+          export FAKE_XIAOLING_F2_CAPABILITY=supported
+          expected_success=1 ;;
+        rollback_f2_initial_baseline_allowed)
+          sed 's/^APP_VERSION=.*/APP_VERSION=4.1.48/' "$workspace/releases/current.env" > "$workspace/releases/current.new"
+          mv "$workspace/releases/current.new" "$workspace/releases/current.env"
+          sed 's/^APP_VERSION=.*/APP_VERSION=4.1.47/' "$workspace/releases/previous.env" > "$workspace/releases/previous.new"
+          mv "$workspace/releases/previous.new" "$workspace/releases/previous.env"
+          export FAKE_ALEMBIC_REVISION=119_chat_message_authority
+          export FAKE_CHAT_AUTHORITY_SCHEMA_STATE=complete FAKE_CHAT_OLD_CAPABILITY=supported
+          expected_success=1 ;;
+        rollback_f2_activation_pending_refused)
+          sed 's/^APP_VERSION=.*/APP_VERSION=4.1.48/' "$workspace/releases/current.env" > "$workspace/releases/current.new"
+          mv "$workspace/releases/current.new" "$workspace/releases/current.env"
+          sed 's/^APP_VERSION=.*/APP_VERSION=4.1.48/' "$workspace/releases/previous.env" > "$workspace/releases/previous.new"
+          mv "$workspace/releases/previous.new" "$workspace/releases/previous.env"
+          printf 'APP_VERSION=4.1.49\nRELEASE_SHA=%s\n' "$current_sha" > "$workspace/releases/xiaoling-f2-activation.env"
+          export FAKE_ALEMBIC_REVISION=119_chat_message_authority
+          export FAKE_CHAT_AUTHORITY_SCHEMA_STATE=complete FAKE_CHAT_OLD_CAPABILITY=supported
+          export FAKE_XIAOLING_F2_CAPABILITY=unsupported ;;
+        rollback_f2_activation_marker_symlink_refused)
+          sed 's/^APP_VERSION=.*/APP_VERSION=4.1.48/' "$workspace/releases/current.env" > "$workspace/releases/current.new"
+          mv "$workspace/releases/current.new" "$workspace/releases/current.env"
+          ln -s missing-marker-target "$workspace/releases/xiaoling-f2-activation.env" ;;
+        rollback_f2_current_state_missing_refused)
+          rm "$workspace/releases/current.env" ;;
+        rollback_f2_lock_state_refresh)
+          sed 's/^APP_VERSION=.*/APP_VERSION=4.1.48/' "$workspace/releases/current.env" > "$workspace/releases/current.new"
+          mv "$workspace/releases/current.new" "$workspace/releases/current.env"
+          sed 's/^APP_VERSION=.*/APP_VERSION=4.1.48/' "$workspace/releases/previous.env" > "$workspace/releases/previous.new"
+          mv "$workspace/releases/previous.new" "$workspace/releases/previous.env"
+          cat >> "$workspace/deploy/lib/common.sh" <<'SCRIPT'
+acquire_directory_lock() {
+  local current_file="${RELEASE_STATE_DIR:?}/current.env" current_tmp="${RELEASE_STATE_DIR:?}/current.lock-refresh"
+  sed 's/^APP_VERSION=.*/APP_VERSION=4.1.49/' "$current_file" > "$current_tmp"
+  mv "$current_tmp" "$current_file"
+  rm -f "${RELEASE_STATE_DIR:?}/xiaoling-f2-activation.env"
+}
+SCRIPT
+          export FAKE_ALEMBIC_REVISION=119_chat_message_authority
+          export FAKE_CHAT_AUTHORITY_SCHEMA_STATE=complete FAKE_CHAT_OLD_CAPABILITY=supported
+          export FAKE_XIAOLING_F2_CAPABILITY=unsupported ;;
       esac
+      if [[ "$test_case" == rollback_f2_* ]]; then
+        f2_target_version="$(sed -n 's/^APP_VERSION=//p' "$workspace/releases/previous.env")"
+        export FAKE_RELEASE_VERSION="$f2_target_version"
+        sed -e "s/^APP_RELEASE=.*/APP_RELEASE=$previous_sha/" \
+          -e "s/^APP_VERSION=.*/APP_VERSION=$f2_target_version/" \
+          -e "s/^BACKEND_RELEASE=.*/BACKEND_RELEASE=$previous_sha/" \
+          -e "s/^FRONTEND_RELEASE=.*/FRONTEND_RELEASE=$previous_sha/" \
+          "$workspace/deploy/.env" > "$workspace/deploy/f2-default.env"
+        mv "$workspace/deploy/f2-default.env" "$workspace/deploy/.env"
+      fi
       printf 'pending fixture\n' > "$workspace/releases/pending.env"
-      state_before="$(file_sha256 "$workspace/releases/current.env")/$(file_sha256 "$workspace/releases/previous.env")/$(file_sha256 "$workspace/releases/pending.env")"
+      state_before="$(file_sha256_or_missing "$workspace/releases/current.env")/$(file_sha256 "$workspace/releases/previous.env")/$(file_sha256 "$workspace/releases/pending.env")"
       status_code=0
       ./rollback.sh all --confirm ROLLBACK_APPLICATION > "$output_file" 2>&1 || status_code=$?
       if [[ "$expected_success" == 1 ]]; then
@@ -705,6 +791,15 @@ PY
           assert_contains "$docker_log" 'prism_chat_authority_schema'
           assert_contains "$docker_log" '--entrypoint python sha256:'
           assert_contains "$output_file" '小菱权限快照回滚门通过(schema=complete, revision=119_chat_message_authority)'
+        fi
+        if [[ "$test_case" == rollback_f2_capable_allowed ]]; then
+          assert_contains "$output_file" '小菱 F2 回滚行为门通过(reader=supported, current_version=4.1.50)'
+          assert_contains "$docker_log" 'xiaoling_f2_probe_invoked'
+        elif [[ "$test_case" == rollback_f2_initial_baseline_allowed ]]; then
+          assert_not_contains "$docker_log" 'xiaoling_f2_probe_invoked'
+        elif [[ "$test_case" == rollback_f2_activation_pending_refused ]]; then
+          assert_contains "$docker_log" 'xiaoling_f2_probe_invoked'
+          assert_contains "$output_file" '当前发布已启用或正在切换至 F2'
         fi
       else
         [[ "$status_code" != 0 ]] || { printf '账本不兼容/未知仍被回退: %s\n' "$test_case" >&2; exit 1; }
@@ -726,6 +821,16 @@ PY
           assert_contains "$output_file" 'revision 缺失或不唯一'
         elif [[ "$test_case" == rollback_chat_authority_graph_invalid ]]; then
           assert_contains "$output_file" '无法确认数据库是否已经跨过迁移 119'
+        elif [[ "$test_case" == rollback_f2_downgrade_refused ]]; then
+          assert_contains "$output_file" '当前发布已启用或正在切换至 F2；目标镜像不含同等小菱权限门'
+        elif [[ "$test_case" == rollback_f2_current_state_missing_refused ]]; then
+          assert_contains "$output_file" '当前发布账本缺失，无法确认已运行版本的权限语义'
+        elif [[ "$test_case" == rollback_f2_lock_state_refresh ]]; then
+          assert_contains "$output_file" '当前发布已启用或正在切换至 F2'
+          assert_contains "$docker_log" 'xiaoling_f2_probe_invoked'
+        elif [[ "$test_case" == rollback_f2_activation_marker_symlink_refused ]]; then
+          assert_contains "$output_file" 'F2 激活阶段标记无法安全读取'
+          assert_not_contains "$docker_log" 'xiaoling_f2_probe_invoked'
         fi
         if [[ "$test_case" == rollback_chat_authority_partial_refused \
           || "$test_case" == rollback_chat_authority_revision_mismatch \
@@ -738,7 +843,11 @@ PY
         else
           assert_not_contains "$docker_log" 'compose stop '
         fi
-        [[ "$state_before" == "$(file_sha256 "$workspace/releases/current.env")/$(file_sha256 "$workspace/releases/previous.env")/$(file_sha256 "$workspace/releases/pending.env")" ]] || { echo '拒绝后发布账本被修改' >&2; exit 1; }
+        if [[ "$test_case" == rollback_f2_lock_state_refresh ]]; then
+          assert_contains "$workspace/releases/current.env" 'APP_VERSION=4.1.49'
+        else
+          [[ "$state_before" == "$(file_sha256_or_missing "$workspace/releases/current.env")/$(file_sha256 "$workspace/releases/previous.env")/$(file_sha256 "$workspace/releases/pending.env")" ]] || { echo '拒绝后发布账本被修改' >&2; exit 1; }
+        fi
         [[ ! -e "$workspace/maintenance.lock" ]] || { echo '拒绝后维护锁未释放' >&2; exit 1; }
       fi ;;
     *) echo "未知发布测试: $test_case" >&2; exit 1 ;;
@@ -750,7 +859,7 @@ run_release_binding_tests() {
   local workspace="$1/release-binding"
   local test_case failed=0 passed=0
   mkdir -p "$workspace"
-  for test_case in stopped_release_binding stopped_release_oneoff write_version legacy_labels legacy_git missing_evidence conflicting_labels wrong_revision invalid_version digest_changed ops_default_drift ops_masked_drift ops_running_drift ops_consistent ops_stopped_container restore_missing_image restore_missing_evidence restore_invalid_heads restore_pinned_image rollback_version rollback_legacy rollback_missing_evidence rollback_ledger_compatible rollback_ledger_empty_old rollback_ledger_written_old rollback_ledger_reference_without_schema rollback_ledger_invalid_json rollback_ledger_probe_failure rollback_ledger_probe_unknown rollback_ledger_db_failure rollback_ledger_schema_unknown rollback_ledger_legacy rollback_member_supported rollback_member_old rollback_member_unknown rollback_member_probe_failure rollback_chat_authority_compatible rollback_chat_authority_old_refused rollback_chat_authority_absent_119_aware_refused rollback_chat_authority_partial_refused rollback_chat_authority_revision_mismatch rollback_chat_authority_schema_unknown rollback_chat_authority_multiple_revisions rollback_chat_authority_graph_invalid; do
+      for test_case in stopped_release_binding stopped_release_oneoff write_version legacy_labels legacy_git missing_evidence conflicting_labels wrong_revision invalid_version digest_changed ops_default_drift ops_masked_drift ops_running_drift ops_consistent ops_stopped_container restore_missing_image restore_missing_evidence restore_invalid_heads restore_pinned_image rollback_version rollback_legacy rollback_missing_evidence rollback_ledger_compatible rollback_ledger_empty_old rollback_ledger_written_old rollback_ledger_reference_without_schema rollback_ledger_invalid_json rollback_ledger_probe_failure rollback_ledger_probe_unknown rollback_ledger_db_failure rollback_ledger_schema_unknown rollback_ledger_legacy rollback_member_supported rollback_member_old rollback_member_unknown rollback_member_probe_failure rollback_chat_authority_compatible rollback_chat_authority_old_refused rollback_chat_authority_absent_119_aware_refused rollback_chat_authority_partial_refused rollback_chat_authority_revision_mismatch rollback_chat_authority_schema_unknown rollback_chat_authority_multiple_revisions rollback_chat_authority_graph_invalid rollback_f2_downgrade_refused rollback_f2_capable_allowed rollback_f2_initial_baseline_allowed rollback_f2_activation_pending_refused rollback_f2_activation_marker_symlink_refused rollback_f2_current_state_missing_refused rollback_f2_lock_state_refresh; do
     if bash "$PWD/tests/test_scripts.sh" --release-case "$test_case" "$workspace/$test_case" > "$workspace/$test_case.log" 2>&1; then
       passed=$((passed + 1)); printf 'PASS %s\n' "$test_case"
     else
@@ -846,6 +955,210 @@ with tempfile.TemporaryDirectory(prefix="prism-chat-authority-probe-") as tempor
     run_probe("supported")
     print("chat authority probe: current rank writer and both fail-closed readers PASS")
 
+    f2_probe = pathlib.Path(sys.argv[1]).with_name("xiaoling_f2_compatibility.py")
+
+    def run_f2_probe(expected):
+        result = subprocess.run([sys.executable, str(f2_probe)], capture_output=True, text=True,
+                                env=env, timeout=10)
+        assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
+        assert result.stdout.strip() == expected, (result.stdout, result.stderr)
+
+    run_f2_probe("supported")
+    print("xiaoling F2 probe: current authority semantics supported PASS")
+
+    runtime = root / "services/enterprise_assistant_runtime_service.py"
+    original = runtime.read_text(encoding="utf-8")
+    finalizer_without_clearance = original.replace(
+        "_require_model_send_clearance(db, run=run, state=state, checkpoint=checkpoint)",
+        "pass",
+        1,
+    )
+    assert finalizer_without_clearance != original
+    runtime.write_text(finalizer_without_clearance, encoding="utf-8")
+    run_f2_probe("unsupported")
+    print("xiaoling F2 probe: finalizer missing model-send gate refused PASS")
+
+    class HideFinalizerClearance(ast.NodeTransformer):
+        def __init__(self):
+            self.in_target = False
+            self.hidden = False
+
+        def visit_FunctionDef(self, node):
+            previous = self.in_target
+            self.in_target = node.name == "_finalize_runtime"
+            node = self.generic_visit(node)
+            self.in_target = previous
+            return node
+
+        def visit_Expr(self, node):
+            if (self.in_target and isinstance(node.value, ast.Call)
+                    and isinstance(node.value.func, ast.Name)
+                    and node.value.func.id == "_require_model_send_clearance"):
+                self.hidden = True
+                return ast.If(test=ast.Constant(value=False), body=[node], orelse=[])
+            return node
+
+    tree = ast.parse(original)
+    hider = HideFinalizerClearance()
+    changed_tree = hider.visit(tree)
+    assert hider.hidden, "finalizer clearance call"
+    runtime.write_text(ast.unparse(ast.fix_missing_locations(changed_tree)), encoding="utf-8")
+    run_f2_probe("unsupported")
+    print("xiaoling F2 probe: unreachable finalizer model-send gate refused PASS")
+    runtime.write_text(original, encoding="utf-8")
+
+    class EmptySupersededHandler(ast.NodeTransformer):
+        def __init__(self):
+            self.in_target = False
+            self.changed = False
+
+        def visit_FunctionDef(self, node):
+            previous = self.in_target
+            self.in_target = node.name == "_finalize_runtime"
+            node = self.generic_visit(node)
+            self.in_target = previous
+            return node
+
+        def visit_ExceptHandler(self, node):
+            if (self.in_target and node.type is not None
+                    and "SupersededByAuthorityDirectiveError" in ast.unparse(node.type)):
+                self.changed = True
+                node.body = [ast.Pass()]
+                return node
+            return self.generic_visit(node)
+
+    tree = ast.parse(original)
+    empty_handler = EmptySupersededHandler()
+    changed_tree = empty_handler.visit(tree)
+    assert empty_handler.changed, "finalizer superseded exception handler"
+    runtime.write_text(ast.unparse(ast.fix_missing_locations(changed_tree)), encoding="utf-8")
+    run_f2_probe("unsupported")
+    print("xiaoling F2 probe: finalizer that swallows authority rejection refused PASS")
+    runtime.write_text(original, encoding="utf-8")
+
+    tree = ast.parse(original)
+    tree.body = [node for node in tree.body if not (
+        isinstance(node, ast.FunctionDef) and node.name == "_authority_candidate_messages"
+    )]
+    runtime.write_text(ast.unparse(ast.fix_missing_locations(tree)), encoding="utf-8")
+    run_f2_probe("unsupported")
+    print("xiaoling F2 probe: legacy runtime without current-discussion candidates refused PASS")
+    runtime.write_text(original, encoding="utf-8")
+
+    for call, description in (
+        ("_require_model_send_clearance(db, run=run, state=current, checkpoint=saved_checkpoint)",
+         "billing send gate"),
+        ("_live_role_snapshot(current_db, state)", "tool live-role gate"),
+    ):
+        changed = original.replace(call, "pass", 1)
+        assert changed != original, call
+        runtime.write_text(changed, encoding="utf-8")
+        run_f2_probe("unsupported")
+        print(f"xiaoling F2 probe: missing {description} refused PASS")
+    runtime.write_text(original, encoding="utf-8")
+
+    class RemoveGuard(ast.NodeTransformer):
+        def __init__(self, function_name, marker):
+            self.function_name = function_name
+            self.marker = marker
+            self.in_target = False
+            self.removed = False
+
+        def visit_FunctionDef(self, node):
+            previous = self.in_target
+            self.in_target = node.name == self.function_name
+            node = self.generic_visit(node)
+            self.in_target = previous
+            return node
+
+        def visit_If(self, node):
+            node = self.generic_visit(node)
+            if self.in_target and self.marker in ast.unparse(node.test):
+                self.removed = True
+                return None
+            return node
+
+    for function_name, marker, description in (
+        ("_authority_candidate_messages", "_MAX_AUTHORITY_CANDIDATES", "candidate overflow guard"),
+        ("_render_runtime_context", "_MAX_CONTEXT_CHARS", "permission-context budget guard"),
+    ):
+        tree = ast.parse(original)
+        remover = RemoveGuard(function_name, marker)
+        changed_tree = remover.visit(tree)
+        assert remover.removed, (function_name, marker)
+        runtime.write_text(ast.unparse(ast.fix_missing_locations(changed_tree)), encoding="utf-8")
+        run_f2_probe("unsupported")
+        print(f"xiaoling F2 probe: missing {description} refused PASS")
+    runtime.write_text(original, encoding="utf-8")
+
+    class RemoveRecentBudgetLoop(ast.NodeTransformer):
+        def __init__(self):
+            self.in_target = False
+            self.removed = False
+
+        def visit_FunctionDef(self, node):
+            previous = self.in_target
+            self.in_target = node.name == "_render_runtime_context"
+            node = self.generic_visit(node)
+            self.in_target = previous
+            return node
+
+        def visit_For(self, node):
+            if self.in_target and "reversed(rendered)" in ast.unparse(node.iter):
+                self.removed = True
+                return None
+            return self.generic_visit(node)
+
+    tree = ast.parse(original)
+    remover = RemoveRecentBudgetLoop()
+    changed_tree = remover.visit(tree)
+    assert remover.removed, "recent context budget loop"
+    runtime.write_text(ast.unparse(ast.fix_missing_locations(changed_tree)), encoding="utf-8")
+    run_f2_probe("unsupported")
+    print("xiaoling F2 probe: missing recent-context budget loop refused PASS")
+    runtime.write_text(original, encoding="utf-8")
+
+    class HideBudgetControl(ast.NodeTransformer):
+        def __init__(self, mode):
+            self.mode = mode
+            self.in_target = False
+            self.hidden = False
+
+        def visit_FunctionDef(self, node):
+            previous = self.in_target
+            self.in_target = node.name == "_render_runtime_context"
+            node = self.generic_visit(node)
+            self.in_target = previous
+            return node
+
+        def visit_If(self, node):
+            node = self.generic_visit(node)
+            if (self.in_target and self.mode == "guard"
+                    and "_MAX_CONTEXT_CHARS" in ast.unparse(node.test)):
+                self.hidden = True
+                return ast.If(test=ast.Constant(value=False), body=[node], orelse=[])
+            return node
+
+        def visit_For(self, node):
+            if (self.in_target and self.mode == "loop"
+                    and "reversed(rendered)" in ast.unparse(node.iter)):
+                self.hidden = True
+                return ast.If(test=ast.Constant(value=False), body=[node], orelse=[])
+            return self.generic_visit(node)
+
+    for mode, description in (
+        ("guard", "unreachable permission-context budget guard"),
+        ("loop", "unreachable recent-context budget loop"),
+    ):
+        tree = ast.parse(original)
+        hider = HideBudgetControl(mode)
+        changed_tree = hider.visit(tree)
+        assert hider.hidden, description
+        runtime.write_text(ast.unparse(ast.fix_missing_locations(changed_tree)), encoding="utf-8")
+        run_f2_probe("unsupported")
+        print(f"xiaoling F2 probe: {description} refused PASS")
+    runtime.write_text(original, encoding="utf-8")
+
     chat = root / "services/enterprise_chat_service.py"
     original = chat.read_text(encoding="utf-8")
     tree = ast.parse(original)
@@ -861,13 +1174,18 @@ with tempfile.TemporaryDirectory(prefix="prism-chat-authority-probe-") as tempor
 
     runtime = root / "services/enterprise_assistant_runtime_service.py"
     original = runtime.read_text(encoding="utf-8")
-    runtime.write_text(original.replace("if message.sender_authority_rank is None:", "if False:", 1), encoding="utf-8")
+    guard_start = original.index("def _assert_no_newer_authority_directive(")
+    guard_end = original.index("\ndef ", guard_start + 1)
+    guard = original[guard_start:guard_end]
+    legacy_directive_guard = 'message.sender_authority_rank is None and "@小菱" in (message.content or "")'
+    assert legacy_directive_guard in guard
+    runtime.write_text(
+        original[:guard_start] + guard.replace(legacy_directive_guard, "False", 1) + original[guard_end:],
+        encoding="utf-8",
+    )
     run_probe("unsupported")
     print("chat authority probe: runtime that revives unknown legacy authority refused PASS")
-    runtime.write_text(original.replace(
-        "if message.sender_authority_rank is None:",
-        "if message.sender_authority_rank is None and False:", 1,
-    ), encoding="utf-8")
+    runtime.write_text(original.replace("int(message.sender_authority_rank)", "0", 1), encoding="utf-8")
     run_probe("unsupported")
     print("chat authority probe: disabled legacy-rank branch refused PASS")
     runtime.write_text(original, encoding="utf-8")

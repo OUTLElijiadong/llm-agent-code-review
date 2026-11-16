@@ -36,11 +36,49 @@ def test_legacy_newer_directive_stays_stale_after_author_loses_access(records_db
     records_db.commit()
 
     assert clarification.status(records_db, enterprise_id=10, conversation_id=30, request_id=request.id) == "stale"
-
     member = records_db.query(EnterpriseMember).filter_by(enterprise_id=10, user_id=4).one()
     member.status = "removed"
     records_db.commit()
 
+    assert clarification.status(records_db, enterprise_id=10, conversation_id=30, request_id=request.id) == "stale"
+
+
+def test_legacy_prior_directive_with_unknown_rank_is_still_a_candidate(records_db):
+    prior = records_db.get(EnterpriseChatMessage, 100)
+    prior.content = "@小菱 迁移前的高权限指令"
+    prior.sender_authority_rank = None
+    author = records_db.query(EnterpriseMember).filter_by(enterprise_id=10, user_id=2).one()
+    author.status = "removed"
+    records_db.flush()
+    run = records_db.get(EnterpriseAssistantRun, 200)
+
+    _room, candidates, rows, _fingerprint, superseded = clarification._context(records_db, run)
+
+    assert [int(message.id) for message in candidates] == [100]
+    assert rows[100]["rank"] == 0
+    assert not superseded
+
+
+def test_prior_candidate_keeps_send_rank_after_demotion_and_invalidates_old_decision(records_db):
+    prior = records_db.get(EnterpriseChatMessage, 100)
+    prior.content = "@小菱 先不要创建团队"
+    prior.sender_authority_rank = 3
+    records_db.flush()
+    request = _request(records_db)
+    clarification.decide(records_db, enterprise_id=10, conversation_id=30, request_id=request.id,
+                         source_message_id=100, user_id=1, decision="allow")
+    records_db.commit()
+
+    member = records_db.query(EnterpriseMember).filter_by(enterprise_id=10, user_id=2).one()
+    member.role = "member"
+    records_db.commit()
+    run = records_db.get(EnterpriseAssistantRun, 200)
+    _room, candidates, rows, _fingerprint, superseded = clarification._context(records_db, run)
+
+    assert [int(message.id) for message in candidates] == [100]
+    assert rows[100]["message_authority_rank"] == 3
+    assert rows[100]["rank"] == 1
+    assert not superseded
     assert clarification.status(records_db, enterprise_id=10, conversation_id=30, request_id=request.id) == "stale"
 
 

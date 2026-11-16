@@ -3,15 +3,17 @@
 import asyncio
 from contextlib import nullcontext
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 
-from app.core.exceptions import AuthError, ForbiddenError
+from app.core.exceptions import AuthError, ForbiddenError, ValidationError
 from app.models.billing_ledger import BillingWallet
 from app.models.enterprise_assistant_runtime import EnterpriseAssistantRuntimeState
 from app.models.enterprise_chat import EnterpriseAssistantRun, EnterpriseChatMessage, EnterpriseConversation
 from app.models.enterprise_org import EnterpriseGroup, EnterpriseGroupMember, EnterpriseMember
 from app.models.user import User
+from app.services import enterprise_assistant_clarification_service as clarification
 from app.services import enterprise_assistant_runtime_service as runtime
 from app.services.deepseek_responses_runtime import WAITING_CLARIFICATION, PendingAction, RunCheckpoint, ToolCall
 
@@ -58,7 +60,7 @@ def test_owner_directive_requires_clarification_before_team_creation(records_db,
     assert calls == []
 
 
-def test_untagged_earlier_message_does_not_block_team_creation(records_db, monkeypatch):
+def test_untagged_higher_authority_message_requires_team_clarification(records_db, monkeypatch):
     state = records_db.get(EnterpriseAssistantRuntimeState, 300)
     room = records_db.get(EnterpriseConversation, 30)
     messages = (
@@ -98,8 +100,9 @@ def test_untagged_earlier_message_does_not_block_team_creation(records_db, monke
         raw_arguments="{}",
     )
     result = asyncio.run(executor.execute(call))
-    assert result.status == "success", result.error
-    assert len(calls) == 1
+    assert result.status == "clarification_required", result.error
+    assert [item["message_id"] for item in result.preview["candidates"]] == [100]
+    assert calls == []
 
 
 @pytest.mark.parametrize("kind", ["group", "direct"])
@@ -126,7 +129,7 @@ def test_explicit_owner_directive_is_scoped_to_group_or_direct_room(records_db, 
     assert preview["candidates"][0]["author_id"] == 1
 
 
-def test_directive_outside_frozen_30_messages_is_not_candidate(records_db, monkeypatch):
+def test_untagged_higher_authority_message_outside_frozen_30_is_candidate(records_db, monkeypatch):
     records_db.add_all(
         [
             EnterpriseChatMessage(
@@ -136,7 +139,7 @@ def test_directive_outside_frozen_30_messages_is_not_candidate(records_db, monke
                 sender_id=1 if i == 10 else 3,
                 sender_type="human",
                 client_message_id=f"old-{i}",
-                content="@小菱 不要建队" if i == 10 else "日常消息",
+                content="不要建队" if i == 10 else "日常消息",
             )
             for i in range(10, 45)
         ]
@@ -168,7 +171,9 @@ def test_directive_outside_frozen_30_messages_is_not_candidate(records_db, monke
         actor_user_id=3,
     )
     monkeypatch.setattr(executor, "_current", lambda: (state, {}))
-    monkeypatch.setattr(runtime.enterprise_agent_team_service, "create_team_from_assistant", lambda *_a, **_k: {})
+    calls = []
+    monkeypatch.setattr(runtime.enterprise_agent_team_service, "create_team_from_assistant",
+                        lambda *_a, **_k: calls.append(True) or {})
     from app.models.billing_ledger import BillingWallet
 
     records_db.add(BillingWallet(owner_type="enterprise", owner_id=10))
@@ -181,13 +186,160 @@ def test_directive_outside_frozen_30_messages_is_not_candidate(records_db, monke
         arguments={"title": "团队"},
         raw_arguments="{}",
     )
-    assert asyncio.run(executor.execute(call)).status == "success"
+    result = asyncio.run(executor.execute(call))
+    assert result.status == "clarification_required"
+    assert any(candidate["message_id"] == 10 for candidate in result.preview["candidates"])
+    assert calls == []
+
+    prompt, _refs = runtime._render_runtime_context(
+        records_db,
+        enterprise_id=10,
+        user_id=3,
+        room=room,
+        source=records_db.get(EnterpriseChatMessage, 101),
+        snapshot=snapshot,
+    )
+    assert "【消息 10 ·" in prompt
+    assert "不要建队" in prompt
+
+
+def test_only_completed_xiaoling_answer_closes_prior_discussion_scope(records_db):
+    prior_source = records_db.get(EnterpriseChatMessage, 101)
+    records_db.delete(prior_source)
+    records_db.flush()
+    prior_run = EnterpriseAssistantRun(
+        id=199,
+        public_id="prior-placeholder-run",
+        request_key="prior-placeholder-run",
+        enterprise_id=10,
+        conversation_id=30,
+        initiator_user_id=3,
+        source_message_id=100,
+        prompt_sha256="b" * 64,
+        status="running",
+    )
+    records_db.add(prior_run)
+    records_db.flush()
+    assistant_reply = EnterpriseChatMessage(
+        id=105, enterprise_id=10, conversation_id=30, sender_id=None, sender_type="assistant",
+        assistant_run_id=199, client_message_id="prior-placeholder-run", content="需要先确认会话指令",
+    )
+    next_source = EnterpriseChatMessage(
+        id=106, enterprise_id=10, conversation_id=30, sender_id=3, sender_type="human",
+        client_message_id="next-source", content="@小菱 创建团队",
+    )
+    records_db.add_all([assistant_reply, next_source])
+    run = records_db.get(EnterpriseAssistantRun, 200)
+    state = records_db.get(EnterpriseAssistantRuntimeState, 300)
+    run.source_message_id = 106
+    state.source_message_id = 106
+    records_db.flush()
+    room = records_db.get(EnterpriseConversation, 30)
+    snapshot = runtime._role_snapshot(
+        records_db, enterprise_id=10, room=room, messages=[assistant_reply, next_source], initiator_id=3,
+    )
+    state.permission_snapshot_json = runtime._json(snapshot)
+    state.permission_snapshot_sha256 = runtime._digest(snapshot)
+    records_db.flush()
+
+    _room, candidates, _rows, _fingerprint, superseded = clarification._context(records_db, run)
+
+    assert [message.id for message in candidates] == [100]
+    assert not superseded
+
+    prior_run.status = "completed"
+    prior_run.response_text = "上一轮已完成"
+    assistant_reply.content = "上一轮已完成"
+    records_db.flush()
+
+    _room, candidates, _rows, _fingerprint, superseded = clarification._context(records_db, run)
+
+    assert candidates == []
+    assert not superseded
+
+
+def test_authority_candidate_limit_fails_closed():
+    messages = [
+        SimpleNamespace(
+            id=index,
+            sender_type="human",
+            sender_id=1,
+            sender_authority_rank=2,
+            content="请先暂停",
+        )
+        for index in range(runtime._MAX_AUTHORITY_CANDIDATES + 1)
+    ]
+    rows_by_id = {message.id: {"rank": 2} for message in messages}
+
+    with pytest.raises(ValidationError, match="权限消息过多"):
+        runtime._authority_candidate_messages(
+            messages,
+            rows_by_id,
+            initiator_id=3,
+            initiator_rank=1,
+        )
+
+
+@pytest.mark.parametrize(
+    ("recorded_rank", "current_rank", "content", "expected_candidate"),
+    [
+        (3, 1, "暂停这个任务", True),
+        (1, 3, "普通成员当时的发言", False),
+        (None, 3, "迁移前的普通消息", True),
+        (None, 0, "@小菱 迁移前的未知权限消息", True),
+    ],
+)
+def test_prior_authority_uses_send_rank_and_legacy_fallback(
+    recorded_rank, current_rank, content, expected_candidate,
+):
+    message = SimpleNamespace(
+        id=88,
+        sender_type="human",
+        sender_id=2,
+        sender_authority_rank=recorded_rank,
+        content=content,
+    )
+    candidates = runtime._authority_candidate_messages(
+        [message], {88: {"rank": current_rank}}, initiator_id=3, initiator_rank=2,
+    )
+    assert bool(candidates) is expected_candidate
+
+
+def test_post_source_message_scan_limit_fails_closed(records_db):
+    run = records_db.get(EnterpriseAssistantRun, 200)
+    room = records_db.get(EnterpriseConversation, 30)
+    records_db.add_all(
+        EnterpriseChatMessage(
+            enterprise_id=10,
+            conversation_id=30,
+            sender_id=3,
+            sender_type="human",
+            client_message_id=f"post-source-flood-{index}",
+            content="继续讨论",
+            sender_authority_rank=1,
+        )
+        for index in range(runtime._MAX_DISCUSSION_MESSAGES + 1)
+    )
+    records_db.commit()
+
+    with pytest.raises(ForbiddenError, match="后续消息超过安全处理上限"):
+        runtime._assert_no_newer_authority_directive(
+            records_db,
+            enterprise_id=10,
+            room=room,
+            source_message_id=101,
+            initiator_id=3,
+            initiator_rank=1,
+        )
+    with pytest.raises(ForbiddenError, match="后续消息超过安全处理上限"):
+        clarification._context(records_db, run)
 
 
 def test_initial_team_write_rolls_back_if_subscription_expires_after_flush(records_db, monkeypatch):
     from app.models.project import Project
 
     earlier = records_db.get(EnterpriseChatMessage, 100)
+    earlier.sender_id = 3
     earlier.content = "普通讨论，没有指令"
     state = records_db.get(EnterpriseAssistantRuntimeState, 300)
     room = records_db.get(EnterpriseConversation, 30)

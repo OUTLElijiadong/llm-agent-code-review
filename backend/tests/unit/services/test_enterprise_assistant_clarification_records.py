@@ -18,6 +18,7 @@ from app.models.enterprise_org import Enterprise, EnterpriseMember
 from app.models.user import User
 from app.services import enterprise_assistant_clarification_service as clarification
 from app.services import enterprise_assistant_runtime_service as runtime
+from app.services import enterprise_chat_service
 
 
 @pytest.fixture
@@ -94,17 +95,21 @@ def test_request_binds_exact_action_and_is_idempotent(records_db):
     source = rows[int(run.source_message_id)]
     source_message = records_db.get(EnterpriseChatMessage, int(run.source_message_id))
     legacy_fingerprint = clarification._digest({
-        "initiator_rank": int(source["rank"]),
+        "initiator_rank": int(source["message_authority_rank"]),
         "initiator_role": source.get("member_role"),
         "initiator_group_role": source.get("group_role"),
         "source_content": clarification._digest({"text": source_message.content}),
         "messages": [{
             "id": int(message.id), "author": int(message.sender_id),
-            "rank": int(rows[int(message.id)]["rank"]),
+            "rank": int(rows[int(message.id)]["message_authority_rank"]),
+            "current_rank": int(rows[int(message.id)]["rank"]),
             "member_role": rows[int(message.id)].get("member_role"),
             "group_role": rows[int(message.id)].get("group_role"),
+            "recorded_rank": (int(message.sender_authority_rank)
+                              if message.sender_authority_rank is not None else None),
             "content": clarification._digest({"text": message.content}),
         } for message in candidates],
+        "newer_messages": [],
     })
     assert first.authority_sha256 == legacy_fingerprint
     records_db.commit()
@@ -149,6 +154,30 @@ def test_expiry_or_new_higher_message_invalidates_prior_decision(records_db):
     request.expires_at = clarification._now() - timedelta(seconds=1)
     records_db.commit()
     assert clarification.status(records_db, enterprise_id=10, conversation_id=30, request_id=request.id) == "expired"
+
+
+def test_lower_authority_followup_does_not_supersede_but_initiator_followup_does(records_db):
+    member = records_db.query(EnterpriseMember).filter_by(enterprise_id=10, user_id=3).one()
+    member.role = "admin"
+    records_db.flush()
+    request = _request(records_db)
+    records_db.commit()
+
+    lower = enterprise_chat_service.send_message(
+        records_db, 10, 4, 30, "lower-followup", "补充一个背景",
+    )
+    records_db.commit()
+    assert lower.sender_authority_rank == 1
+    assert clarification.status(records_db, enterprise_id=10, conversation_id=30,
+                                request_id=request.id) == "waiting"
+
+    own = enterprise_chat_service.send_message(
+        records_db, 10, 3, 30, "initiator-followup", "我再补充一条",
+    )
+    records_db.commit()
+    assert own.sender_authority_rank == 3
+    assert clarification.status(records_db, enterprise_id=10, conversation_id=30,
+                                request_id=request.id) == "stale"
 
 
 def test_changed_authority_creates_new_version_and_preserves_old_decisions(records_db):

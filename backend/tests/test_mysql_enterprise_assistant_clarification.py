@@ -210,7 +210,7 @@ def test_sent_directive_rank_survives_author_revocation_and_is_immutable(fresh_c
                               request_id=request_id) == "stale"
 
 
-def test_lower_authority_and_initiator_followup_do_not_supersede(fresh_chain):
+def test_lower_authority_does_not_supersede_but_initiator_followup_does(fresh_chain):
     factory, enterprise_id, group_id, _owner_id, _author_id, room_id, run_public_id = _seed(fresh_chain)
     with factory.begin() as db:
         run = db.query(EnterpriseAssistantRun).filter_by(public_id=run_public_id).one()
@@ -242,12 +242,18 @@ def test_lower_authority_and_initiator_followup_do_not_supersede(fresh_chain):
         lower_message = enterprise_chat_service.send_message(
             db, enterprise_id, lower_id, room_id, "lower-directive", "@小菱 请继续",
         )
-        own_message = enterprise_chat_service.send_message(
-            db, enterprise_id, actor_id, room_id, "initiator-followup", "@小菱 我补充说明",
-        )
         assert lower_message.sender_authority_rank == 1
-        assert own_message.sender_authority_rank == 3
 
     with factory.begin() as db:
         assert service.status(db, enterprise_id=enterprise_id, conversation_id=room_id,
                               request_id=request_id) == "waiting"
+
+    with factory() as db:
+        own_message = enterprise_chat_service.send_message(
+            db, enterprise_id, actor_id, room_id, "initiator-followup", "补充说明",
+        )
+        assert own_message.sender_authority_rank == 3
+
+    with factory.begin() as db:
+        assert service.status(db, enterprise_id=enterprise_id, conversation_id=room_id,
+                              request_id=request_id) == "stale"

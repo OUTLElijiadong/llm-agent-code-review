@@ -156,6 +156,10 @@ def test_mysql_directive_snapshot_is_required_and_message_is_immutable(fresh_cha
         )
         directive_id = int(directive.id)
         assert directive.sender_authority_rank == 3
+        ordinary = enterprise_chat_service.send_message(
+            db, enterprise_id, author_id, room_id, "ordinary-authority", "请先暂停并核对",
+        )
+        assert ordinary.sender_authority_rank == 3
     with sessions() as db:
         directive = db.get(EnterpriseChatMessage, directive_id)
         params = {
