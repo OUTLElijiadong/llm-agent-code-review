@@ -37,7 +37,7 @@ fresh_chain_url = chain.fresh_chain_url
 verified_model_catalog = chain.verified_model_catalog
 
 
-def _seed(factory, *, ordinary_message_indexes=frozenset()):
+def _seed(factory, *, ordinary_message_indexes=frozenset(), first_user_enterprise_role="member"):
     suffix = uuid4().hex[:12]
     permission, plan, capability = {"messages": []}, {"project_id": None}, {"execution_mode": "model_only"}
     with factory.begin() as db:
@@ -59,8 +59,9 @@ def _seed(factory, *, ordinary_message_indexes=frozenset()):
         db.add(group)
         db.flush()
         db.add(EnterpriseMember(enterprise_id=company.id, user_id=owner.id, role="owner", status="active"))
-        for user in users:
-            db.add(EnterpriseMember(enterprise_id=company.id, user_id=user.id, role="member", status="active"))
+        for index, user in enumerate(users):
+            member_role = first_user_enterprise_role if index == 0 else "member"
+            db.add(EnterpriseMember(enterprise_id=company.id, user_id=user.id, role=member_role, status="active"))
             db.add(
                 EnterpriseGroupMember(
                     enterprise_id=company.id, group_id=group.id, user_id=user.id, role="member", status="active"
@@ -84,7 +85,11 @@ def _seed(factory, *, ordinary_message_indexes=frozenset()):
                 sender_type="human",
                 client_message_id=f"message-{suffix}-{index}",
                 content="普通消息" if index in ordinary_message_indexes else "@小菱 执行任务",
-                sender_authority_rank=None if index in ordinary_message_indexes else 1,
+                sender_authority_rank=(
+                    None if index in ordinary_message_indexes
+                    else 3 if index == 0 and first_user_enterprise_role == "admin"
+                    else 1
+                ),
             )
             db.add(message)
             db.flush()
@@ -487,7 +492,9 @@ def test_live_team_authorization_does_not_serialize_independent_members(fresh_ch
     _ready(monkeypatch)
     monkeypatch.setattr(parent_runtime, "_live_role_snapshot", real_live_snapshot)
     factory = sessionmaker(bind=fresh_chain, autoflush=False, expire_on_commit=False)
-    company, _group, _owner, _users, tasks, teams = _seed(factory, ordinary_message_indexes={1})
+    company, _group, _owner, _users, tasks, teams = _seed(
+        factory, ordinary_message_indexes={1}, first_user_enterprise_role="admin",
+    )
     _install_live_snapshots(factory, company, teams, legacy=True)
     held, release, started = Event(), Event(), Event()
     writer_ids = []

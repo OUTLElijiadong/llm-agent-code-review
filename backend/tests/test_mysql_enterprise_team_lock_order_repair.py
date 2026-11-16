@@ -93,7 +93,9 @@ def test_team_cancel_and_worker_take_parent_before_company(fresh_chain, monkeypa
     _ready(monkeypatch)
     monkeypatch.setattr(parent_runtime, '_live_role_snapshot', real_snapshot)
     factory = sessionmaker(bind=fresh_chain, autoflush=False, expire_on_commit=False)
-    company, _group, owner, _users, tasks, teams = _seed(factory, ordinary_message_indexes={1})
+    company, _group, owner, _users, tasks, teams = _seed(
+        factory, ordinary_message_indexes={1}, first_user_enterprise_role="admin",
+    )
     _install_live_snapshots(factory, company, teams, legacy=True)
     held, release, started = Event(), Event(), Event()
     worker_id, cancel_cid = [], []
@@ -152,7 +154,9 @@ def test_real_retry_and_team_do_not_invert_parent_company_locks(fresh_chain, mon
     _ready(monkeypatch)
     monkeypatch.setattr(parent_runtime, '_live_role_snapshot', real_snapshot)
     factory = sessionmaker(bind=fresh_chain, autoflush=False, expire_on_commit=False)
-    company, _group, _owner, users, tasks, teams = _seed(factory, ordinary_message_indexes={1})
+    company, _group, _owner, users, tasks, teams = _seed(
+        factory, ordinary_message_indexes={1}, first_user_enterprise_role="admin",
+    )
     _install_live_snapshots(factory, company, teams, legacy=True)
     with factory() as db:
         team_row = db.get(EnterpriseAgentTeam, teams[0])
@@ -223,7 +227,9 @@ def test_real_retry_first_does_not_deadlock_team(fresh_chain, monkeypatch):
     _ready(monkeypatch)
     monkeypatch.setattr(parent_runtime, '_live_role_snapshot', real_snapshot)
     factory = sessionmaker(bind=fresh_chain, autoflush=False, expire_on_commit=False)
-    company, _group, _owner, users, tasks, teams = _seed(factory, ordinary_message_indexes={1})
+    company, _group, _owner, users, tasks, teams = _seed(
+        factory, ordinary_message_indexes={1}, first_user_enterprise_role="admin",
+    )
     _install_live_snapshots(factory, company, teams, legacy=True)
     with factory() as db:
         team_row = db.get(EnterpriseAgentTeam, teams[0])
@@ -367,7 +373,9 @@ def test_team_first_fences_revocation_and_next_execution_rechecks(fresh_chain, m
     _ready(monkeypatch)
     monkeypatch.setattr(parent_runtime, '_live_role_snapshot', real_snapshot)
     factory = sessionmaker(bind=fresh_chain, autoflush=False, expire_on_commit=False)
-    company, group, owner, users, tasks, teams = _seed(factory, ordinary_message_indexes={1})
+    company, group, owner, users, tasks, teams = _seed(
+        factory, ordinary_message_indexes={1}, first_user_enterprise_role="admin",
+    )
     _install_live_snapshots(factory, company, teams, legacy=True)
     held, release, started, finished = Event(), Event(), Event(), Event()
     writer_cid = []
