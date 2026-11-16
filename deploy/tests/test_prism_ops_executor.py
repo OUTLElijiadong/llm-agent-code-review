@@ -299,6 +299,22 @@ def test_backup_audit_and_restore_lookup_use_configured_backup_dir(tmp_path: Pat
     assert lookup == backup.resolve()
 
 
+def test_backup_file_enforces_schema_filename_limit(tmp_path: Path, monkeypatch) -> None:
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    monkeypatch.setenv("BACKUP_DIR", str(backup_dir))
+
+    max_length_name = f"code_review_{'a' * 181}.sql.gz"
+    (backup_dir / max_length_name).write_bytes(b"gzip placeholder")
+    assert len(max_length_name) == 200
+    assert executor._backup_file(max_length_name) == (backup_dir / max_length_name).resolve()
+
+    oversized_name = f"code_review_{'a' * 182}.sql.gz"
+    assert len(oversized_name) == 201
+    with pytest.raises(ValueError, match="备份文件名不合法"):
+        executor._backup_file(oversized_name)
+
+
 def test_ledger_is_atomic_and_request_digest_binds_arguments(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(executor, "LEDGER_DIR", tmp_path / "ledger")
     first_digest = executor._request_digest("host_inventory", {})
@@ -826,7 +842,9 @@ def test_db_container_watchdog_kills_term_ignoring_client_after_host_detaches(tm
         os.kill(mysql_pid, 0)  # 客户端取消本身并未终止内部进程。
         deadline = time.monotonic() + 4
         while time.monotonic() < deadline:
-            status = subprocess.run(["ps", "-p", str(mysql_pid), "-o", "stat="], capture_output=True, text=True)
+            status = subprocess.run(
+                ["ps", "-p", str(mysql_pid), "-o", "stat="], check=False, capture_output=True, text=True,
+            )
             if not status.stdout.strip() or status.stdout.strip().startswith("Z"):
                 break
             time.sleep(0.02)
