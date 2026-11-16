@@ -315,6 +315,17 @@ case "${1:-}" in
       build) : ;;
       exec)
         case "$*" in
+          *'prism_billing_evidence_schema'*)
+            evidence_state="${FAKE_BILLING_EVIDENCE_SCHEMA_STATE:-absent}"
+            if [[ -n "${FAKE_BILLING_EVIDENCE_SCHEMA_FILE:-}" && -f "$FAKE_BILLING_EVIDENCE_SCHEMA_FILE" ]]; then
+              IFS= read -r evidence_state < "$FAKE_BILLING_EVIDENCE_SCHEMA_FILE"
+            fi
+            case "$evidence_state" in
+              absent) printf '{"table_count":1,"columns":[],"checks":[]}\n' ;;
+              complete) cat "${FAKE_BILLING_EVIDENCE_COMPLETE_FIXTURE:?}" ;;
+              partial) printf '{"table_count":1,"columns":[{}],"checks":[]}\n' ;;
+              invalid) exit 71 ;;
+            esac ;;
           *'prism_chat_authority_schema'*)
             chat_state="${FAKE_CHAT_AUTHORITY_SCHEMA_STATE:-absent}"
             if [[ -n "${FAKE_CHAT_AUTHORITY_SCHEMA_FILE:-}" && -f "$FAKE_CHAT_AUTHORITY_SCHEMA_FILE" ]]; then
@@ -404,7 +415,14 @@ case "${1:-}" in
     case "$*" in
       *'--entrypoint python'* )
         probe_body="$(cat)"
-        if [[ "$probe_body" == *'Probe the Xiaoling F2 authority contract'* ]]; then
+        if [[ "$probe_body" == *'Check pinned, reviewed 121 evidence reader'* ]]; then
+          [[ "${FAKE_BILLING_EVIDENCE_PROBE_FAILURE:-0}" != 1 ]] || exit 76
+          if [[ -n "${FAKE_BILLING_OLD_IMAGE_ID:-}" && "$*" == *"$FAKE_BILLING_OLD_IMAGE_ID"* ]]; then
+            printf '%s\n' "${FAKE_BILLING_OLD_CAPABILITY:-unsupported}"
+          else
+            printf '%s\n' "${FAKE_BILLING_EVIDENCE_CAPABILITY:-supported}"
+          fi
+        elif [[ "$probe_body" == *'Probe the Xiaoling F2 authority contract'* ]]; then
           printf '%s\n' 'xiaoling_f2_probe_invoked' >> "${FAKE_DOCKER_LOG:?FAKE_DOCKER_LOG is required}"
           [[ "${FAKE_XIAOLING_F2_PROBE_FAILURE:-0}" != 1 ]] || exit 75
           if [[ -n "${FAKE_XIAOLING_F2_TARGET_IMAGE_ID:-}" && "$*" == *"$FAKE_XIAOLING_F2_TARGET_IMAGE_ID"* ]]; then
@@ -440,6 +458,11 @@ case "${1:-}" in
           echo "$alembic_revision"
         fi ;;
       *'upgrade head'*)
+        if [[ "$alembic_head" == "121_billing_model_evidence" ]]; then
+          [[ -z "${FAKE_DB_REVISION_FILE:-}" ]] || printf '%s\n' "$alembic_head" > "$FAKE_DB_REVISION_FILE"
+          [[ -z "${FAKE_CHAT_AUTHORITY_SCHEMA_FILE:-}" ]] || printf 'complete\n' > "$FAKE_CHAT_AUTHORITY_SCHEMA_FILE"
+          [[ -z "${FAKE_BILLING_EVIDENCE_SCHEMA_FILE:-}" ]] || printf 'complete\n' > "$FAKE_BILLING_EVIDENCE_SCHEMA_FILE"
+        fi
         if [[ "$alembic_head" == "119_chat_message_authority" || "$alembic_head" == "120_chat_authority_fixture" ]]; then
           [[ -z "${FAKE_DB_REVISION_FILE:-}" ]] || printf '%s\n' "$alembic_head" > "$FAKE_DB_REVISION_FILE"
           [[ -z "${FAKE_CHAT_AUTHORITY_SCHEMA_FILE:-}" ]] || printf 'complete\n' > "$FAKE_CHAT_AUTHORITY_SCHEMA_FILE"
@@ -468,6 +491,7 @@ run_release_binding_case() {
   [[ ! -f lib/xiaoling_f2_compatibility.py ]] || cp lib/xiaoling_f2_compatibility.py "$workspace/deploy/lib/"
   [[ ! -f lib/chat_authority_schema_compatibility.py ]] || cp lib/chat_authority_schema_compatibility.py "$workspace/deploy/lib/"
   [[ ! -f lib/alembic_revision_compatibility.py ]] || cp lib/alembic_revision_compatibility.py "$workspace/deploy/lib/"
+  cp lib/billing_evidence_compatibility.py lib/billing_evidence_schema_compatibility.py "$workspace/deploy/lib/"
   cp -R ../backend/alembic/versions "$workspace/backend/alembic/"
   python3 "$workspace/deploy/lib/chat_authority_schema_compatibility.py" \
     "$workspace/backend/alembic/versions/119_chat_message_authority.py" --fixture \
@@ -2533,6 +2557,7 @@ run_deploy_failure_rollback_simulation() {
   cp lib/common.sh "$repo/deploy/lib/common.sh"
   cp lib/alembic_revision_compatibility.py "$repo/deploy/lib/alembic_revision_compatibility.py"
   cp lib/chat_authority_schema_compatibility.py "$repo/deploy/lib/chat_authority_schema_compatibility.py"
+  cp lib/billing_evidence_compatibility.py lib/billing_evidence_schema_compatibility.py "$repo/deploy/lib/"
   cp -R ../backend/alembic/versions "$repo/backend/alembic/"
   printf '%s\n' '3.7.0' > "$repo/VERSION"
   printf '%s\n' 'test database' > "$repo/backend/GeoLite2-City.mmdb"

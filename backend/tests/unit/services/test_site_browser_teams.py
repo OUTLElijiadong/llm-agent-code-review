@@ -11,6 +11,7 @@ from app.core.permission_codes import PermissionCode
 from app.models.agent_browser_action import AgentBrowserAction
 from app.models.agent_response_run import AgentResponseRun
 from app.models.agent_team import AgentTeam, AgentTeamEvent, AgentTeamTask
+from app.models.enterprise_org import EnterpriseMember
 from app.models.rbac import Permission, Role, RolePermission, UserRole
 from app.models.user import User
 from app.schemas.agent_browser import BrowserAckIn
@@ -64,7 +65,7 @@ def create(db, owner, *, plan=None, confirmed=False):
         )
 
 
-async def observe(db, owner, *, controls=None):
+async def observe(db, owner, *, controls=None, expected_args=None, route="/forum"):
     # 使用与真实客户端相同的 pending -> claim -> ack，不 mock 页面服务。
     for _ in range(100):
         pending = browser.pending_actions(db, owner, run_id="page-team-run",
@@ -72,7 +73,7 @@ async def observe(db, owner, *, controls=None):
         if pending:
             event = pending[0]
             assert event["account_id"] == owner.id
-            assert event["args"] == {}
+            assert event["args"] == (expected_args or {})
             assert db.query(AgentResponseRun).filter_by(run_id=event["run_id"]).one().id
             claim = browser.claim_action(db, owner, event["action_id"], session_key=event["session_id"],
                                          surface=event["surface"], nonce=event["client_nonce"])
@@ -80,7 +81,7 @@ async def observe(db, owner, *, controls=None):
                 "session_id": event["session_id"], "surface": event["surface"],
                 "client_nonce": event["client_nonce"], "claim_token": claim["claim_token"],
                 "outcome": "completed", "observation": {
-                    "snapshot_id": event["observation_snapshot_id"], "route": "/forum", "title": "真实论坛",
+                    "snapshot_id": event["observation_snapshot_id"], "route": route, "title": "当前页面",
                     "controls": controls or [], "messages": ["实际页面观察"],
                 },
             }))
@@ -107,9 +108,7 @@ def test_page_contract_is_discoverable_and_coordinator_stays_coordination_only(d
     schemas = asyncio.run(executor.tool_schemas())
     names = {item["name"] for item in schemas}
     assert "list_agents" in names and "create_agent_team" in names
-    # 协调者只拿到无副作用的页面引导（跳转/滚动/观察）；改变页面状态的动作仍走 site_operator 团队。
-    page = next(item for item in schemas if item["name"] == "operate_current_page")
-    assert set(page["parameters"]["properties"]["action"]["enum"]) == {"navigate", "scroll", "inspect"}
+    assert "operate_current_page" not in names
 
 
 @pytest.mark.asyncio
@@ -122,7 +121,7 @@ async def test_real_member_inspect_and_verifier_keep_client_observed_boundary(db
     }]))
     assert result["status"] == "completed"
     receipt = result["result_receipt"]
-    assert receipt["output"]["observation"]["title"] == "真实论坛"
+    assert receipt["output"]["observation"]["title"] == "当前页面"
     assert receipt["output"]["observation"]["controls"][0]["label"] == "新建帖子"
     assert receipt["output"]["verification_status"] == "client_observed"
     assert receipt["output"]["server_verified"] is False
@@ -138,6 +137,42 @@ async def test_real_member_inspect_and_verifier_keep_client_observed_boundary(db
     assert verified["result_receipt"]["output"]["verification_status"] == "client_observed"
     assert verified["result_receipt"]["output"]["server_verified"] is False
     assert "page_action" not in verified["result_receipt"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("action", "args"), [
+    ("navigate", {"route": "/forum"}), ("scroll", {"direction": "down"}),
+])
+async def test_real_member_navigation_and_scroll_use_team_and_browser_receipt(db, owner, monkeypatch, action, args):
+    monkeypatch.setattr(browser, "POLL_SECONDS", .001)
+    created = create(db, owner, plan=payload(action=action, args=args))
+    claim = agent_team_service.claim_next_task(db, created["team_id"], lease_seconds=60)
+    result, event = await asyncio.gather(execute(db, owner, created, claim),
+                                         observe(db, owner, expected_args=args))
+    assert event["action"] == action
+    assert result["status"] == "completed"
+    assert result["result_receipt"]["output"]["verification_status"] == "client_observed"
+    agent_team_service.complete_task(db, created["team_id"], claim["task_id"],
+                                    lease_token=claim["lease_token"], result=result, success=True)
+    verifier = agent_team_service.claim_next_task(db, created["team_id"], lease_seconds=60)
+    verified = await execute(db, owner, created, verifier)
+    assert verified["status"] == "completed"
+    assert verified["result_receipt"]["output"]["server_verified"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("action", "args"), [("navigate", {"route": "/enterprise"}), ("inspect", {})])
+async def test_enterprise_member_uses_real_team_page_bridge(db, owner, monkeypatch, action, args):
+    db.add(EnterpriseMember(enterprise_id=101, user_id=owner.id, role="member", status="active"))
+    db.commit()
+    monkeypatch.setattr(browser, "POLL_SECONDS", .001)
+    created = create(db, owner, plan=payload(action=action, args=args))
+    claim = agent_team_service.claim_next_task(db, created["team_id"], lease_seconds=60)
+    result, event = await asyncio.gather(execute(db, owner, created, claim),
+                                         observe(db, owner, expected_args=args, route="/enterprise"))
+    assert event["action"] == action and event["account_id"] == owner.id
+    assert result["status"] == "completed"
+    assert result["result_receipt"]["output"]["verification_status"] == "client_observed"
 
 
 def test_page_team_requires_persisted_matching_parent_run(db, owner):

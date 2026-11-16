@@ -351,6 +351,93 @@ SQL
   esac
 }
 
+# Migration 121 adds independently reviewed billing evidence. MySQL DDL can
+# stop between its two columns and CHECK; revision alone is not sufficient.
+billing_evidence_database_state() {
+  local result schema_state probe_file
+  result="$(checkpoint_database_query "$(cat <<'SQL'
+    SELECT /*+ MAX_EXECUTION_TIME(15000) */ /* prism_billing_evidence_schema */
+      JSON_OBJECT(
+        'table_count', (SELECT COUNT(*) FROM information_schema.tables
+          WHERE table_schema = DATABASE() AND table_name = 'billing_reservation_reconciliation_event'
+            AND table_type = 'BASE TABLE'),
+        'columns', COALESCE((SELECT JSON_ARRAYAGG(JSON_OBJECT(
+          'name', column_name, 'type', data_type, 'nullable', is_nullable,
+          'default', column_default, 'extra', extra)) FROM information_schema.columns
+          WHERE table_schema = DATABASE() AND table_name = 'billing_reservation_reconciliation_event'
+            AND column_name IN ('model_search_calls_evidence', 'model_fetch_calls_evidence')), JSON_ARRAY()),
+        'checks', COALESCE((SELECT JSON_ARRAYAGG(JSON_OBJECT('enforced', tc.enforced, 'clause', cc.check_clause))
+          FROM information_schema.table_constraints tc JOIN information_schema.check_constraints cc
+            ON cc.constraint_schema = tc.constraint_schema AND cc.constraint_name = tc.constraint_name
+          WHERE tc.constraint_schema = DATABASE() AND tc.table_name = 'billing_reservation_reconciliation_event'
+            AND tc.constraint_name = 'ck_billing_res_recon_model_evidence' AND tc.constraint_type = 'CHECK'),
+          JSON_ARRAY())
+      )
+SQL
+  )" | tr -d '\r')" || return 1
+  probe_file="$(dirname "${BASH_SOURCE[0]}")/billing_evidence_schema_compatibility.py"
+  [[ -r "$probe_file" ]] || return 1
+  schema_state="$(printf '%s' "$result" | python3 "$probe_file")" || return 1
+  case "$schema_state" in
+    absent|complete|partial) printf '%s\n' "$schema_state" ;;
+    *) return 1 ;;
+  esac
+}
+
+assert_billing_evidence_image_compatible() {
+  local image_id="$1" capability probe_file
+  probe_file="$(dirname "${BASH_SOURCE[0]}")/billing_evidence_compatibility.py"
+  [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ && -r "$probe_file" ]] \
+    || fatal "计费证据兼容检查缺少镜像或探针"
+  capability="$(docker run --rm -i --memory 128m --pids-limit 32 \
+    --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+    --entrypoint python "$image_id" - < "$probe_file")" \
+    || fatal "计费证据镜像检查执行失败，拒绝启动"
+  [[ "$capability" == supported ]] \
+    || fatal "目标镜像未通过 121 计费证据兼容检查，拒绝切换并前向修复"
+  log_info "计费证据镜像身份检查通过(image=$image_id)"
+}
+
+# Stop on partial/unknown schema or revision drift, even when no evidence rows
+# currently exist. External writers do not participate in the release lock.
+assert_billing_evidence_database_compatible() {
+  local marker="$1" revision schema relation versions_dir revision_probe
+  if ! schema="$(billing_evidence_database_state)"; then
+    stop_chat_authority_writers
+    fatal "无法读取 121 计费证据结构；Backend 已停，拒绝切换"
+  fi
+  revision="$(current_alembic_revision)"
+  if [[ "$revision" == unknown || "$revision" == ambiguous ]]; then
+    stop_chat_authority_writers
+    fatal "无法确定 121 计费证据迁移版本；Backend 已停，拒绝切换"
+  fi
+  if ! versions_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../backend/alembic/versions" && pwd -P)"; then
+    stop_chat_authority_writers
+    fatal "121 计费证据迁移图不可读；Backend 已停，拒绝切换"
+  fi
+  revision_probe="$(dirname "${BASH_SOURCE[0]}")/alembic_revision_compatibility.py"
+  if ! relation="$(python3 "$revision_probe" "$versions_dir" "$revision" "121_billing_model_evidence")"; then
+    stop_chat_authority_writers
+    fatal "无法确认 121 计费证据迁移链；Backend 已停，拒绝切换"
+  fi
+  if [[ -e "$marker" || -L "$marker" ]]; then
+    [[ -f "$marker" && ! -L "$marker" && -r "$marker" ]] \
+      || fatal "计费证据激活标记无法安全读取，拒绝切换"
+    if [[ "$schema" != complete || "$relation" != compatible ]]; then
+      stop_chat_authority_writers
+      fatal "计费证据激活标记与数据库结构/版本不一致；Backend 已停，需前向核验"
+    fi
+  fi
+  if [[ "$schema" == absent && "$relation" == descendant ]]; then
+    BILLING_EVIDENCE_DATABASE_STATE=absent
+  elif [[ "$schema" == complete && "$relation" == compatible ]]; then
+    BILLING_EVIDENCE_DATABASE_STATE=complete
+  else
+    stop_chat_authority_writers
+    fatal "121 计费证据结构不完整或与迁移版本不一致；Backend 已停，需前向修复"
+  fi
+}
+
 # 检查目标 Backend 镜像是否实现迁移 119 的消息写入和权限快照读取契约。
 # 参数: $1 已按 digest 绑定的 Backend 镜像。
 # 返回: 完整实现时 0；未知、旧版本或 probe 故障时终止发布/回滚。

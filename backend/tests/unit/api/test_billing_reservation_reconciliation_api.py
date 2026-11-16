@@ -171,6 +171,60 @@ def test_reservation_reconciliation_api_is_super_admin_only_and_dual_approved():
         engine.dispose()
 
 
+def test_external_zero_counts_api_preserves_absent_provider_usage():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)()
+    admins = {
+        1: User(id=1, username="evidence-admin-one", password="x", role="super_admin", status=1),
+        2: User(id=2, username="evidence-admin-two", password="x", role="super_admin", status=1),
+    }
+    db.add_all(admins.values())
+    db.flush()
+    seed_test_baseline(db)
+    wallet = get_or_create_wallet(db, "user", 101)
+    grant(db, wallet_id=wallet.id, grant_key="evidence-grant", kind="purchase", amount_milli=100_000)
+    reservation = reserve(db, request_key="evidence-api", model_name="deepseek-flash", user_id=101,
+                          max_milli=80_000, personal_wallet_id=wallet.id, provider_identity=PROVIDER,
+                          now=datetime(2026, 11, 6))
+    mark_unknown(db, reservation.request_key)
+    db.commit()
+    client = _client(db, admins)
+    try:
+        row = client.get("/api/billing/admin/reservations/reconciliation", headers={"x-test-user": "1"}) \
+            .json()["data"]["items"][0]
+        assert row["can_settle"] is True and row["requires_model_tool_evidence"] is True
+        path = f"/api/billing/admin/reservations/{reservation.id}/reconciliation/proposals"
+        body = {"resolution": "settle", "provider_request_id": "provider-evidence-case",
+                "input_tokens": 10_000, "output_tokens": 5_000, "evidence_reference": "provider-record",
+                "evidence_sha256": "b" * 64, "note": "核验外部工具证据"}
+        assert client.post(path, headers={"x-test-user": "1"}, json=body).status_code == 409
+        partial = client.post(path, headers={"x-test-user": "1"},
+                              json={**body, "model_search_calls_evidence": 0})
+        assert partial.status_code == 409
+        positive = client.post(path, headers={"x-test-user": "1"},
+                               json={**body, "model_search_calls_evidence": 1, "model_fetch_calls_evidence": 0})
+        assert positive.status_code == 422
+        proposal = client.post(path, headers={"x-test-user": "1"},
+                               json={**body, "model_search_calls_evidence": 0, "model_fetch_calls_evidence": 0})
+        assert proposal.status_code == 200
+        assert proposal.json()["data"]["model_search_calls_evidence"] == 0
+        decision = client.post(f"/api/billing/admin/reservations/{reservation.id}/reconciliation/decision",
+                               headers={"x-test-user": "2"}, json={"decision": "approve", "note": "复核证据"})
+        assert decision.status_code == 200
+        result = decision.json()["data"]
+        assert result["reservation"]["status"] == "settled"
+        assert result["reservation"].get("server_tool_search_calls") is None
+        assert result["reservation"].get("server_tool_fetch_calls") is None
+        db.refresh(reservation)
+        assert (reservation.server_tool_search_calls, reservation.server_tool_fetch_calls) == (None, None)
+        assert result["event"]["model_fetch_calls_evidence"] == 0
+    finally:
+        client.close()
+        db.close()
+        engine.dispose()
+
+
 def test_tool_reconciliation_api_filters_billable_kind_and_requires_count_and_dual_approval():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)

@@ -221,6 +221,93 @@ def test_real_retry_and_team_do_not_invert_parent_company_locks(fresh_chain, mon
         event.remove(fresh_chain, 'after_cursor_execute', listener)
 
 
+def test_parallel_terminal_tasks_use_current_read_for_team_status(fresh_chain, monkeypatch):
+    """A transaction with an old RR snapshot must aggregate the prior committed task state."""
+    _ready(monkeypatch)
+    rr_engine = fresh_chain.execution_options(isolation_level="REPEATABLE READ")
+    factory = sessionmaker(bind=rr_engine, autoflush=False, expire_on_commit=False)
+    company, _group, _owner, _users, tasks, teams = _seed(factory)
+    with factory.begin() as db:
+        first_task = db.get(EnterpriseAgentTeamTask, tasks[0])
+        second_task = EnterpriseAgentTeamTask(
+            team_id=first_task.team_id,
+            member_id=first_task.member_id,
+            task_key="parallel-work",
+            title="并发工作",
+            instructions="测试状态汇总",
+            dependency_keys_json="[]",
+            input_json="{}",
+            status="queued",
+            priority=1,
+            attempt_count=0,
+            max_attempts=3,
+            lease_generation=0,
+            result_json="{}",
+            artifacts_json="[]",
+            errors_json="[]",
+        )
+        db.add(second_task)
+        db.flush()
+        second_task_id = int(second_task.id)
+
+    first_transitioned, second_snapshot_ready = Event(), Event()
+    second_lock_requested = Event()
+    second_thread_id = []
+
+    def observe_second_team_lock(_conn, _cursor, sql, _params, _context, _many):
+        if (
+            second_thread_id
+            and get_ident() == second_thread_id[0]
+            and "FROM ENTERPRISE_AGENT_TEAM" in sql.upper()
+            and "FOR UPDATE" in sql.upper()
+        ):
+            second_lock_requested.set()
+
+    event.listen(fresh_chain, "before_cursor_execute", observe_second_team_lock)
+
+    def finish_first_task():
+        with factory.begin() as db:
+            team = (
+                db.query(EnterpriseAgentTeam)
+                .filter_by(id=teams[0], enterprise_id=company)
+                .with_for_update()
+                .one()
+            )
+            db.get(EnterpriseAgentTeamTask, tasks[0]).status = "failed"
+            runtime._update_team_status(db, {"team": team}, now=runtime._now())
+            first_transitioned.set()
+            assert second_lock_requested.wait(15), "第二个事务没有开始申请团队行锁"
+
+    def finish_second_task():
+        second_thread_id.append(get_ident())
+        with factory.begin() as db:
+            # Establish an RR snapshot before the first transaction commits.
+            db.query(EnterpriseAgentTeamTask.status).filter_by(team_id=teams[0]).all()
+            second_snapshot_ready.set()
+            assert first_transitioned.wait(15), "第一个任务没有先完成状态迁移"
+            team = (
+                db.query(EnterpriseAgentTeam)
+                .filter_by(id=teams[0], enterprise_id=company)
+                .with_for_update()
+                .one()
+            )
+            db.get(EnterpriseAgentTeamTask, second_task_id).status = "failed"
+            runtime._update_team_status(db, {"team": team}, now=runtime._now())
+            return team.status
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            second = pool.submit(finish_second_task)
+            assert second_snapshot_ready.wait(15), "第二个事务没有建立旧快照"
+            first = pool.submit(finish_first_task)
+            first.result(timeout=20)
+            assert second.result(timeout=20) == "failed"
+        with factory() as db:
+            assert db.get(EnterpriseAgentTeam, teams[0]).status == "failed"
+    finally:
+        event.remove(fresh_chain, "before_cursor_execute", observe_second_team_lock)
+
+
 def test_real_retry_first_does_not_deadlock_team(fresh_chain, monkeypatch):
     """A retry holding the parent first finishes before the team takes it."""
     real_snapshot = parent_runtime._live_role_snapshot

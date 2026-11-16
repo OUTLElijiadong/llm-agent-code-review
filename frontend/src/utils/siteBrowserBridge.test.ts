@@ -124,6 +124,49 @@ describe('controlled site browser bridge', () => {
     route = '/forum/else'; await agent.handle(request(3, 'click', { client_handle: handle, route: '/forum', snapshot_id: 'snapshot-1' })); expect(ack.mock.calls[2]![1].outcome).toBe('failed')
     await agent.handle(request(4, 'navigate', { route: 'https://evil.example' })); expect(route).toBe('/forum/else'); expect(ack.mock.calls[3]![1].outcome).toBe('failed')
   })
+  it('does not report a navigation as completed when a router guard redirects it', async () => {
+    const agent = createSiteBrowserBridge({ current: () => ({ ...account, route }),
+      canNavigate: () => true, navigate: async () => { route = '/enterprise' },
+      settle: async () => undefined, api: { claim, ack, pending } })
+    await agent.handle(request(11, 'navigate', { route: '/usage' }))
+    expect(route).toBe('/enterprise')
+    expect(ack.mock.calls[0]![1].outcome).toBe('indeterminate')
+    expect(ack.mock.calls[0]![1].error).toContain('目标页面')
+  })
+  it('confirms a declared alias only after the target page really renders', async () => {
+    let settleCount = 0
+    const agent = createSiteBrowserBridge({ current: () => ({ ...account, route }),
+      canNavigate: () => true, expectedRoute: () => '/security?section=rules',
+      navigate: async () => { route = '/security?section=rules' },
+      settle: async () => { if (++settleCount === 1) document.querySelector('main')!.innerHTML = '<h1>安全规则</h1>' },
+      api: { claim, ack, pending } })
+    await agent.handle(request(12, 'navigate', { route: '/rules' }))
+    expect(ack.mock.calls[0]![1].outcome).toBe('completed')
+    expect(ack.mock.calls[0]![1].observation.route).toBe('/security?section=rules')
+  })
+  it('treats a target that never renders as indeterminate', async () => {
+    vi.useFakeTimers()
+    try {
+      const agent = createSiteBrowserBridge({ current: () => ({ ...account, route }),
+        canNavigate: () => true, navigate: async path => { route = path },
+        settle: async () => undefined, api: { claim, ack, pending } })
+      const task = agent.handle(request(13, 'navigate', { route: '/billing' }))
+      await vi.advanceTimersByTimeAsync(3200)
+      await task
+      expect(ack.mock.calls[0]![1].outcome).toBe('indeterminate')
+      expect(ack.mock.calls[0]![1].error).toContain('目标页面')
+    } finally { vi.useRealTimers() }
+  })
+  it('does not send a navigation receipt after the account changes during rendering', async () => {
+    const agent = createSiteBrowserBridge({ current: () => ({ ...account, route }),
+      canNavigate: () => true, navigate: async path => { route = path },
+      settle: async () => {
+        account.token = 'new-login'
+        document.querySelector('main')!.innerHTML = '<h1>账单</h1>'
+      }, api: { claim, ack, pending } })
+    await agent.handle(request(14, 'navigate', { route: '/billing' }))
+    expect(ack).not.toHaveBeenCalled()
+  })
   it('retries only an unclaimed stale nonce using the fresh owner event', async () => {
     const agent = bridge(); claim.mockRejectedValueOnce(new Error('nonce rotated before claim'))
     await agent.handle(request(1, 'inspect')); expect(ack).not.toHaveBeenCalled()

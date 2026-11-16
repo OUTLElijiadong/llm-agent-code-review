@@ -41,6 +41,11 @@ from app.services.billing_refund_policy import (
 )
 from app.services.billing_subscription_rules import cycle_boundary, subscription_status
 
+
+class BillingQuoteChanged(ledger.BillingError):
+    """The current server price no longer matches the user's confirmed quote."""
+
+
 _PENDING_REFUND_STATUSES = {"processing", "unknown"}
 REFUND_RECONCILIATION_COOLDOWN = timedelta(seconds=15)
 REFUND_RECONCILIATION_LEASE = timedelta(seconds=60)
@@ -103,14 +108,18 @@ def _now():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def _active_credit_pack_price(db: Session, quantity: int) -> int:
+def _active_credit_pack_catalog(db: Session):
     from app.services import billing_rate_catalog_service
 
     try:
-        catalog = billing_rate_catalog_service.active_catalog(db, lock_for_use=True)
+        return billing_rate_catalog_service.active_catalog(db, lock_for_use=True)
     except billing_rate_catalog_service.RateCatalogError as exc:
         raise ledger.BillingError("积分商品与费率目录未对齐，暂不能创建积分订单") from exc
-    return catalog.credit_pack_price_fen * quantity
+
+
+def _active_credit_pack_price(db: Session, quantity: int, *, catalog=None) -> int:
+    current = catalog or _active_credit_pack_catalog(db)
+    return current.credit_pack_price_fen * quantity
 
 
 def _naive(value):
@@ -126,13 +135,22 @@ def _new_order_number() -> str:
 
 def create_order(db: Session, *, user_id: int, product: str, quantity: int, channel: str,
                  client_request_id: str | None = None, enterprise_id: int | None = None,
-                 enterprise_name: str | None = None) -> BillingOrder:
+                 enterprise_name: str | None = None, expected_pricing_version: str | None = None,
+                 expected_amount_fen: int | None = None) -> BillingOrder:
     """Prices are selected only on the server; external sale endpoint remains disabled."""
     user = db.get(User, user_id)
     if not user or user.status != 1:
         raise ledger.BillingError("购买账号不可用")
     if channel not in {"alipay", "wechat"} or type(quantity) is not int or not 1 <= quantity <= 10000:
         raise ledger.BillingError("支付渠道或购买数量无效")
+    if ((expected_pricing_version is None) != (expected_amount_fen is None)
+            or (expected_pricing_version is not None
+                and (not isinstance(expected_pricing_version, str) or not expected_pricing_version.strip()
+                     or len(expected_pricing_version) > 64 or type(expected_amount_fen) is not int
+                     or expected_amount_fen <= 0))):
+        raise ledger.BillingError("价格确认信息无效")
+    quote_catalog = _active_credit_pack_catalog(db) if expected_pricing_version is not None else None
+    current_pricing_version = quote_catalog.version_key if quote_catalog is not None else None
     if product == "reviewer_month":
         if quantity != 1 or enterprise_id is not None or enterprise_name is not None:
             raise ledger.BillingError("个人审查员订单参数无效")
@@ -140,12 +158,12 @@ def create_order(db: Session, *, user_id: int, product: str, quantity: int, chan
     elif product == "personal_credits":
         if enterprise_id is not None or enterprise_name is not None:
             raise ledger.BillingError("个人积分订单参数无效")
-        price = _active_credit_pack_price(db, quantity)
+        price = _active_credit_pack_price(db, quantity, catalog=quote_catalog)
     elif product == "enterprise_credits":
         if not enterprise_id or enterprise_name is not None:
             raise ledger.BillingError("企业积分订单参数无效")
         org.require_enterprise_admin(db, enterprise_id, user_id)
-        price = _active_credit_pack_price(db, quantity)
+        price = _active_credit_pack_price(db, quantity, catalog=quote_catalog)
     elif product == "enterprise_create":
         if enterprise_id is not None or not isinstance(enterprise_name, str) or not enterprise_name.strip():
             raise ledger.BillingError("企业创建订单参数无效")
@@ -186,6 +204,10 @@ def create_order(db: Session, *, user_id: int, product: str, quantity: int, chan
             if prior.request_fingerprint != request_fingerprint:
                 raise ledger.IdempotencyConflict("支付请求编号已用于其他商品或金额")
             return prior
+    if expected_pricing_version is not None and (
+        expected_pricing_version != current_pricing_version or expected_amount_fen != price
+    ):
+        raise BillingQuoteChanged("商品价格已更新，请刷新价格并重新确认后再下单")
     order = BillingOrder(order_no=_new_order_number(), user_id=user_id, enterprise_id=enterprise_id,
                          enterprise_name=enterprise_name, product=product, amount_fen=price,
                          quantity=quantity, channel=channel, status="created",

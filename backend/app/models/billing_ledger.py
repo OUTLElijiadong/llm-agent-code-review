@@ -282,6 +282,13 @@ class BillingReservationReconciliationEvent(Base, IdMixin):
             "tool_successful_calls IS NULL OR tool_successful_calls IN (0, 1)",
             name="ck_billing_res_recon_tool_success_count",
         ),
+        CheckConstraint(
+            "(model_search_calls_evidence IS NULL AND model_fetch_calls_evidence IS NULL) OR "
+            "(model_search_calls_evidence IS NOT NULL AND model_fetch_calls_evidence IS NOT NULL "
+            "AND model_search_calls_evidence = 0 AND model_fetch_calls_evidence = 0 "
+            "AND decision IN ('proposed', 'approved', 'rejected') AND resolution = 'settle')",
+            name="ck_billing_res_recon_model_evidence",
+        ),
     )
     reservation_id = Column(BigInteger, nullable=False)
     related_event_id = Column(BigInteger, nullable=True)
@@ -293,6 +300,8 @@ class BillingReservationReconciliationEvent(Base, IdMixin):
     output_tokens = Column(BigInteger, nullable=True)
     actual_milli = Column(BigInteger, nullable=True)
     tool_successful_calls = Column(BigInteger, nullable=True)
+    model_search_calls_evidence = Column(BigInteger, nullable=True)
+    model_fetch_calls_evidence = Column(BigInteger, nullable=True)
     evidence_reference = Column(String(240), nullable=True)
     evidence_sha256 = Column(String(64), nullable=True)
     note = Column(String(500), nullable=False)

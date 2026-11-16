@@ -11,10 +11,11 @@
     <p v-if="!pricing?.sales_enabled" class="gate-note" role="status">
       线上收款暂未开放。平台计量、权益、商户配置和验收门禁未全部通过；当前无法创建支付订单。
     </p>
+    <p v-else-if="!availablePaymentChannelCount" class="gate-note" role="status">当前没有可用的支付渠道。</p>
     <p v-if="pageError" class="error-note" role="alert">{{ pageError }}</p>
-    <p v-if="orderError && !activeOrder" class="error-note" role="alert">{{ orderError }}</p>
+    <p v-if="orderError && !activeOrder && !paymentDialogVisible" class="error-note" role="alert">{{ orderError }}</p>
     <p v-if="loading && !pricing" class="notice" role="status">正在加载账户与商品信息…</p>
-        <p v-else-if="pageError && !pricing" class="notice" role="alert">
+    <p v-else-if="pageError && !pricing" class="notice" role="alert">
       计费信息加载失败。<button type="button" @click="() => load()">重新加载</button>
     </p>
 
@@ -56,12 +57,8 @@
           </label>
           <p v-else class="muted">会员权益按自然月周期发放。已有永久审查员权益不会因购买订单而重复升级。</p>
           <p class="price">应付金额 <strong>{{ money(personalTotalFen) }}</strong></p>
-          <div class="channels" role="group" aria-label="选择支付渠道">
-            <button type="button" :aria-pressed="channel === 'alipay'" :disabled="!pricing.channels.alipay" @click="channel = 'alipay'">支付宝</button>
-            <button type="button" :aria-pressed="channel === 'wechat'" :disabled="!pricing.channels.wechat" @click="channel = 'wechat'">微信支付</button>
-          </div>
           <button class="primary" type="button" :disabled="!canCreatePersonal" @click="createPersonalOrder">
-            {{ creating ? '正在创建订单…' : '创建支付订单' }}
+            选择支付方式
           </button>
         </template>
 
@@ -87,12 +84,8 @@
               <input v-model.number="quantity" type="number" min="1" max="100" step="1" inputmode="numeric" />
             </label>
             <p class="price">应付金额 <strong>{{ money(enterpriseTotalFen) }}</strong></p>
-            <div class="channels" role="group" aria-label="选择支付渠道">
-              <button type="button" :aria-pressed="channel === 'alipay'" :disabled="!pricing.channels.alipay" @click="channel = 'alipay'">支付宝</button>
-              <button type="button" :aria-pressed="channel === 'wechat'" :disabled="!pricing.channels.wechat" @click="channel = 'wechat'">微信支付</button>
-            </div>
             <button class="primary" type="button" :disabled="!canCreateEnterprise" @click="createEnterpriseOrder">
-              {{ creating ? '正在创建订单…' : '创建企业支付订单' }}
+              选择支付方式
             </button>
           </template>
           <template v-else>
@@ -105,12 +98,8 @@
               <small>{{ number(pricing.enterprise_seat_month.credits) }} 积分/席位/周期，价格 {{ money(pricing.enterprise_seat_month.price_fen) }}/席位。</small>
             </label>
             <p class="price">应付金额 <strong>{{ money(enterpriseCreateTotalFen) }}</strong></p>
-            <div class="channels" role="group" aria-label="选择支付渠道">
-              <button type="button" :aria-pressed="channel === 'alipay'" :disabled="!pricing.channels.alipay" @click="channel = 'alipay'">支付宝</button>
-              <button type="button" :aria-pressed="channel === 'wechat'" :disabled="!pricing.channels.wechat" @click="channel = 'wechat'">微信支付</button>
-            </div>
             <button class="primary" type="button" :disabled="!canCreateEnterprise" @click="createEnterpriseOrder">
-              {{ creating ? '正在创建订单…' : '创建企业支付订单' }}
+              选择支付方式
             </button>
           </template>
         </template>
@@ -186,6 +175,35 @@
         <p class="muted">订单列表仅显示当前账号作为付款人的订单；企业账务以服务端授权和账单记录为准。</p>
       </section>
     </template>
+
+    <el-dialog v-model="paymentDialogVisible" title="选择支付方式" width="440px" :close-on-click-modal="!creating"
+      :close-on-press-escape="!creating" :show-close="!creating" append-to-body>
+      <div v-if="checkoutIntent" class="checkout-summary">
+        <div><span>购买内容</span><strong>{{ productName(checkoutIntent.product) }}</strong></div>
+        <div v-if="checkoutIntent.product !== 'reviewer_month'"><span>数量</span><strong>{{ checkoutIntent.quantity }}</strong></div>
+        <div v-if="checkoutEnterpriseName"><span>企业</span><strong>{{ checkoutEnterpriseName }}</strong></div>
+        <div class="checkout-total"><span>金额预览</span><strong>{{ money(checkoutAmountFen) }}</strong></div>
+      </div>
+      <div class="payment-options" role="radiogroup" aria-label="支付方式">
+        <label v-for="option in paymentOptions.filter(item => pricing?.channels[item.value])" :key="option.value"
+          class="payment-choice" :class="{ 'is-selected': paymentChannel === option.value }">
+          <input v-model="paymentChannel" type="radio" name="payment-channel" :value="option.value" />
+          <span class="payment-option-mark" aria-hidden="true">{{ option.value === 'alipay' ? '支' : '微' }}</span>
+          <span>{{ option.label }}</span>
+          <span v-if="paymentChannel === option.value" class="payment-check" aria-hidden="true">✓</span>
+        </label>
+      </div>
+      <p v-if="!availablePaymentChannelCount" class="error-note" role="status">当前没有可用的支付渠道。</p>
+      <p v-if="orderError" class="error-note" role="alert">{{ orderError }}</p>
+      <template #footer>
+        <div class="checkout-actions">
+          <button type="button" :disabled="creating" @click="paymentDialogVisible = false">返回</button>
+          <button class="primary" type="button" :disabled="!canConfirmCheckout" @click="confirmCheckout">
+            {{ checkingPrice ? '正在核对价格…' : creating ? '正在创建订单…' : '确认并创建订单' }}
+          </button>
+        </div>
+      </template>
+    </el-dialog>
   </main>
 </template>
 
@@ -231,10 +249,17 @@ const enterpriseProduct = ref<'enterprise_renew' | 'enterprise_credits'>('enterp
 const selectedEnterpriseId = ref<number | null>(null)
 const enterpriseName = ref('')
 const quantity = ref(1)
-const channel = ref<'alipay' | 'wechat'>('alipay')
+const paymentDialogVisible = ref(false)
+const paymentChannel = ref<'alipay' | 'wechat'>('alipay')
+type CheckoutIntent = Omit<Parameters<typeof createBillingOrder>[0],
+  'client_request_id' | 'channel' | 'expected_pricing_version' | 'expected_amount_fen'>
+const checkoutIntent = ref<CheckoutIntent | null>(null)
+const checkoutPricingVersion = ref<string | null>(null)
+const checkingPrice = ref(false)
 const refundReason = ref('')
 let generation = 0
 let orderGeneration = 0
+let checkoutGeneration = 0
 let enterpriseWalletGeneration = 0
 let enterpriseOrderGeneration = 0
 const pendingOrderKeys = new Map<string, string>()
@@ -242,6 +267,14 @@ let pendingOrderStorageUnavailable = false
 
 const managedEnterprises = computed(() => enterprises.value.filter(item => item.role === 'owner' || item.role === 'admin'))
 const selectedEnterprise = computed(() => managedEnterprises.value.find(item => item.id === selectedEnterpriseId.value) ?? null)
+const checkoutEnterpriseName = computed(() => {
+  const intent = checkoutIntent.value
+  if (intent?.enterprise_name) return intent.enterprise_name
+  if (intent?.enterprise_id) {
+    return managedEnterprises.value.find(item => item.id === intent.enterprise_id)?.name ?? ''
+  }
+  return ''
+})
 const quantityMaximum = computed(() => {
   if (purchaseScope.value === 'personal') return 100
   if (!selectedEnterprise.value || enterpriseProduct.value === 'enterprise_renew') return 10000
@@ -257,11 +290,29 @@ const enterpriseTotalFen = computed(() => (selectedEnterprise.value && enterpris
   : pricing.value?.credit_pack.price_fen ?? 0) * (validQuantity.value ? quantity.value : 0))
 const enterpriseCreateTotalFen = computed(() => (pricing.value?.enterprise_seat_month.price_fen ?? 0)
   * (validQuantity.value ? quantity.value : 0))
-const canCreatePersonal = computed(() => Boolean(pricing.value?.sales_enabled && pricing.value.channels[channel.value]
-  && !creating.value && validQuantity.value))
-const canCreateEnterprise = computed(() => Boolean(pricing.value?.sales_enabled && pricing.value.channels[channel.value]
+const canCreatePersonal = computed(() => Boolean(pricing.value?.sales_enabled && availablePaymentChannelCount.value > 0 && !creating.value
+  && (personalProduct.value === 'reviewer_month' || validQuantity.value)))
+const canCreateEnterprise = computed(() => Boolean(pricing.value?.sales_enabled && availablePaymentChannelCount.value > 0
   && !creating.value && validQuantity.value
   && (selectedEnterprise.value || enterpriseName.value.trim())))
+const paymentOptions = [
+  { value: 'alipay' as const, label: '支付宝' },
+  { value: 'wechat' as const, label: '微信支付' },
+]
+const availablePaymentChannelCount = computed(() => paymentOptions.filter(option => pricing.value?.channels[option.value]).length)
+const canConfirmCheckout = computed(() => Boolean(paymentDialogVisible.value && checkoutIntent.value && pricing.value?.sales_enabled
+  && pricing.value.pricing_version && pricing.value.channels[paymentChannel.value]
+  && !creating.value && !checkingPrice.value))
+function amountForPricing(intent: CheckoutIntent, catalog: BillingPricing): number {
+  if (intent.product === 'personal_credits' || intent.product === 'enterprise_credits') {
+    return catalog.credit_pack.price_fen * intent.quantity
+  }
+  if (intent.product === 'reviewer_month') return catalog.reviewer_month.price_fen
+  return catalog.enterprise_seat_month.price_fen * intent.quantity
+}
+const checkoutAmountFen = computed(() => (
+  checkoutIntent.value && pricing.value ? amountForPricing(checkoutIntent.value, pricing.value) : 0
+))
 const canCancelActiveOrder = computed(() => Boolean(activeOrder.value && activeOrder.value.status !== 'paid'
   && activeOrder.value.status !== 'refunded' && activeOrder.value.status !== 'cancelled'))
 
@@ -270,7 +321,7 @@ const money = (fen: number) => `¥${(fen / 100).toFixed(2)}`
 const dateTime = (value: string) => new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
 const productName = (product: BillingOrder['product']) => ({
   personal_credits: '个人积分充值', reviewer_month: '个人审查员月度会员', enterprise_credits: '企业积分充值',
-  enterprise_create: '企业席位首期套餐', enterprise_renew: '企业席位续费',
+  enterprise_create: '创建企业并购买席位', enterprise_renew: '企业席位续费',
 }[product] || product)
 const orderStatus = (order: BillingOrder) => {
   if (order.status === 'paid') return '已支付'
@@ -367,8 +418,14 @@ async function load() {
     }
   } finally { if (current === generation) loading.value = false }
 }
+function isPricingChangedError(error: unknown): boolean {
+  const detail = (error as { response?: { data?: { detail?: { code?: unknown } } } })
+    ?.response?.data?.detail
+  return detail?.code === 'PRICING_CHANGED'
+}
+
 async function createOrder(input: Omit<Parameters<typeof createBillingOrder>[0], 'client_request_id'>) {
-  if (!pricing.value?.sales_enabled || creating.value) return
+  if (!pricing.value?.sales_enabled || !pricing.value.channels[input.channel] || creating.value) return
   const orderRequest = ++orderGeneration
   creating.value = true; orderError.value = ''; activeRefund.value = null
   const account = currentUserId.value, token = getToken(), current = generation
@@ -379,11 +436,25 @@ async function createOrder(input: Omit<Parameters<typeof createBillingOrder>[0],
       || orderRequest !== orderGeneration) return
     clearRequestId(fingerprint)
     await setActiveOrder(order, orderRequest)
+    if (current === generation && orderRequest === orderGeneration) paymentDialogVisible.value = false
     await loadOrders(current)
     if (input.enterprise_id) await loadEnterpriseOrders(input.enterprise_id, current)
-  } catch {
+  } catch (error) {
     if (current === generation && account === currentUserId.value && token === getToken()
       && orderRequest === orderGeneration) {
+      if (isPricingChangedError(error)) {
+        try {
+          const latest = await getBillingPricing()
+          if (current !== generation || account !== currentUserId.value || token !== getToken()
+            || orderRequest !== orderGeneration || !checkoutIntent.value) return
+          pricing.value = latest
+          checkoutPricingVersion.value = latest.pricing_version
+          orderError.value = '价格已更新，已刷新金额，请核对后再次确认。'
+        } catch {
+          orderError.value = '价格刚刚发生变化，无法刷新当前金额；请刷新计费页面后重试。'
+        }
+        return
+      }
       orderError.value = pendingOrderStorageUnavailable
         ? '订单结果暂未确认。本页面相同购买会复用请求标识；刷新页面后请先查询订单，避免重复购买。'
         : '订单结果暂未确认。刷新订单列表并查询原请求，不要为同一购买重复新建订单。'
@@ -393,20 +464,77 @@ async function createOrder(input: Omit<Parameters<typeof createBillingOrder>[0],
 }
 function createPersonalOrder() {
   if (personalProduct.value === 'reviewer_month') {
-    return void createOrder({ product: 'reviewer_month', quantity: 1, channel: channel.value })
+    return void openCheckout({ product: 'reviewer_month', quantity: 1 })
   }
   if (!validQuantity.value) return
-  return void createOrder({ product: 'personal_credits', quantity: quantity.value, channel: channel.value })
+  return void openCheckout({ product: 'personal_credits', quantity: quantity.value })
 }
 function createEnterpriseOrder() {
   if (!validQuantity.value) return
   if (selectedEnterprise.value) {
-    return void createOrder({ product: enterpriseProduct.value, quantity: quantity.value, channel: channel.value,
+    return void openCheckout({ product: enterpriseProduct.value, quantity: quantity.value,
       enterprise_id: selectedEnterprise.value.id })
   }
   if (!enterpriseName.value.trim()) return
-  return void createOrder({ product: 'enterprise_create', quantity: quantity.value, channel: channel.value,
+  return void openCheckout({ product: 'enterprise_create', quantity: quantity.value,
     enterprise_name: enterpriseName.value.trim() })
+}
+function openCheckout(intent: CheckoutIntent) {
+  if (!pricing.value?.sales_enabled || creating.value) return
+  checkoutIntent.value = intent
+  checkoutPricingVersion.value = pricing.value.pricing_version
+  if (!pricing.value.channels.alipay && pricing.value.channels.wechat) paymentChannel.value = 'wechat'
+  else paymentChannel.value = 'alipay'
+  orderError.value = ''
+  paymentDialogVisible.value = true
+}
+watch(paymentDialogVisible, (visible) => {
+  if (!visible) {
+    checkoutGeneration++
+    checkoutIntent.value = null
+    checkingPrice.value = false
+  }
+}, { flush: 'sync' })
+
+async function confirmCheckout() {
+  const intent = checkoutIntent.value
+  const previewVersion = checkoutPricingVersion.value
+  const previewAmount = checkoutAmountFen.value
+  if (!intent || !previewVersion || !canConfirmCheckout.value) return
+  const account = currentUserId.value
+  const token = getToken()
+  const current = generation
+  const checkout = checkoutGeneration
+  checkingPrice.value = true
+  orderError.value = ''
+  try {
+    const latest = await getBillingPricing()
+    if (checkout !== checkoutGeneration || !paymentDialogVisible.value
+      || current !== generation || account !== currentUserId.value || token !== getToken()
+      || checkoutIntent.value !== intent) return
+    const latestAmount = amountForPricing(intent, latest)
+    pricing.value = latest
+    if (!latest.sales_enabled || !latest.channels[paymentChannel.value]) {
+      checkoutPricingVersion.value = latest.pricing_version
+      orderError.value = '当前支付渠道已不可用，请重新选择后再确认。'
+      return
+    }
+    if (latest.pricing_version !== previewVersion || latestAmount !== previewAmount) {
+      checkoutPricingVersion.value = latest.pricing_version
+      orderError.value = '价格已更新，已刷新金额，请核对后再次确认。'
+      return
+    }
+    void createOrder({ ...intent, channel: paymentChannel.value,
+      expected_pricing_version: latest.pricing_version, expected_amount_fen: latestAmount })
+  } catch {
+    if (checkout === checkoutGeneration && paymentDialogVisible.value
+      && current === generation && account === currentUserId.value && token === getToken()
+      && checkoutIntent.value === intent) {
+      orderError.value = '无法核对最新价格和支付渠道，请稍后重试。'
+    }
+  } finally {
+    if (checkout === checkoutGeneration) checkingPrice.value = false
+  }
 }
 async function setActiveOrder(order: BillingOrder, orderRequest: number) {
   const current = generation, account = currentUserId.value, token = getToken()
@@ -532,7 +660,9 @@ watch([currentUserId, () => user.token], () => {
   pageError.value = ''; orderError.value = ''; loading.value = false; loadingOrders.value = false; creating.value = false
   orderLoading.value = false
   purchaseScope.value = 'personal'; personalProduct.value = 'personal_credits'; enterpriseProduct.value = 'enterprise_renew'
-  selectedEnterpriseId.value = null; enterpriseName.value = ''; quantity.value = 1; channel.value = 'alipay'; refundReason.value = ''
+  selectedEnterpriseId.value = null; enterpriseName.value = ''; quantity.value = 1; paymentDialogVisible.value = false
+  checkoutIntent.value = null; checkoutPricingVersion.value = null; checkingPrice.value = false
+  paymentChannel.value = 'alipay'; refundReason.value = ''
   if (currentUserId.value) void load()
 }, { flush: 'sync' })
 onMounted(() => { if (currentUserId.value) void load() })
@@ -541,7 +671,7 @@ onBeforeUnmount(() => { generation++; orderGeneration++; enterpriseOrderGenerati
 
 <style scoped>
 .billing-page { max-width: 1180px; margin: 0 auto; padding: 26px; color: #20243a; }
-.page-head, .section-head, .tabs, .channels { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.page-head, .section-head, .tabs, .checkout-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .page-head { margin-bottom: 18px; } h1 { margin: 0; font-size: 24px; } h2 { margin: 0 0 14px; font-size: 17px; }
 .page-head p, .muted, small { color: #69718a; font-size: 13px; line-height: 1.55; }
 .gate-note, .error-note, .notice { padding: 13px 15px; border-radius: 10px; line-height: 1.55; }
@@ -557,8 +687,21 @@ onBeforeUnmount(() => { generation++; orderGeneration++; enterpriseOrderGenerati
 input, select, textarea, button { font: inherit; border: 1px solid #d9ddeb; background: white; border-radius: 8px; padding: 9px 11px; color: inherit; }
 input, select, textarea { width: 100%; }.field small { font-weight: 400; }.muted { margin: 10px 0; }
 .price { margin: 18px 0 12px; }.price strong { font-size: 22px; color: #282f84; }
-.channels { justify-content: flex-start; margin-bottom: 14px; }.channels button[aria-pressed='true'] { border-color: #5962d6; color: #424cc5; background: #f0f1ff; }
 button { cursor: pointer; } button:disabled { opacity: .55; cursor: not-allowed; }.primary { min-width: 180px; color: white; background: #4f58ce; border-color: #4f58ce; }
+.checkout-summary { display: grid; gap: 12px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid #eceef5; }
+.checkout-summary > div { display: flex; justify-content: space-between; gap: 16px; color: #69718a; }
+.checkout-summary strong { color: #20243a; text-align: right; }
+.checkout-summary .checkout-total { padding-top: 10px; border-top: 1px solid #eceef5; align-items: baseline; }
+.checkout-summary .checkout-total strong { color: #282f84; font-size: 22px; }
+.payment-options { display: grid; gap: 10px; }
+.payment-choice { min-height: 56px; display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid #e2e5ef; border-radius: 8px; cursor: pointer; }
+.payment-choice.is-selected { border-color: #5962d6; background: #f3f3ff; color: #424cc5; }
+.payment-choice input { width: auto; margin: 0; accent-color: #4f58ce; }
+.payment-option-mark { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; background: #edf0ff; font-size: 13px; font-weight: 700; }
+.payment-unavailable { margin-left: auto; color: #9299aa; font-size: 12px; }
+.payment-check { margin-left: auto; color: #424cc5; font-weight: 700; }
+.checkout-actions { justify-content: flex-end; }
+:deep(.el-dialog) { max-width: calc(100vw - 24px); border-radius: 16px; }
 .order-panel, .orders-panel { margin-top: 16px; }.section-head h2 { margin: 0; }
 dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 16px; }.section-head + dl { margin-top: 14px; }
 dt { color: #69718a; }dd { margin: 0; overflow-wrap: anywhere; }
@@ -567,5 +710,5 @@ dt { color: #69718a; }dd { margin: 0; overflow-wrap: anywhere; }
 .refund-status { margin-top: 15px; padding: 12px; background: #f6f7fb; border-radius: 9px; }.refund-status p { color: #69718a; font-size: 13px; }
 .table-wrap { overflow-x: auto; margin-top: 12px; }table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
 th, td { padding: 10px 12px; border-bottom: 1px solid #eef0f5; white-space: nowrap; }th { color: #69718a; }
-@media (max-width: 680px) { .billing-page { padding: 16px; }.page-head { align-items: flex-start; }.summary-grid { grid-template-columns: 1fr; }.purchase, .order-panel, .orders-panel { padding: 14px; }.tabs, .channels { flex-wrap: wrap; }dl { grid-template-columns: 1fr; gap: 3px; }dd { margin-bottom: 8px; }.table-wrap { margin-inline: -5px; } }
+@media (max-width: 680px) { .billing-page { padding: 16px; }.page-head { align-items: flex-start; }.summary-grid { grid-template-columns: 1fr; }.purchase, .order-panel, .orders-panel { padding: 14px; }.tabs { flex-wrap: wrap; }dl { grid-template-columns: 1fr; gap: 3px; }dd { margin-bottom: 8px; }.table-wrap { margin-inline: -5px; }.checkout-actions { flex-wrap: wrap; }.checkout-actions button { flex: 1; } }
 </style>

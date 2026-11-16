@@ -6,6 +6,7 @@ const harness = vi.hoisted(() => ({
   agentPermission: true,
   role: 'user',
   activeSpace: 'personal',
+  enterpriseMember: false,
   push: vi.fn(),
   replace: vi.fn(),
 }))
@@ -42,7 +43,10 @@ vi.mock('@/stores/user', () => ({
 
 vi.mock('@/stores/workspace', () => ({
   getActiveWorkspaceMode: () => harness.activeSpace,
-  useWorkspaceStore: () => ({ activeSpace: harness.activeSpace }),
+  useWorkspaceStore: () => ({
+    activeSpace: harness.activeSpace,
+    get hasEnterpriseMembership() { return harness.enterpriseMember },
+  }),
 }))
 
 import AppHeader from './AppHeader.vue'
@@ -69,6 +73,7 @@ describe('AppHeader navigation visibility', () => {
     harness.agentPermission = true
     harness.role = 'user'
     harness.activeSpace = 'personal'
+    harness.enterpriseMember = false
     harness.push.mockReset()
     harness.replace.mockReset()
   })
@@ -120,6 +125,16 @@ describe('AppHeader navigation visibility', () => {
     const items = (wrapper.vm as any).searchItems as Array<{ path?: string }>
     expect(items.some((item) => item.path === '/forum')).toBe(false)
     expect(items.some((item) => item.path === '/knowledge')).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('企业成员账号在个人页面模式下也不显示公开论坛导航', () => {
+    harness.enterpriseMember = true
+    harness.activeSpace = 'personal'
+    const wrapper = mountHeader()
+    const items = (wrapper.vm as any).searchItems as Array<{ path?: string }>
+
+    expect(items.some((item) => item.path === '/forum')).toBe(false)
     wrapper.unmount()
   })
 

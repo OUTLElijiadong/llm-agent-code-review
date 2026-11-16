@@ -20,11 +20,92 @@ from app.core.permission_codes import PermissionCode
 from app.core.security import create_access_token
 from app.models.agent_browser_action import AgentBrowserAction
 from app.models.agent_response_run import AgentResponseRun
+from app.models.enterprise_org import EnterpriseMember
 from app.models.rbac import Permission, Role, RolePermission, UserRole
 from app.models.user import User
 from app.schemas.agent_browser import BrowserAckIn
 from app.services import agent_browser_service as service
 from app.services.agent_supervisor_service import review_response_tool
+
+
+@pytest.mark.parametrize("route", ["/enterprise", "/usage", "/billing", "/my-agents", "/agent-assets"])
+def test_workspace_routes_are_recognized_without_granting_enterprise_resources(db, owner, route):
+    assert service.authorize_route(db, owner, route) == route
+
+
+@pytest.mark.parametrize("route", [
+    "/admin/billing-refunds", "/admin/billing-statements", "/admin/billing-reservations",
+    "/admin/billing-pricing", "/admin/enterprise-asset-publications",
+])
+def test_sensitive_billing_and_asset_pages_require_super_admin(db, owner, monkeypatch, route):
+    monkeypatch.setattr(service.rbac_service, "is_admin_user", lambda *_args: True)
+    monkeypatch.setattr(service.rbac_service, "is_super_admin_user", lambda *_args: False)
+    with pytest.raises(ForbiddenError):
+        service.authorize_route(db, owner, route)
+    monkeypatch.setattr(service.rbac_service, "is_super_admin_user", lambda *_args: True)
+    assert service.authorize_route(db, owner, route) == route
+
+
+@pytest.mark.parametrize("route", ["/admin/billing-reviews", "/admin/billing-rate-reviews",
+                                  "/admin/billing-refund-reviews"])
+def test_billing_review_pages_require_admin(db, owner, monkeypatch, route):
+    with pytest.raises(ForbiddenError):
+        service.authorize_route(db, owner, route)
+    monkeypatch.setattr(service.rbac_service, "is_admin_user", lambda *_args: True)
+    assert service.authorize_route(db, owner, route) == route
+
+
+def test_public_forum_is_denied_for_any_active_enterprise_membership(db, owner):
+    db.add(EnterpriseMember(enterprise_id=101, user_id=owner.id, role="member", status="inactive"))
+    db.commit()
+    assert service.authorize_route(db, owner, "/forum/123") == "/forum/123"
+    other = User(username="another-browser-user", password="unused", role="user", status=1)
+    db.add(other)
+    db.flush()
+    db.add(EnterpriseMember(enterprise_id=202, user_id=other.id, role="member", status="active"))
+    db.commit()
+    assert service.authorize_route(db, owner, "/forum") == "/forum"
+    db.add(EnterpriseMember(enterprise_id=303, user_id=owner.id, role="member", status="active"))
+    db.commit()
+    for route in ("/forum", "/forum/new", "/forum/123/edit"):
+        with pytest.raises(ForbiddenError, match="企业成员"):
+            service.authorize_route(db, owner, route)
+    assert service.authorize_route(db, owner, "/enterprise") == "/enterprise"
+
+
+def test_actual_rbac_roles_cannot_bypass_billing_page_boundaries(db, owner):
+    admin = User(username="browser-admin", password="unused", role="admin", status=1)
+    super_admin = User(username="admin", password="unused", role="super_admin", status=1)
+    admin_role = Role(name="管理员", code="admin", status="active")
+    super_role = Role(name="最高管理员", code="super_admin", status="active")
+    db.add_all([admin, super_admin, admin_role, super_role])
+    db.flush()
+    db.add_all([UserRole(user_id=admin.id, role_id=admin_role.id),
+                UserRole(user_id=super_admin.id, role_id=super_role.id)])
+    db.commit()
+    for actor in (owner, admin):
+        with pytest.raises(ForbiddenError):
+            service.authorize_route(db, actor, "/admin/billing-pricing")
+    assert service.authorize_route(db, admin, "/admin/billing-reviews") == "/admin/billing-reviews"
+    assert service.authorize_route(db, super_admin, "/admin/billing-pricing") == "/admin/billing-pricing"
+
+
+def test_encoded_query_is_supported_but_not_an_authorization_bypass(db, owner, monkeypatch):
+    route = "/enterprise?section=%E4%BC%81%E4%B8%9A"
+    assert service.authorize_route(db, owner, route) == route
+    assert service.authorize_route(db, owner, "/enterprise?section=企业") == "/enterprise?section=企业"
+    for invalid in ("/enterprise%2fother", "/enterprise?section=%0A", "/enterprise?section=%7F",
+                    "/enterprise?section=%C2%85", "/enterprise?section=\u0085",
+                    "/enterprise?section=%ZZ", "/enterprise?" + "a" * 500,
+                    "/enterprise?" + "&".join(f"k{i}=1" for i in range(65))):
+        with pytest.raises(ValidationError):
+            service.authorize_route(db, owner, invalid)
+    monkeypatch.setattr(service.rbac_service, "is_admin_user", lambda *_args: True)
+    monkeypatch.setattr(service.rbac_service, "is_super_admin_user", lambda *_args: False)
+    with pytest.raises(ForbiddenError):
+        service.authorize_route(db, owner, "/admin/platform?section=%6C%6C%6D")
+    with pytest.raises(ForbiddenError):
+        service.authorize_route(db, owner, "/admin/platform?section=beta-codes&section=%6C%6C%6D")
 
 
 @pytest.mark.parametrize("route", ["/admin/embedding", "/admin/mcp-workers", "/admin/llm",
@@ -539,7 +620,9 @@ async def test_pending_run_creation_window_uses_real_checkpoint_id_and_keeps_own
         assert restored.run_id == run_id
         assert restored.last_response["id"] == "resp_upstream_response"
         confirmed = (await client.get("/api/agent-responses/session", params=params, headers=headers)).json()["data"]
-        assert (confirmed["surface"], confirmed["session_id"], confirmed["run"]["run_id"]) == (surface, session_key, run_id)
+        assert (confirmed["surface"], confirmed["session_id"], confirmed["run"]["run_id"]) == (
+            surface, session_key, run_id,
+        )
         unknown = await client.get(
             "/api/agent-browser/pending",
             params={**params, "run_id": "run_never_created"},
@@ -575,13 +658,15 @@ async def test_pending_run_creation_window_uses_real_checkpoint_id_and_keeps_own
         ))
         try:
             await asyncio.sleep(0)
-            recovered = (await client.get("/api/agent-browser/pending", params=params, headers=headers)).json()["data"]["actions"][0]
+            pending = await client.get("/api/agent-browser/pending", params=params, headers=headers)
+            recovered = pending.json()["data"]["actions"][0]
             action_path = f"/api/agent-browser/actions/{recovered['action_id']}"
             context = {"session_id": session_key, "surface": surface, "client_nonce": recovered["client_nonce"]}
             claimed = await client.post(action_path + "/claim", json=context, headers=headers)
             assert claimed.status_code == 200
             receipt = {**context, **claimed.json()["data"], "outcome": "completed", "observation": {
-                "snapshot_id": recovered["observation_snapshot_id"], "route": "/forum", "title": "论坛", "controls": [], "messages": [],
+                "snapshot_id": recovered["observation_snapshot_id"], "route": "/forum",
+                "title": "论坛", "controls": [], "messages": [],
             }}
             receipt.pop("action_id")
             delivered = await client.post(action_path + "/ack", json=receipt, headers=headers)
@@ -614,12 +699,16 @@ def test_audit_reviewer_still_requires_permission_and_admin_keeps_access(db, own
 
 
 def test_agent_studio_legacy_route_uses_real_redirect_page_permissions(db, owner, monkeypatch):
-    monkeypatch.setattr(service.rbac_service, "check_permission", lambda _db, _id, permission: permission == "agent:view")
+    monkeypatch.setattr(
+        service.rbac_service, "check_permission", lambda _db, _id, permission: permission == "agent:view",
+    )
     assert service.authorize_route(db, owner, "/agent-studio") == "/agent-studio"
 
 
 def test_report_template_permission_does_not_bypass_admin_surface(db, owner, monkeypatch):
     monkeypatch.setattr(service.rbac_service, "is_admin_user", lambda *_args: False)
-    monkeypatch.setattr(service.rbac_service, "check_permission", lambda _db, _id, permission: permission == "report:template_manage")
+    monkeypatch.setattr(
+        service.rbac_service, "check_permission", lambda _db, _id, permission: permission == "report:template_manage",
+    )
     with pytest.raises(ForbiddenError):
         service.authorize_route(db, owner, "/report/templates")

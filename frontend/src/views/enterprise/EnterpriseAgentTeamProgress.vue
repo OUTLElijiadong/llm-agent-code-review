@@ -61,6 +61,7 @@
           <span :style="{ width: `${progressPercent}%` }" />
         </div>
         <p class="progress-count">已结束 {{ settledCount }}/{{ detail.tasks.length }} 项 · {{ completedCount }} 项完成</p>
+        <p v-if="actionNotice?.teamId === detail.team_id" class="task-summary" role="status">{{ actionNotice.text }}</p>
         <ul class="task-list">
           <li v-for="task in detail.tasks" :key="task.task_id" class="task-row">
             <div class="task-heading">
@@ -77,8 +78,27 @@
             <p v-else-if="task.errors.length && task.status === 'failed'" class="task-summary task-error">
               任务失败。请查看小菱会话回执；若费用状态不明，不要重试。
             </p>
+            <p v-if="task.status === 'awaiting_reconciliation'" class="task-summary task-error">
+              账单处理完成后可继续：确认未发送并释放后将重试；已结算但结果缺失时会结束任务，不会自动重发。
+            </p>
+            <details v-if="taskFindings(task).length" class="task-findings">
+              <summary>查看 {{ taskFindingCount(task) }} 项审查发现</summary>
+              <ol>
+                <li v-for="(finding, index) in taskFindings(task)" :key="`${task.task_id}:${index}:${findingTitle(finding)}`">
+                  <div class="finding-heading">
+                    <strong>{{ findingTitle(finding) || `发现项 ${index + 1}` }}</strong>
+                    <span>{{ findingSeverity(finding) }}</span>
+                  </div>
+                  <small v-if="findingLocation(finding)">{{ findingLocation(finding) }}</small>
+                  <p v-if="findingDescription(finding)">{{ findingDescription(finding) }}</p>
+                </li>
+              </ol>
+              <p v-if="taskFindingCount(task) > taskFindings(task).length" class="task-findings-limit">
+                当前显示前 {{ taskFindings(task).length }} 项；共 {{ taskFindingCount(task) }} 项。
+              </p>
+            </details>
             <button
-              v-if="task.status === 'retryable' && canControlSelectedTeam"
+              v-if="task.status === 'retryable' && canControlSelectedTeam && canCancel(detail.status)"
               type="button"
               class="retry-task"
               :disabled="busyAction !== null"
@@ -86,6 +106,13 @@
             >
               {{ busyAction === `retry:${task.task_id}` ? '提交中…' : '重试未计费任务' }}
             </button>
+            <button
+              v-if="task.status === 'awaiting_reconciliation' && canControlSelectedTeam && canCancel(detail.status)"
+              type="button"
+              class="retry-task"
+              :disabled="busyAction !== null"
+              @click="retryTask(task.task_id, true)"
+            >{{ busyAction === `retry:${task.task_id}` ? '处理中…' : '账单处理后继续' }}</button>
             <button
               v-if="hasSecurityArtifact(task)"
               :id="`security-report-trigger-${task.task_id}`"
@@ -195,6 +222,7 @@ const loadingMore = ref(false)
 const nextBeforeId = ref<number | null>(null)
 const busyAction = ref<string | null>(null)
 const error = ref('')
+const actionNotice = ref<{ teamId: number; text: string } | null>(null)
 const securityReport = ref<EnterpriseTeamSecurityArtifact | null>(null)
 const securityReportTaskId = ref<number | null>(null)
 const securityReportArtifactId = ref<number | null>(null)
@@ -403,6 +431,7 @@ function selectTeam(teamId: number) {
   if (!teams.value.some(team => team.team_id === teamId)) return
   if (!isCurrent(generation)) return
   clearSecurityReport()
+  actionNotice.value = null
   selectedTeamId.value = teamId
   detail.value = null
   const requestGeneration = generation
@@ -424,6 +453,21 @@ function displayValue(value: unknown, maxLength = 4000): string {
     try { return JSON.stringify(value).slice(0, maxLength) } catch { return '' }
   }
   return ''
+}
+function taskFindingData(task: EnterpriseAgentTeamTask) {
+  const evidence = task.result.evidence
+  if (!Array.isArray(evidence)) return []
+  for (const item of evidence) {
+    if (!isRecord(item) || item.source !== 'request_scoped_agent' || !isRecord(item.data)) continue
+    if (Array.isArray(item.data.issues)) return item.data.issues.filter(isRecord)
+  }
+  return []
+}
+function taskFindings(task: EnterpriseAgentTeamTask) {
+  return taskFindingData(task).slice(0, 20)
+}
+function taskFindingCount(task: EnterpriseAgentTeamTask) {
+  return taskFindingData(task).length
 }
 function hasSecurityArtifact(task: EnterpriseAgentTeamTask) {
   return task.agent_code === 'security_sentinel'
@@ -570,17 +614,32 @@ async function cancelTeam() {
   }
 }
 
-async function retryTask(taskId: number) {
+async function retryTask(taskId: number, afterReconciliation = false) {
   const teamId = selectedTeamId.value
-  if (!teamId || !canControlSelectedTeam.value || busyAction.value) return
+  if (!teamId || !canControlSelectedTeam.value || busyAction.value || !detail.value || !canCancel(detail.value.status)) return
+  const task = detail.value.tasks.find(item => item.task_id === taskId)
+  if (!task || task.status !== (afterReconciliation ? 'awaiting_reconciliation' : 'retryable')) return
   const requestGeneration = generation
   if (!isCurrent(requestGeneration)) return
   busyAction.value = `retry:${taskId}`
+  actionNotice.value = null
   try {
-    await retryEnterpriseAgentTeamTask(props.enterpriseId, teamId, taskId, getToken())
-    if (isCurrent(requestGeneration)) await refresh()
+    const result = await retryEnterpriseAgentTeamTask(props.enterpriseId, teamId, taskId, getToken())
+    if (!isCurrent(requestGeneration) || selectedTeamId.value !== teamId) return
+    const resolution = (result as typeof result & { resolution?: string }).resolution
+    await refresh()
+    if (!isCurrent(requestGeneration) || selectedTeamId.value !== teamId) return
+    if (resolution === 'released_not_sent') {
+      actionNotice.value = { teamId, text: '未发送的预占已释放，任务已排队重试。' }
+    } else if (resolution === 'settled_result_unavailable') {
+      actionNotice.value = { teamId, text: '账单已结算但结果缺失，任务已结束，未自动重发；可重新发起新任务。' }
+    }
   } catch {
-    if (isCurrent(requestGeneration)) error.value = '重试未提交。仅确认没有模型费用的任务可以重试，请刷新后检查状态。'
+    if (isCurrent(requestGeneration) && selectedTeamId.value === teamId) {
+      error.value = afterReconciliation
+        ? '暂不能继续，请确认账单已处理且任务未停止，再刷新状态重试。'
+        : '重试未提交。请刷新后检查费用及任务状态。'
+    }
   } finally {
     if (isCurrent(requestGeneration)) busyAction.value = null
   }
@@ -601,6 +660,7 @@ function invalidateScope() {
   loading.value = false
   loadingMore.value = false
   busyAction.value = null
+  actionNotice.value = null
   error.value = '登录状态已变化，请重新进入会话。'
 }
 function resetScope() {
@@ -691,6 +751,13 @@ onBeforeUnmount(() => {
 .task-heading strong { font-size: 12px; }
 .task-heading small { display: block; margin-top: 2px; color: #748197; font-size: 11px; }
 .task-summary { margin: 6px 0 0; color: #43536a; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.task-findings { margin-top: 7px; color: #43536a; font-size: 12px; }
+.task-findings summary { width: fit-content; color: #315f9b; cursor: pointer; }
+.task-findings ol { display: grid; gap: 7px; margin: 7px 0 0; padding-left: 20px; }
+.task-findings li { padding-left: 2px; }
+.task-findings small { display: block; margin-top: 3px; color: #748197; overflow-wrap: anywhere; }
+.task-findings li p, .task-findings-limit { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.task-findings-limit { color: #748197; }
 .task-error { color: #9a5730; }
 .retry-task { margin-top: 7px; padding: 4px 8px; font-size: 11px; }
 .team-control { display: flex; align-items: center; gap: 9px; margin-top: 10px; }

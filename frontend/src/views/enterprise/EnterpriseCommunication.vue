@@ -1,5 +1,6 @@
 <template>
-  <main ref="enterprisePageRef" class="enterprise-page">
+  <main ref="enterprisePageRef" class="enterprise-page" data-xiaoling-page="/enterprise"
+    :data-xiaoling-section="companyId ? activeSection : ''">
     <header class="page-header">
       <h1 ref="enterpriseHeadingRef" tabindex="-1">企业空间</h1>
       <div class="header-actions">
@@ -840,6 +841,7 @@ async function loadCompanies() {
     const result = await listMyEnterprises()
     if (!isCurrent()) return
     companies.value = result
+    workspace.setEnterpriseMembership(result.length > 0)
     if (accountId) pruneFormerEnterprises(accountId, new Set(result.map(item => item.id)))
     if (companyId.value && result.some(item => item.id === companyId.value)) {
       if (resourcesStale) await chooseCompany(companyId.value)
@@ -1318,6 +1320,9 @@ async function send() {
 }
 watch([currentUserId, () => user.token], ([current, token], [previous, previousToken]) => {
   if (current === previous && token === previousToken) return
+  // Clear the visible hint synchronously before Vue's next DOM update, so an
+  // overlapping assistant request cannot reuse the previous account's section.
+  enterprisePageRef.value?.setAttribute('data-xiaoling-section', '')
   const active = document.activeElement
   const restoreFocusToEnterprise = Boolean(enterprisePageRef.value?.contains(active)
     || chatPanelRef.value?.contains(active))

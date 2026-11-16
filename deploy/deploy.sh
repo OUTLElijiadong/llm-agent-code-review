@@ -76,6 +76,7 @@ current_state="$release_dir/current.env"
 previous_state="$release_dir/previous.env"
 pending_state="$release_dir/pending.env"
 f2_activation_state="$release_dir/xiaoling-f2-activation.env"
+billing_evidence_activation_state="$release_dir/billing-evidence-activation.env"
 current_release_version=""
 f2_already_active=0
 target_f2_required=0
@@ -423,11 +424,27 @@ if [[ "$target" == "all" || "$target" == "backend" ]]; then
       fatal "目标 Alembic head 与迁移 119 不在同一已知链上，拒绝绕过写入保护"
       ;;
   esac
+  deploy_stage="billing_evidence_preflight"
+  assert_billing_evidence_database_compatible "$billing_evidence_activation_state"
+  billing_target_relation="$(python3 "$repo_dir/deploy/lib/alembic_revision_compatibility.py" \
+    "$repo_dir/backend/alembic/versions" "$MIGRATION_ALEMBIC_HEAD" "121_billing_model_evidence")" \
+    || fatal "无法确认目标迁移链是否包含 121 计费证据"
+  case "$billing_target_relation" in
+    compatible) assert_billing_evidence_image_compatible "$MIGRATION_BACKEND_IMAGE_ID" ;;
+    descendant) [[ "$BILLING_EVIDENCE_DATABASE_STATE" == absent ]] \
+      || fatal "数据库已启用 121 计费证据，拒绝旧迁移目标" ;;
+    *) fatal "目标迁移链与 121 计费证据不兼容" ;;
+  esac
   deploy_stage="migration"
   migration_attempted=1
   run_admin_alembic upgrade head
   deploy_stage="migration_verify"
   assert_alembic_at_head || fatal "Alembic 未位于唯一 head"
+  assert_billing_evidence_database_compatible "$billing_evidence_activation_state"
+  if [[ "$billing_target_relation" == compatible ]]; then
+    [[ "$BILLING_EVIDENCE_DATABASE_STATE" == complete ]] \
+      || fatal "121 迁移后计费证据结构未完整生效"
+  fi
   if [[ "$chat_authority_gate_active" == "1" ]]; then
     chat_schema_state="$(chat_authority_database_state)" \
       || fatal "迁移后无法确认 119 聊天权限结构；Backend 保持停止"
@@ -445,6 +462,12 @@ if [[ "$target" == "all" || "$target" == "backend" ]]; then
   fi
   deployment_mutated=1
   deploy_stage="backend_switch"
+  if [[ "$BILLING_EVIDENCE_DATABASE_STATE" == complete ]]; then
+    [[ ! -L "$billing_evidence_activation_state" ]] || fatal "计费证据激活标记不能为符号链接"
+    billing_marker_tmp="$(mktemp "$release_dir/.billing-evidence-activation.XXXXXX")"
+    (umask 077; printf 'APP_VERSION=%s\nRELEASE_SHA=%s\n' "$app_version" "$target_sha") > "$billing_marker_tmp"
+    mv -f "$billing_marker_tmp" "$billing_evidence_activation_state"
+  fi
   if [[ "$f2_already_active" == "1" || "$target_f2_required" == "1" ]]; then
     # Persist F2 activation before a compatible image can run. Keep the marker
     # after success so later ordinary deploys cannot bypass the behavior probe.

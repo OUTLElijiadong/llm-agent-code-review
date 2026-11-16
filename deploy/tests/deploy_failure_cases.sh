@@ -5,7 +5,7 @@ run_deploy_failure_matrix() {
   local member_capability member_probe_failure
   local old_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   local new_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-  for scenario in tls backup verify backend_build migration backend_up backend_health backend_smoke frontend_build frontend_up assets frontend_health https ops_check rollback_failed ledger_empty_rollback_refused ledger_written_rollback_refused ledger_probe_failed member_empty_old_refused member_unknown_refused member_probe_failed legacy_head_partial_schema legacy_head_schema_mismatch legacy_head_database_ahead chat_multiple_revisions chat_confirmation_missing chat_partial_preexisting chat_database_ahead chat_complete_unversioned chat_revision_unknown chat_schema_query_failure chat_migration_graph_invalid chat_stop_failure chat_stop_verification_failure chat_partial_migration chat_migration_success chat_already_migrated_success chat_future_head_success chat_post_migration_health chat_post_migration_health_compatible f2_frontend_build f2_https f2_downgrade_preflight_refused f2_success; do
+  for scenario in tls backup verify backend_build migration backend_up backend_health backend_smoke frontend_build frontend_up assets frontend_health https ops_check rollback_failed ledger_empty_rollback_refused ledger_written_rollback_refused ledger_probe_failed member_empty_old_refused member_unknown_refused member_probe_failed legacy_head_partial_schema legacy_head_schema_mismatch legacy_head_database_ahead chat_multiple_revisions chat_confirmation_missing chat_partial_preexisting chat_database_ahead chat_complete_unversioned chat_revision_unknown chat_schema_query_failure chat_migration_graph_invalid chat_stop_failure chat_stop_verification_failure chat_partial_migration chat_migration_success chat_already_migrated_success chat_future_head_success chat_post_migration_health chat_post_migration_health_compatible f2_frontend_build f2_https f2_downgrade_preflight_refused f2_success billing_121_success billing_partial_preexisting billing_partial_migration billing_post_migration_old_refused billing_post_migration_compatible billing_target_old_refused; do
     workspace="$test_root/failure-matrix-$scenario"
     mkdir -p "$workspace/repo/deploy/lib" "$workspace/repo/backend/alembic" "$workspace/bin" "$workspace/releases"
     cp deploy.sh rollback.sh "$workspace/repo/deploy/"
@@ -36,10 +36,13 @@ SCRIPT
     cp lib/xiaoling_f2_compatibility.py "$workspace/repo/deploy/lib/"
     cp lib/chat_authority_schema_compatibility.py "$workspace/repo/deploy/lib/"
     cp lib/alembic_revision_compatibility.py "$workspace/repo/deploy/lib/"
+    cp lib/billing_evidence_compatibility.py lib/billing_evidence_schema_compatibility.py "$workspace/repo/deploy/lib/"
     cp -R ../backend/alembic/versions "$workspace/repo/backend/alembic/"
     python3 "$workspace/repo/deploy/lib/chat_authority_schema_compatibility.py" \
       "$workspace/repo/backend/alembic/versions/119_chat_message_authority.py" --fixture \
       > "$workspace/chat-authority-complete-schema.json"
+    python3 "$workspace/repo/deploy/lib/billing_evidence_schema_compatibility.py" --fixture \
+      > "$workspace/billing-evidence-complete-schema.json"
     release_version=3.8.4
     current_version=3.8.2
     if [[ "$scenario" == f2_frontend_build || "$scenario" == f2_https || "$scenario" == f2_success ]]; then
@@ -120,6 +123,14 @@ if [[ "${APP_RELEASE:-}" == bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb && "$FAIL_S
   printf 'unhealthy\n'
   exit 0
 fi
+if [[ "${APP_RELEASE:-}" == bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb && "$FAIL_SCENARIO" == billing_partial_migration && "$stage" == migration ]]; then
+  printf 'partial\n' > "${FAKE_BILLING_EVIDENCE_SCHEMA_FILE:?}"
+  exit 44
+fi
+if [[ "${APP_RELEASE:-}" == bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb && ( "$FAIL_SCENARIO" == billing_post_migration_old_refused || "$FAIL_SCENARIO" == billing_post_migration_compatible ) && "$stage" == backend_health ]]; then
+  printf 'unhealthy\n'
+  exit 0
+fi
 if [[ "${APP_RELEASE:-}" == bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb && "$FAIL_SCENARIO" == chat_post_migration_health_compatible && "$stage" == backend_health ]]; then
   printf 'injected:post_migration_backend_health\n' >> "$FAKE_DOCKER_LOG"
   printf 'unhealthy\n'
@@ -160,6 +171,8 @@ SCRIPT
     : > "$workspace/docker.log"
     db_revision_file="$workspace/db-revision"
     chat_schema_file="$workspace/chat-authority-schema"
+    billing_schema_file="$workspace/billing-evidence-schema"
+    printf 'absent\n' > "$billing_schema_file"
     chat_revision=048_ai_usage_attribution
     chat_head=048_ai_usage_attribution
     chat_revision_rows=""
@@ -217,6 +230,17 @@ down_revision = "119_chat_message_authority"
 branch_labels = None
 depends_on = None
 PY
+        # This synthetic pre-121 head is a valid ancestor, rather than a
+        # branch unrelated to the real 121 gate.
+        python3 - "$workspace/repo/backend/alembic/versions/121_billing_model_evidence.py" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+s = p.read_text(encoding='utf-8')
+assert s.count('down_revision = "120_discussion_turn_watermark"') == 1
+p.write_text(s.replace('down_revision = "120_discussion_turn_watermark"',
+                       'down_revision = "120_chat_authority_fixture"'), encoding='utf-8')
+PY
         ;;
       f2_frontend_build|f2_https|f2_success|f2_downgrade_preflight_refused)
         chat_revision=119_chat_message_authority
@@ -224,6 +248,14 @@ PY
         chat_capability=supported
         printf '%s\n' "$chat_revision" > "$db_revision_file"
         printf 'complete\n' > "$chat_schema_file"
+        ;;
+      billing_121_success|billing_partial_preexisting|billing_partial_migration|billing_post_migration_old_refused|billing_post_migration_compatible|billing_target_old_refused)
+        chat_revision=120_discussion_turn_watermark
+        chat_head=121_billing_model_evidence
+        chat_capability=supported
+        printf '%s\n' "$chat_revision" > "$db_revision_file"
+        printf 'complete\n' > "$chat_schema_file"
+        [[ "$scenario" != billing_partial_preexisting ]] || printf 'partial\n' > "$billing_schema_file"
         ;;
     esac
     ledger_schema=0 ledger_reference=0 probe_failure=0
@@ -254,6 +286,8 @@ PY
         FAKE_RELEASE_VERSION="$current_version" FAKE_ALEMBIC_REVISION="$chat_revision" FAKE_ALEMBIC_HEAD="$chat_head" \
         FAKE_ALEMBIC_CURRENT_ROWS="$chat_revision_rows" \
         FAKE_DB_REVISION_FILE="$db_revision_file" FAKE_CHAT_AUTHORITY_SCHEMA_FILE="$chat_schema_file" \
+        FAKE_BILLING_EVIDENCE_SCHEMA_FILE="$billing_schema_file" \
+        FAKE_BILLING_EVIDENCE_COMPLETE_FIXTURE="$workspace/billing-evidence-complete-schema.json" \
         FAKE_CHAT_AUTHORITY_COMPLETE_FIXTURE="$workspace/chat-authority-complete-schema.json" \
         FAKE_CHAT_OLD_CAPABILITY="$chat_capability" \
         FAKE_XIAOLING_F2_CAPABILITY="$f2_capability" \
@@ -274,6 +308,10 @@ PY
         FAKE_RELEASE_VERSION="$current_version" FAKE_ALEMBIC_REVISION="$chat_revision" FAKE_ALEMBIC_HEAD="$chat_head" \
         FAKE_ALEMBIC_CURRENT_ROWS="$chat_revision_rows" \
         FAKE_DB_REVISION_FILE="$db_revision_file" FAKE_CHAT_AUTHORITY_SCHEMA_FILE="$chat_schema_file" \
+        FAKE_BILLING_EVIDENCE_SCHEMA_FILE="$billing_schema_file" \
+        FAKE_BILLING_EVIDENCE_COMPLETE_FIXTURE="$workspace/billing-evidence-complete-schema.json" \
+        FAKE_BILLING_OLD_IMAGE_ID="$( [[ "$scenario" != billing_post_migration_old_refused ]] || printf 'sha256:%064d' 0 | tr 0 1 )" \
+        FAKE_BILLING_EVIDENCE_CAPABILITY="$( [[ "$scenario" != billing_target_old_refused ]] && printf supported || printf unsupported )" \
         FAKE_CHAT_AUTHORITY_COMPLETE_FIXTURE="$workspace/chat-authority-complete-schema.json" \
         FAKE_CHAT_OLD_CAPABILITY="$chat_capability" \
         FAKE_XIAOLING_F2_CAPABILITY="$f2_capability" \
@@ -292,7 +330,7 @@ PY
     rc=$?
     set -e
     if [[ "$scenario" == chat_migration_success || "$scenario" == chat_already_migrated_success \
-      || "$scenario" == chat_future_head_success || "$scenario" == f2_success ]]; then
+      || "$scenario" == chat_future_head_success || "$scenario" == f2_success || "$scenario" == billing_121_success ]]; then
       [[ "$rc" == 0 ]] || { cat "$workspace/output.log"; printf '119 success fixture failed: rc=%s\n' "$rc" >&2; exit 1; }
       assert_contains "$workspace/releases/current.env" "RELEASE_SHA=$new_sha"
       [[ ! -f "$workspace/releases/pending.env" ]]
@@ -320,7 +358,7 @@ PY
       tls) assert_contains "$workspace/output.log" 'Frontend TLS / ACME 持久化挂载未通过预检' ;;
       backup) expected_rc=41 ;;
       verify) expected_rc=42 ;;
-      backend_build|migration|backend_up|frontend_build|frontend_up|chat_partial_migration|f2_frontend_build) expected_rc=44 ;;
+      backend_build|migration|backend_up|frontend_build|frontend_up|chat_partial_migration|f2_frontend_build|billing_partial_migration) expected_rc=44 ;;
       assets) expected_rc=43 ;;
       chat_stop_failure|chat_stop_verification_failure) expected_rc=1 ;;
     esac
@@ -345,6 +383,38 @@ PY
       }
     fi
     case "$scenario" in
+      billing_partial_preexisting|billing_partial_migration|billing_post_migration_old_refused)
+        expected_rollback=billing_compatibility_gated
+        assert_contains "$workspace/docker.log" 'compose stop backend'
+        assert_not_contains "$workspace/docker.log" "compose up -d --no-deps --no-build --pull never backend | release=$old_sha"
+        [[ -f "$workspace/stopped" ]]
+        [[ -f "$workspace/releases/pending.env" ]]
+        case "$scenario" in
+          billing_partial_preexisting|billing_partial_migration)
+            assert_contains "$workspace/output.log" '121 计费证据结构不完整或与迁移版本不一致'
+            [[ "$(cat "$billing_schema_file")" == partial ]] ;;
+          billing_post_migration_old_refused)
+            assert_contains "$workspace/output.log" '目标镜像未通过 121 计费证据兼容检查'
+            [[ -f "$workspace/releases/billing-evidence-activation.env" ]]
+            [[ "$(cat "$billing_schema_file")" == complete ]] ;;
+        esac
+        ;;
+      billing_target_old_refused)
+        expected_rollback=billing_compatibility_gated
+        assert_contains "$workspace/output.log" '目标镜像未通过 121 计费证据兼容检查'
+        assert_not_contains "$workspace/docker.log" 'upgrade head'
+        assert_contains "$workspace/docker.log" "compose up -d --no-deps --no-build --pull never backend | release=$old_sha"
+        [[ "$(cat "$billing_schema_file")" == absent ]]
+        [[ ! -f "$workspace/releases/billing-evidence-activation.env" ]]
+        ;;
+      billing_post_migration_compatible)
+        expected_rollback=billing_compatibility_gated
+        assert_contains "$workspace/output.log" '兼容门允许的应用层回滚完成'
+        assert_contains "$workspace/docker.log" "compose up -d --no-deps --no-build --pull never backend | release=$old_sha"
+        [[ "$(cat "$billing_schema_file")" == complete ]]
+        [[ -f "$workspace/releases/billing-evidence-activation.env" ]]
+        [[ ! -f "$workspace/releases/pending.env" ]]
+        ;;
       tls|backup|verify|backend_build|migration|f2_downgrade_preflight_refused)
         expected_rollback=not_switched
         cmp "$workspace/original.env" "$workspace/releases/current.env"

@@ -52,12 +52,14 @@ describe('Agent 治理中心页签导航', () => {
     navigation.superAdmin = false
     const ordinary = shallowMount(AdminUnifiedCenter, options)
     expect(ordinary.text()).not.toContain('渗透执行核查')
+    expect(ordinary.get('.unified-center').attributes('data-xiaoling-section')).toBe('overview')
     await flushPromises()
     await vi.dynamicImportSettled()
     ordinary.unmount()
     navigation.superAdmin = true
     const administrator = shallowMount(AdminUnifiedCenter, options)
     expect(administrator.text()).toContain('渗透执行核查')
+    expect(administrator.get('.unified-center').attributes('data-xiaoling-section')).toBe('pentest-evidence')
     await flushPromises()
     await vi.dynamicImportSettled()
     administrator.unmount()

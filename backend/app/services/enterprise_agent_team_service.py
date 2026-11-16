@@ -26,10 +26,8 @@ from app.models.enterprise_project import EnterpriseProject, EnterpriseProjectGr
 from app.models.project import Project
 from app.services import enterprise_chat_service, enterprise_org_service
 
-# security_sentinel's existing Agent Mesh handler reads persisted project/file/task
-# records. Enterprise team plans intentionally accept only caller-supplied text and
-# reject those resource identifiers, so exposing it here would queue a task that can
-# never execute under the advertised contract.
+# The security sentinel reads only a project explicitly bound and authorized on the
+# team plan; individual task inputs accept scan options, not resource identifiers.
 _EXECUTABLE_AGENT_CODES = frozenset({"language_detector", "code_reviewer", "security_sentinel"})
 
 

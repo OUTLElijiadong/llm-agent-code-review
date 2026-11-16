@@ -50,11 +50,21 @@ def test_enterprise_agent_team_tools_expose_only_bounded_registered_agents():
     } <= tools.keys()
     create = tools["create_registered_enterprise_agent_team"]
     member_agent = create["parameters"]["properties"]["members"]["items"]["properties"]["agent_code"]
-    assert member_agent["enum"] == ["language_detector", "code_reviewer"]
+    assert member_agent["enum"] == ["language_detector", "code_reviewer", "security_sentinel"]
+    assert create["parameters"]["properties"]["project_id"] == {"type": "integer", "minimum": 1}
     description = create["description"]
-    assert "不可传项目 ID、URL、MCP、远测、运维或写操作" in description
+    assert "不能自报项目 ID、URL、MCP、远测、运维或写操作" in description
+    assert "security:scan" in description
+    assert "只读项目安全扫描" in description
     assert "持久队列异步执行" in description
     assert "取消父运行、撤权或权限快照变化" in description
+    instructions = runtime._instructions()
+    assert "安全哨兵只能只读扫描已绑定且发起人有权执行的企业项目" in instructions
+    assert "团队计划顶层提供真实 project_id" in instructions
+    assert "security:scan" in instructions
+    assert "不得依赖前序任务结果" in instructions
+    assert "除安全哨兵对绑定授权项目的只读扫描外" in instructions
+    assert "该工具当前只接受语言识别、代码质量审查、安全分析三个 Agent 的短文本输入" not in instructions
     engine.dispose()
 
 
@@ -94,15 +104,16 @@ def test_enterprise_web_tool_dispatch_rechecks_original_initiator_and_never_appr
     factory = sessionmaker(bind=engine)
     calls = []
     monkeypatch.setattr(runtime.EnterpriseAssistantToolExecutor, "_action_clarification", lambda *_args: None)
+    monkeypatch.setattr(runtime, "_validated_billing_group", lambda *_args: 9)
     with factory() as db:
         executor = runtime.EnterpriseAssistantToolExecutor(
             db, enterprise_id=10, conversation_id=20, run_public_id="web-dispatch",
             lease_generation=1, actor_user_id=2,
         )
-        monkeypatch.setattr(executor, "_current", lambda: (SimpleNamespace(initiator_user_id=2), {}))
+        monkeypatch.setattr(executor, "_current", lambda **_kwargs: (SimpleNamespace(initiator_user_id=2), {}))
 
-        async def execute_search(call, state, *, tool_name, arguments):
-            calls.append((call.call_id, state.initiator_user_id, tool_name, arguments))
+        async def execute_search(call, state, *, group_id, tool_name, arguments):
+            calls.append((call.call_id, state.initiator_user_id, group_id, tool_name, arguments))
             return runtime.ToolExecutionResult.success({"billable": True})
 
         monkeypatch.setattr(executor, "_execute_search_fetch", execute_search)
@@ -112,7 +123,7 @@ def test_enterprise_web_tool_dispatch_rechecks_original_initiator_and_never_appr
         )
         result = asyncio.run(executor.execute(call))
         assert result.status == "success"
-        assert calls == [("web-call", 2, "search_enterprise_web", {"query": "latest"})]
+        assert calls == [("web-call", 2, 9, "search_enterprise_web", {"query": "latest"})]
         denied = asyncio.run(executor.execute(call, approved=True))
         assert denied.status == "error" and denied.failure_kind == "authorization"
     engine.dispose()

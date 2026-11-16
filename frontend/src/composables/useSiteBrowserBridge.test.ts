@@ -2,7 +2,7 @@ import { mount } from '@vue/test-utils'
 import { AxiosError, type AxiosResponse, type InternalAxiosRequestConfig } from 'axios'
 import { defineComponent, h, reactive, ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Router } from 'vue-router'
+import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import http from '@/api/http'
 import { siteBrowserApi, type SiteBrowserRequiredEvent } from '@/api/siteBrowser'
 import { ElMessage } from 'element-plus/es/components/message/index'
@@ -34,6 +34,9 @@ function rejectRequest(config: InternalAxiosRequestConfig, status: number, code:
 function mountBridge(surface: 'user' | 'admin') {
   const sessionId = ref('browser-session'), runId = ref(''), status = ref(''), stopped = ref(false)
   const currentRoute = ref({ fullPath: '/forum' })
+  const resolver = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/forum', component: {} }, { path: '/forum/:id', component: {} },
+  ] })
   const navigate = vi.fn(async (path: string) => { currentRoute.value.fullPath = path })
   wrappers.push(mount(defineComponent({
     setup() {
@@ -43,17 +46,18 @@ function mountBridge(surface: 'user' | 'admin') {
         runId: () => runId.value,
         status: () => status.value,
         isStopped: () => stopped.value,
-        router: { currentRoute, push: navigate } as unknown as Router,
+        router: { currentRoute, push: navigate, resolve: resolver.resolve } as unknown as Router,
       })
-      return () => h('main')
+      return () => h('main', [h('h1', { key: currentRoute.value.fullPath }, currentRoute.value.fullPath)])
     },
-  })))
+  }), { attachTo: document.body }))
   return { sessionId, runId, status, stopped, navigate }
 }
 
 beforeEach(() => {
   vi.useFakeTimers()
   vi.clearAllMocks()
+  vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{ width: 20, height: 20 }] as unknown as DOMRectList)
   sessionStorage.clear()
   actor.profile.id = 7
   actor.token = 'browser-owner-token'
@@ -62,6 +66,7 @@ beforeEach(() => {
 afterEach(() => {
   for (const wrapper of wrappers.splice(0)) wrapper.unmount()
   http.defaults.adapter = originalAdapter
+  vi.restoreAllMocks()
   vi.useRealTimers()
 })
 
@@ -194,8 +199,8 @@ describe('页面桥的运行创建与恢复时序', () => {
     expect(ElMessage.error).not.toHaveBeenCalled()
 
     committed = true
-    // 2s 重试轮询 + 跳转后最多 3s 等待目标页渲染（测试页无标题，会走满超时）。
-    await vi.advanceTimersByTimeAsync(2080 + 3200)
+    // 2s 重试轮询，路由组件随之渲染新的目标标题。
+    await vi.advanceTimersByTimeAsync(2200)
     expect(requests.map(request => request.url)).toEqual([
       '/agent-browser/pending',
       '/agent-browser/actions/9/claim', '/agent-browser/actions/9/ack',
@@ -209,9 +214,15 @@ describe('页面桥的运行创建与恢复时序', () => {
     })
     expect(ElMessage.error).not.toHaveBeenCalled()
 
+    // 运行未结束时会继续恢复轮询；重复返回的动作不能被再次认领。
+    await vi.advanceTimersByTimeAsync(2200)
+    expect(requests.filter(request => request.url?.endsWith('/pending'))).toHaveLength(2)
+    expect(requests.filter(request => request.url?.endsWith('/claim'))).toHaveLength(1)
+    expect(requests.filter(request => request.url?.endsWith('/ack'))).toHaveLength(1)
+
     scope.status.value = 'completed'
     await vi.advanceTimersByTimeAsync(5000)
-    expect(requests).toHaveLength(3)
+    expect(requests).toHaveLength(4)
   })
 
   it.each([

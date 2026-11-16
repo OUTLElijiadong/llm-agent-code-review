@@ -21,6 +21,7 @@ interface Options {
   current: () => SiteBrowserContext
   canNavigate: (route: string) => boolean
   navigate: (route: string) => Promise<unknown>
+  expectedRoute?: (route: string) => string | null
   settle: () => Promise<unknown>
   isActive?: () => boolean
   api?: SiteBrowserApi
@@ -89,6 +90,17 @@ function same(left: SiteBrowserContext, right: SiteBrowserContext): boolean {
   return !!left.token && left.accountId === right.accountId && left.token === right.token
     && left.sessionId === right.sessionId && left.runId === right.runId && left.surface === right.surface
 }
+
+function matchesRoute(actual: string, expected: string): boolean {
+  const origin = 'https://prism.invalid'
+  const current = new URL(actual, origin)
+  const target = new URL(expected, origin)
+  if (current.origin !== origin || target.origin !== origin || current.pathname !== target.pathname) return false
+  for (const key of new Set(target.searchParams.keys())) {
+    if (JSON.stringify(current.searchParams.getAll(key)) !== JSON.stringify(target.searchParams.getAll(key))) return false
+  }
+  return true
+}
 function randomHandle(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(16)), value => value.toString(16).padStart(2, '0')).join('')
 }
@@ -118,18 +130,18 @@ export function createSiteBrowserBridge(options: Options) {
   let generation = 0
   let snapshot: Snapshot | null = null
   let queue = Promise.resolve()
-  /** 懒加载页面在 router.push 之后才渲染：等路由落定且主内容区出现新标题，最多 3 秒。 */
-  async function waitForRouteRender(route: string): Promise<void> {
-    const targetPath = route.split(/[?#]/)[0]!
-    const before = scopeRoots()[0]?.querySelector('h1,h2,[role="heading"]')?.textContent || ''
+  /** 懒加载页面在 router.push 后才渲染，未能观察到目标则不能宣称导航完成。 */
+  async function waitForRouteRender(route: string, previousPath: string, previousHeading: Element | null): Promise<void> {
     const deadline = Date.now() + 3000
     while (Date.now() < deadline) {
       await options.settle()
-      const onRoute = options.current().route.split(/[?#]/)[0] === targetPath
-      const heading = scopeRoots()[0]?.querySelector('h1,h2,[role="heading"]')?.textContent || ''
-      if (onRoute && heading && heading !== before) return
+      const heading = scopeRoots()[0]?.querySelector('h1,h2,[role="heading"]') || null
+      const changedPage = previousPath !== new URL(route, 'https://prism.invalid').pathname
+      if (matchesRoute(options.current().route, route) && heading?.textContent?.trim()
+          && (!changedPage || !previousHeading || heading !== previousHeading)) return
       await new Promise(resolve => setTimeout(resolve, 120))
     }
+    throw new Error('未能确认目标页面已呈现')
   }
 
   function observe(id: string, context: SiteBrowserContext): SiteBrowserObservation {
@@ -202,8 +214,13 @@ export function createSiteBrowserBridge(options: Options) {
       if (event.action === 'navigate') {
         const route = event.args.route || ''
         if (!isSafeXiaolingRoute(route) || !options.canNavigate(route)) throw new Error('目标不是当前账号可访问的站内业务页面')
+        const expected = options.expectedRoute ? options.expectedRoute(route) : route
+        if (!expected || !isSafeXiaolingRoute(expected)) throw new Error('无法核对目标页面的正式路由')
+        const previousPath = new URL(options.current().route, 'https://prism.invalid').pathname
+        const previousHeading = scopeRoots()[0]?.querySelector('h1,h2,[role="heading"]') || null
         began = true; await options.navigate(route)
-        await waitForRouteRender(route)
+        if (!matchesRoute(options.current().route, expected)) throw new Error('导航未到达目标页面')
+        await waitForRouteRender(expected, previousPath, previousHeading)
       } else if (event.action !== 'inspect') {
         const element = event.action === 'scroll' && !event.args.client_handle ? scopeRoots()[0] : target(event, options.current())
         if (!element) throw new Error('当前业务页面不可用')

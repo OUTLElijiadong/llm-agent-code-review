@@ -74,8 +74,11 @@ class EnterpriseAgentTeamCreatePlan(_StrictModel):
         if len(task_keys) != len(set(task_keys)):
             raise ValueError("团队任务标识必须唯一")
         known_members, known_tasks = set(member_keys), set(task_keys)
+        member_agents = {member.member_key: member.agent_code for member in self.members}
         if any(task.member_key not in known_members for task in self.tasks):
             raise ValueError("团队任务引用了不存在的成员")
+        if any(member_agents[task.member_key] == "security_sentinel" and task.depends_on for task in self.tasks):
+            raise ValueError("安全哨兵必须直接扫描绑定项目，不能依赖其他任务结果")
         if any(task.task_key in task.depends_on or not set(task.depends_on) <= known_tasks for task in self.tasks):
             raise ValueError("团队任务存在自依赖或未知依赖")
         graph = {task.task_key: set(task.depends_on) for task in self.tasks}

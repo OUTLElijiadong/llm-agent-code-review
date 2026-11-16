@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from app.core.exceptions import ForbiddenError
+from app.models.enterprise_org import EnterpriseMember
 from app.models.user import User
 from app.schemas.common import PageOut, Resp
 from app.schemas.forum import (
@@ -21,7 +23,21 @@ from app.schemas.forum import (
 )
 from app.services import forum_service, personalization_service
 
-router = APIRouter()
+
+def _require_personal_account_forum_access(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> None:
+    """Enterprise members use their company community instead of the public forum."""
+    is_enterprise_member = db.query(EnterpriseMember.id).filter(
+        EnterpriseMember.user_id == user.id,
+        EnterpriseMember.status == "active",
+    ).first()
+    if is_enterprise_member:
+        raise ForbiddenError("企业成员请使用公司社区")
+
+
+router = APIRouter(dependencies=[Depends(_require_personal_account_forum_access)])
 
 
 @router.get("/posts", response_model=Resp[PageOut[PostListItemOut]])

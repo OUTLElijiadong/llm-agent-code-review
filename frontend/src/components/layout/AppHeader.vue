@@ -86,6 +86,7 @@ const searchItems = computed<SearchItem[]>(() => {
     if (item.admin && !isAdmin.value) return false
     if (item.action === 'agent' && !canUseAgent.value) return false
     if (item.path && !isNavigationPathAllowed(router, item.path, userStore)) return false
+    if (item.path === '/forum' && workspaceStore.hasEnterpriseMembership !== false) return false
     if (item.path && router.resolve({ path: item.path }).meta.workspace === 'personal'
       && workspaceStore.activeSpace === 'enterprise') return false
     return true

@@ -9,6 +9,7 @@ import inspect
 import json
 import re
 import secrets
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from time import monotonic, sleep
 from typing import Any, Mapping
@@ -20,6 +21,7 @@ from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, Va
 from app.core.permission_codes import PermissionCode
 from app.models.agent_browser_action import AgentBrowserAction
 from app.models.agent_response_run import AgentResponseRun, response_run_stop_requested
+from app.models.enterprise_org import EnterpriseMember
 from app.models.user import User
 from app.schemas.agent_browser import BrowserAckIn
 from app.services import agent_supervisor_service, rbac_service
@@ -79,6 +81,7 @@ _EVENT_FIELDS = (
 _ROUTES = (
     (r"/", ()),
     (r"/dashboard", ()),
+    (r"/(?:enterprise|usage|billing|my-agents|agent-assets)", ()),
     (r"/projects(?:/\d+)?", ("project:view",)),
     (r"/reviews/start", ("review:start",)),
     (r"/reviews(?:/\d+)?", ("review:view",)),
@@ -100,12 +103,14 @@ _ROUTES = (
     (r"/support(?:/(?:maintenance|feedback))?", ()),
     (r"/profile(?:/(?:personalization|password|api-config))?", ()),
     (
-        r"/admin(?:/(?:governance|operations|security-center|access|platform|overview|agents|approvals|agent-releases|beta-codes|policies|tools|knowledge|jobs|observability|rewards|rollback|users|rbac/(?:roles|permissions|users)|ai-logs|report-templates|audit|evolution|skills|embedding|mcp-workers|llm))?",
+        r"/admin(?:/(?:governance|operations|security-center|access|platform|overview|agents|approvals|agent-releases|beta-codes|policies|tools|knowledge|jobs|observability|rewards|rollback|users|rbac/(?:roles|permissions|users)|ai-logs|report-templates|audit|evolution|skills|embedding|mcp-workers|llm|billing-refunds|billing-statements|billing-reservations|billing-reviews|billing-rate-reviews|billing-refund-reviews|billing-pricing|enterprise-asset-publications))?",
         (),
     ),
 )
 _SUPER_ADMIN_ROUTES = frozenset(
-    {"/admin/security-center", "/admin/embedding", "/admin/mcp-workers", "/admin/llm"}
+    {"/admin/security-center", "/admin/embedding", "/admin/mcp-workers", "/admin/llm",
+     "/admin/billing-refunds", "/admin/billing-statements", "/admin/billing-reservations",
+     "/admin/billing-pricing", "/admin/enterprise-asset-publications"}
 )
 _SUPER_ADMIN_PLATFORM_SECTIONS = frozenset({"embedding", "mcp-workers", "llm"})
 
@@ -130,21 +135,36 @@ def _clean(value: str, limit: int = 500) -> str:
 def authorize_route(db: Session, user: User, route: str) -> str:
     if not isinstance(route, str) or len(route) > 500 or not route.startswith("/") or route.startswith("//"):
         raise ValidationError("页面路径必须是本站已登记的路由")
-    if any(char in route for char in ("\\", "%", "#")) or any(ord(char) < 32 for char in route):
+    if any(char in route for char in ("\\", "#")) or any(unicodedata.category(char) == "Cc" for char in route):
         raise ValidationError("页面路径包含不支持的编码或控制字符")
     parts = urlsplit(route)
     if parts.scheme or parts.netloc or parts.fragment:
         raise ValidationError("禁止外部 URL 或脚本导航")
+    if "%" in parts.path or re.search(r"%(?![0-9a-fA-F]{2})", parts.query):
+        raise ValidationError("页面路径包含不支持的编码")
+    try:
+        query = parse_qs(parts.query, keep_blank_values=True, errors="strict", max_num_fields=64)
+    except (ValueError, UnicodeError) as exc:
+        raise ValidationError("页面参数编码无效") from exc
+    if any(unicodedata.category(char) == "Cc" or char == "\\"
+           for key, values in query.items() for value in (key, *values) for char in value):
+        raise ValidationError("页面参数包含不支持的控制字符")
     if parts.path == "/report/templates":
         route = "/admin/report-templates" + (f"?{parts.query}" if parts.query else "")
         parts = urlsplit(route)
     found = next((permissions for pattern, permissions in _ROUTES if re.fullmatch(pattern, parts.path)), None)
     if found is None:
         raise ValidationError("页面未登记，停止猜测目标")
+    if parts.path == "/forum" or parts.path.startswith("/forum/"):
+        membership = (db.query(EnterpriseMember.id)
+                      .filter_by(user_id=int(user.id), status="active")
+                      .with_for_update(read=True).first())
+        if membership is not None:
+            raise ForbiddenError("企业成员请使用公司社区")
     is_admin = rbac_service.is_admin_user(db, int(user.id))
     if parts.path.startswith("/admin") and not is_admin:
         raise ForbiddenError("当前账号不能操作管理页面")
-    sections = parse_qs(parts.query).get("section", [])
+    sections = query.get("section", [])
     super_admin_target = parts.path in _SUPER_ADMIN_ROUTES or (
         parts.path == "/admin/platform" and bool(_SUPER_ADMIN_PLATFORM_SECTIONS.intersection(sections))
     )

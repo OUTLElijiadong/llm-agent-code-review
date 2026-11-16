@@ -113,9 +113,9 @@ function selectTab(value: string | number): void {
 </script>
 
 <template>
-  <div class="unified-center">
+  <div class="unified-center" :data-xiaoling-page="route.path" :data-xiaoling-section="activeName">
     <header class="unified-head">
-      <p v-if="activeName !== 'pentest-evidence'" class="unified-description">{{ sectionDescription }}</p>
+      <p v-if="domain !== 'platform' && activeName !== 'pentest-evidence'" class="unified-description">{{ sectionDescription }}</p>
       <el-tabs :model-value="activeName" @tab-change="selectTab">
         <el-tab-pane v-for="tab in visibleTabs" :key="tab.name" :label="tab.label" :name="tab.name" />
       </el-tabs>

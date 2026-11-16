@@ -703,6 +703,34 @@ def mark_tool_attempt_started(db: Session, request_key: str, *, now=None) -> Bil
     return reservation
 
 
+def mark_model_attempt_started(db: Session, request_key: str, *, now=None) -> BillingReservation:
+    """Persist a model send marker before the caller enters its provider guard."""
+    at = _naive_utc(now) if now is not None else _now()
+    row = db.query(BillingReservation).filter_by(request_key=request_key).first()
+    if row is None or row.billable_kind != "model":
+        raise BillingError("模型 reservation 不存在")
+    parts = db.query(BillingReservationPart).filter_by(
+        reservation_id=row.id,
+    ).order_by(BillingReservationPart.id).all()
+    locked_wallets = _lock_wallets(db, _reservation_wallet_ids(row, parts))
+    reservation = (db.query(BillingReservation).filter_by(request_key=request_key)
+                   .populate_existing().with_for_update().one())
+    parts = (db.query(BillingReservationPart).filter_by(reservation_id=reservation.id)
+             .order_by(BillingReservationPart.id).populate_existing().with_for_update().all())
+    _require_locked_reservation_wallets(reservation, parts, locked_wallets)
+    if reservation.status != "reserved" or reservation.provider_attempt_started_at is not None:
+        raise IdempotencyConflict("模型调用已开始或已结束，禁止再次发送")
+    if _reservation_provider_identity(reservation) is None or _reservation_rates(reservation) is None:
+        raise BillingError("模型预占缺少可信供应商或费率快照，不能发送")
+    if any((reservation.input_tokens is not None, reservation.output_tokens is not None,
+            reservation.server_tool_search_calls is not None,
+            reservation.server_tool_fetch_calls is not None, reservation.actual_milli is not None)):
+        raise BillingError("模型 reservation 已写入用量，不能再次发送")
+    reservation.provider_attempt_started_at = at
+    db.flush()
+    return reservation
+
+
 def settle_tool(db: Session, *, request_key: str, tool_successful_calls: int,
                 nonbillable: bool = False, now=None) -> BillingReservation:
     """Settle one tool attempt from its immutable unit-price snapshot."""
@@ -918,12 +946,40 @@ def release_not_sent(db: Session, request_key: str, *, now=None) -> BillingReser
     return _release_not_sent(db, request_key, allowed_states={"reserved"}, now=now)
 
 
-def release_verified_not_sent(db: Session, request_key: str, *, now=None) -> BillingReservation:
+def release_model_attempt_not_sent(db: Session, request_key: str, *, now=None) -> BillingReservation:
+    """Release a model hold only after its final send guard proves no provider call began.
+
+    The caller must invoke this only on a control-flow path that never called the
+    provider callback. Clearing the marker and releasing the hold share one
+    transaction, so a crash cannot make the same reservation sendable again.
+    """
+    row = db.query(BillingReservation).filter_by(request_key=request_key).first()
+    if row is None or row.billable_kind != "model":
+        raise BillingError("模型待释放预占不存在")
+    return _release_not_sent(
+        db,
+        request_key,
+        allowed_states={"reserved"},
+        allow_model_attempt=True,
+        now=now,
+    )
+
+
+def release_verified_not_sent(db: Session, request_key: str, *, fenced_model_attempt: bool = False,
+                              now=None) -> BillingReservation:
     """Release a possibly-sent reservation only after an audited two-person review proves no send."""
-    return _release_not_sent(db, request_key, allowed_states={"reserved", "unknown"}, now=now)
+    return _release_not_sent(db, request_key, allowed_states={"reserved", "unknown"},
+                             allow_model_attempt=fenced_model_attempt, now=now)
 
 
-def _release_not_sent(db: Session, request_key: str, *, allowed_states: set[str], now=None) -> BillingReservation:
+def _release_not_sent(
+    db: Session,
+    request_key: str,
+    *,
+    allowed_states: set[str],
+    allow_model_attempt: bool = False,
+    now=None,
+) -> BillingReservation:
     now = _naive_utc(now) if now is not None else _now()
     res = db.query(BillingReservation).filter_by(request_key=request_key).first()
     if res is None:
@@ -950,7 +1006,9 @@ def _release_not_sent(db: Session, request_key: str, *, allowed_states: set[str]
         res.server_tool_fetch_calls is not None,
     )):
         raise BillingError("预占已记录供应商用量，不能按未发送证据释放")
-    if res.provider_attempt_started_at is not None:
+    if res.provider_attempt_started_at is not None and not (
+        allow_model_attempt and res.billable_kind == "model"
+    ):
         raise BillingError("provider attempt 已持久化；不能再按未发送释放")
 
     for part in parts:
@@ -971,6 +1029,8 @@ def _release_not_sent(db: Session, request_key: str, *, allowed_states: set[str]
         limit.reserved_milli -= int(item.reserved_milli)
     res.status = "released"
     res.usage_state = "not_sent"
+    if allow_model_attempt:
+        res.provider_attempt_started_at = None
     res.settled_at = now
     db.flush()
     return res

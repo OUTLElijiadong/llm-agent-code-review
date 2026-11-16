@@ -55,6 +55,16 @@ describe('委任的账本复核', () => {
     wrapper.unmount()
   })
 
+  it('委任复核者能看到管理员提交的外部工具计数并独立核验', async () => {
+    api.detail.mockResolvedValue({ ...pending, proposal: { ...pending.proposal,
+      model_search_calls_evidence: 0, model_fetch_calls_evidence: 0 } })
+    const wrapper = mount(BillingC4Reviews)
+    await flushPromises(); await wrapper.get('[data-review="5"]').trigger('click'); await flushPromises()
+    expect(wrapper.text()).toContain('管理员提交：Search 0 · Fetch 0')
+    expect(wrapper.text()).toContain('系统不会自动验证证据真实性')
+    wrapper.unmount()
+  })
+
   it('无委任权限时清除待审内容并提供明确状态', async () => {
     api.list.mockRejectedValue({ code: 40300 })
     const wrapper = mount(BillingC4Reviews)

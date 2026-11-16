@@ -33,7 +33,7 @@ from app.models.agent_response_run import (
 )
 from app.models.user import User
 from app.schemas.common import Resp, StrictInputModel
-from app.services import agent_mesh_service, agent_run_salvage, rbac_service
+from app.services import agent_mesh_service, agent_run_salvage, page_guide_service, rbac_service
 from app.services.agent_responses_service import (
     AgentResponsesService,
     DatabaseCheckpointStore,
@@ -219,6 +219,32 @@ class AgentResponseMessage(StrictInputModel):
         return value
 
 
+class AgentPageContext(StrictInputModel):
+    """Client-reported SPA location; a navigation hint, never an authorization claim."""
+
+    path: str = Field(min_length=1, max_length=300)
+    section: str = Field(default="", max_length=80)
+
+    @field_validator("path")
+    @classmethod
+    def validate_path(cls, value: str) -> str:
+        normalize_plain_text(value, field_name="页面路径", allow_empty=False)
+        allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/_-"
+        if (not value.startswith("/") or value.startswith("//") or ".." in value
+                or "?" in value or "#" in value or any(char not in allowed for char in value)):
+            raise ValueError("页面路径格式无效")
+        return value
+
+    @field_validator("section")
+    @classmethod
+    def validate_section(cls, value: str) -> str:
+        normalize_plain_text(value, field_name="页面分区", allow_empty=True)
+        allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+        if value and any(char not in allowed for char in value):
+            raise ValueError("页面分区格式无效")
+        return value
+
+
 class AgentResponsesRequest(StrictInputModel):
     action: Literal["start", "approve", "reject", "answer", "retry", "cancel"] = "start"
     surface: Literal["user", "admin"] = "user"
@@ -232,6 +258,7 @@ class AgentResponsesRequest(StrictInputModel):
     confirmation: str = Field(default="", max_length=20)
     cancel_reason: str = Field(default="", max_length=500)
     mesh_message_id: str = Field(default="", max_length=80)
+    page_context: Optional[AgentPageContext] = None
 
     @field_validator("session_id")
     @classmethod
@@ -282,6 +309,8 @@ class AgentResponsesRequest(StrictInputModel):
                 raise ValueError("用户消息与 Agent Mesh 消息不能在同一次启动中混用")
         elif not self.run_id:
             raise ValueError("恢复 Agent 运行必须提供 run_id")
+        if self.action != "start" and self.page_context is not None:
+            raise ValueError("页面上下文只能用于启动新对话轮次")
         if self.action != "start" and self.mesh_message_id:
             raise ValueError("恢复运行时不得重新指定 mesh_message_id")
         if self.action == "answer" and not self.answer.strip():
@@ -1665,6 +1694,11 @@ async def stream_agent_response(
                     run_user,
                     surface=payload.surface,
                     session_key=payload.session_id,
+                    page_context=page_guide_service.current_page_context_block(
+                        payload.surface,
+                        path=payload.page_context.path if payload.page_context else "",
+                        section=payload.page_context.section if payload.page_context else "",
+                    ),
                 )
                 mesh_message_id = ""
                 source_attribution = {}

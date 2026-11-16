@@ -11,6 +11,7 @@ const workspaceState = vi.hoisted(() => ({
   activeSpace: 'enterprise',
   activeEnterpriseId: null as number | null,
   activateEnterprise: vi.fn((id?: number | null) => { workspaceState.activeEnterpriseId = id ?? null }),
+  setEnterpriseMembership: vi.fn(),
 }))
 vi.mock('@/stores/user', async () => {
   const { reactive } = await import('vue')

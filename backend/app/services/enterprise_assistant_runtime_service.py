@@ -991,26 +991,27 @@ class EnterpriseAssistantToolExecutor:
     def _is_proactive_run(self) -> bool:
         return self._trigger_kind == "proactive"
 
-    def _action_clarification(self, state, call: ToolCall) -> ToolExecutionResult | None:
+    def _action_clarification(self, state, call: ToolCall, db: Session | None = None) -> ToolExecutionResult | None:
         from app.services import enterprise_assistant_clarification_service as clarification
 
+        current_db = db if db is not None else self._db
         saved = _parse_json(state.permission_snapshot_json, message="企业权限快照损坏")
         if not isinstance(saved.get("messages"), list) or len(saved["messages"]) > 30:
             raise ForbiddenError("企业会话快照不可用于澄清")
         if self._clarification_token is not None:
             version, expires = self._clarification_token
-            enterprise_chat_service._require_locked_member(self._db, self._enterprise_id, self._actor_user_id,
+            enterprise_chat_service._require_locked_member(current_db, self._enterprise_id, self._actor_user_id,
                                                             expected_token_version=version)
             if expires <= int(datetime.now(timezone.utc).timestamp()):
                 raise AuthError("登录状态已过期，请重新登录")
-        run = self._db.query(EnterpriseAssistantRun).filter_by(id=state.assistant_run_id).one()
-        _room, candidates, rows, _fingerprint, superseded = clarification._context(self._db, run)
+        run = current_db.query(EnterpriseAssistantRun).filter_by(id=state.assistant_run_id).one()
+        _room, candidates, rows, _fingerprint, superseded = clarification._context(current_db, run)
         if superseded:
             return ToolExecutionResult.failure(
                 "会话有新的同级或更高权限消息，旧运行已失效。",
                 failure_kind="clarification_closed",
             )
-        existing = (self._db.query(EnterpriseAssistantClarification).filter_by(
+        existing = (current_db.query(EnterpriseAssistantClarification).filter_by(
             assistant_run_id=run.id, phase="tool", call_id=call.call_id,
         ).order_by(EnterpriseAssistantClarification.version.desc()).populate_existing().with_for_update().first())
         if self._clarification_request is not None and (
@@ -1022,14 +1023,14 @@ class EnterpriseAssistantToolExecutor:
             if not candidates:
                 return None
             existing = clarification.create_request(
-                self._db, enterprise_id=self._enterprise_id, conversation_id=self._conversation_id,
+                current_db, enterprise_id=self._enterprise_id, conversation_id=self._conversation_id,
                 run_id=int(run.id), phase="tool", call_id=call.call_id, action=call.name,
                 target=target, arguments=dict(call.arguments), expires_at=_now() + timedelta(minutes=30),
             )
         expected = _digest({"action": call.name, "target": target, "arguments": dict(call.arguments)})
         if existing.arguments_sha256 != expected or existing.action != call.name:
             return ToolExecutionResult.failure("澄清动作已变化，请重新发起。", failure_kind="clarification_closed")
-        status = clarification.status(self._db, enterprise_id=self._enterprise_id,
+        status = clarification.status(current_db, enterprise_id=self._enterprise_id,
                                       conversation_id=self._conversation_id, request_id=int(existing.id))
         if status == "recorded":
             return None
@@ -1056,8 +1057,12 @@ class EnterpriseAssistantToolExecutor:
                 "name": "create_registered_enterprise_agent_team",
                 "description": (
                     "为当前会话创建持久化、由企业付款的注册 Agent 协作任务。仅用于用户明确委派或需要并行分析的任务；"
-                    "只允许 language_detector、code_reviewer 两种只读 Agent；"
-                    "输入必须是当前会话已授权的短文本，不可传项目 ID、URL、MCP、远测、运维或写操作。"
+                    "允许 language_detector、code_reviewer，以及绑定顶层企业 project_id 的 security_sentinel "
+                    "只读项目安全扫描；"
+                    "安全扫描要求服务端复核项目绑定、当前项目执行权限与 security:scan，不能扫描未授权项目。"
+                    "安全扫描直接读取绑定项目，不能依赖其他任务结果。各任务 input 必须是当前会话已授权的短文本，"
+                    "不能自报项目 ID、URL、MCP、远测、运维或写操作；"
+                    "security_sentinel 仅做只读项目安全扫描，不触发远测或修改项目。"
                     "服务端固定模型白名单、单任务调用数/Token 上限，并把团队费用限制为企业积分、"
                     "当前适用月度额度和平台硬上限三者的最小值。"
                     "任务由持久队列异步执行；父回复完成后仍可继续，取消父运行、撤权或权限快照变化会阻断后续发送。"
@@ -1067,6 +1072,7 @@ class EnterpriseAssistantToolExecutor:
                     "properties": {
                         "title": {"type": "string", "minLength": 1, "maxLength": 200},
                         "objective": {"type": "string", "minLength": 1, "maxLength": 4000},
+                        "project_id": {"type": "integer", "minimum": 1},
                         "members": {
                             "type": "array",
                             "minItems": 2,
@@ -1080,6 +1086,7 @@ class EnterpriseAssistantToolExecutor:
                                         "enum": [
                                             "language_detector",
                                             "code_reviewer",
+                                            "security_sentinel",
                                         ],
                                     },
                                     "display_name": {"type": "string", "minLength": 1, "maxLength": 100},
@@ -1358,7 +1365,7 @@ class EnterpriseAssistantToolExecutor:
         return state, snapshot
 
     async def _execute_search_fetch(self, call: ToolCall, state: EnterpriseAssistantRuntimeState,
-                                    *, tool_name: str,
+                                    *, group_id: int | None, tool_name: str,
                                     arguments: Mapping[str, Any]) -> ToolExecutionResult:
         if self._search_fetch_blocked:
             return ToolExecutionResult.failure(
@@ -1375,7 +1382,6 @@ class EnterpriseAssistantToolExecutor:
         suffix = hashlib.sha256(f"{call.call_id}:{tool_name}".encode("utf-8")).hexdigest()[:32]
         request_key = f"enterprise-assistant:{self._run_public_id}:tool:{billing_tool_name}:{suffix}"
         run_prefix = f"enterprise-assistant:{self._run_public_id}:"
-        group_id = _validated_billing_group(self._db, state)
 
         try:
             replay_block: tuple[str, str] | None = None
@@ -1383,7 +1389,10 @@ class EnterpriseAssistantToolExecutor:
             for snapshot_attempt in range(2):
                 try:
                     with factory.begin() as recovery_db:
-                        self._current(db=recovery_db, lock_state=True)
+                        recovery_state, _ = self._current(db=recovery_db, lock_state=True)
+                        clarification = self._action_clarification(recovery_state, call, recovery_db)
+                        if clarification is not None:
+                            return clarification
                         candidate = (recovery_db.query(BillingReservation.id)
                                      .filter_by(request_key=request_key).one_or_none())
                         existing = (billing_search_fetch_service._lock_tool_reservation(recovery_db, request_key)
@@ -1502,6 +1511,8 @@ class EnterpriseAssistantToolExecutor:
             if not current_config.billing_eligible or current_identity != provider_identity:
                 raise ForbiddenError("平台 DeepSeek 凭据或计费资格发生变化，已停止发送 Search/Fetch")
             current, _snapshot = self._current(db=db, lock_state=True)
+            if self._action_clarification(current, call, db) is not None:
+                raise ForbiddenError("企业会话澄清或授权已变化，请重新发起")
             if int(current.initiator_user_id) != self._actor_user_id:
                 raise ForbiddenError("Search/Fetch 运行发起人已变化")
             unresolved = (db.query(BillingReservation.id)
@@ -1564,6 +1575,7 @@ class EnterpriseAssistantToolExecutor:
             return ToolExecutionResult.failure(str(exc), failure_kind="billing")
 
     async def execute(self, call: ToolCall, *, approved: bool = False) -> ToolExecutionResult:
+        independent_tool = call.name in {"search_enterprise_web", "fetch_enterprise_web_page"}
         try:
             if self._is_proactive_run():
                 return ToolExecutionResult.failure("主动讨论仅可提供建议，不能执行工具", failure_kind="authorization")
@@ -1571,6 +1583,21 @@ class EnterpriseAssistantToolExecutor:
                 return ToolExecutionResult.failure(
                     "本次小菱运行已有 Search/Fetch 结果待恢复或账单待核对，已停止后续工具。",
                     failure_kind=self._search_fetch_blocked,
+                )
+            if independent_tool:
+                # The executor session belongs to the caller. This tool opens
+                # multiple billing transactions, so preflight in an independent
+                # short transaction and never commit caller-owned writes.
+                with _factory(self._db).begin() as tool_db:
+                    state, _snapshot = self._current(db=tool_db)
+                    if int(state.initiator_user_id) != self._actor_user_id or approved:
+                        raise ForbiddenError("Search/Fetch 只能由本次运行的原发起人触发")
+                    clarification = self._action_clarification(state, call, tool_db)
+                    if clarification is not None:
+                        return clarification
+                    group_id = _validated_billing_group(tool_db, state)
+                return await self._execute_search_fetch(
+                    call, state, group_id=group_id, tool_name=call.name, arguments=dict(call.arguments),
                 )
             state, snapshot = self._current()
             args = dict(call.arguments)
@@ -1583,12 +1610,6 @@ class EnterpriseAssistantToolExecutor:
                 clarification_result = self._action_clarification(state, call)
                 if clarification_result is not None:
                     return clarification_result
-            if call.name in {"search_enterprise_web", "fetch_enterprise_web_page"}:
-                if int(state.initiator_user_id) != self._actor_user_id or approved:
-                    raise ForbiddenError("Search/Fetch 只能由本次运行的原发起人触发")
-                return await self._execute_search_fetch(
-                    call, state, tool_name=call.name, arguments=args,
-                )
             if call.name == "create_registered_enterprise_agent_team":
                 if int(state.initiator_user_id) != self._actor_user_id or approved:
                     raise ForbiddenError("企业团队只能由当前运行的原发起人创建")
@@ -1794,17 +1815,18 @@ class EnterpriseAssistantToolExecutor:
                 return ToolExecutionResult.failure(str(exc), failure_kind="clarification_closed")
             raise
         except PaymentRequiredError as exc:
-            if self._clarification_resuming:
+            if self._clarification_resuming and not independent_tool:
                 self._db.rollback()
             kind = "clarification_closed" if self._clarification_resuming else "billing"
             return ToolExecutionResult.failure(str(exc), failure_kind=kind)
         except (AuthError, ConflictError, ForbiddenError, NotFoundError, ValidationError) as exc:
-            if self._clarification_resuming:
+            if self._clarification_resuming and not independent_tool:
                 self._db.rollback()
             kind = "clarification_closed" if self._clarification_resuming else "authorization"
             return ToolExecutionResult.failure(str(exc), failure_kind=kind)
         except Exception as exc:  # noqa: BLE001 - tool errors are returned to the same checkpoint
-            self._db.rollback()
+            if not independent_tool:
+                self._db.rollback()
             kind = "clarification_closed" if self._clarification_resuming else ""
             return ToolExecutionResult.failure(f"企业工具执行失败：{type(exc).__name__}", failure_kind=kind)
 
@@ -2571,11 +2593,15 @@ def _instructions() -> str:
         "每步独立计费、逐步复权，前序输出按不可信输入传递。此功能不是已注册运行时 Agent 团队，"
         "不能声称调用了代码审查/安全等注册 Agent，也不能运行任意工具、代码、文件、网络或审批工作流。"
         "对于需要多个已注册 Agent 协作的只读分析，可用 create_registered_enterprise_agent_team；"
-        "该工具当前只接受语言识别、代码质量审查、安全分析三个 Agent 的短文本输入，创建后由后台持久队列运行。"
+        "该工具开放语言识别、代码质量审查和安全哨兵三个注册 Agent，由后台持久队列运行；"
+        "语言识别与代码质量审查使用任务中提供的文本。安全哨兵只能只读扫描已绑定且发起人有权执行的企业项目，"
+        "需在团队计划顶层提供真实 project_id，发起人须有 security:scan 权限；安全扫描任务只能填受支持的扫描选项，"
+        "不得依赖前序任务结果。"
         "必须把用户请求编译成明确的成员/任务/依赖，不能在任务输入中臆造代码、项目 ID 或资源授权；"
         "创建成功只表示已入队；团队详情由用户在当前会话的团队进度中查看，不得声称已读到受限结果。"
         "取消使用 cancel_enterprise_agent_team；重试只能使用 retry_enterprise_agent_team_task，账单未知时不得重试。"
-        "若请求需要项目读取、远测、写入、MCP、平台运维或其他未开放能力，必须说明当前注册团队暂不支持，不能换工具绕过。"
+        "除安全哨兵对绑定授权项目的只读扫描外，若请求需要其他项目读取、远测、写入、MCP、平台运维"
+        "或其他未开放能力，必须说明当前注册团队暂不支持，不能换工具绕过。"
         "若受限团队返回 partial 且 reason_code 为 usage_unknown，必须说明该步账单待核对；"
         "只有用户明确要求后才可发起新的重试。"
         "草稿、旧 Agent Studio、任意工具或工作流仍不可执行；"

@@ -71,6 +71,8 @@ class OrderRequest(StrictInputModel):
     client_request_id: str | None = Field(default=None, min_length=1, max_length=80)
     enterprise_id: int | None = Field(default=None, gt=0)
     enterprise_name: str | None = Field(default=None, min_length=1, max_length=120)
+    expected_pricing_version: str | None = Field(default=None, min_length=1, max_length=64)
+    expected_amount_fen: int | None = Field(default=None, strict=True, ge=1, le=2**63 - 1)
 
 
 class RefundRequest(StrictInputModel):
@@ -104,6 +106,8 @@ class ReservationReconciliationProposal(StrictInputModel):
     input_tokens: int | None = Field(default=None, strict=True, ge=0, le=2**63 - 1)
     output_tokens: int | None = Field(default=None, strict=True, ge=0, le=2**63 - 1)
     tool_successful_calls: int | None = Field(default=None, strict=True, ge=0, le=1)
+    model_search_calls_evidence: int | None = Field(default=None, strict=True, ge=0, le=0)
+    model_fetch_calls_evidence: int | None = Field(default=None, strict=True, ge=0, le=0)
     evidence_reference: str = Field(min_length=1, max_length=240)
     evidence_sha256: str = Field(min_length=64, max_length=64)
     note: str = Field(min_length=1, max_length=500)
@@ -179,6 +183,10 @@ def pricing(db: Session = Depends(get_db), user: User = Depends(get_current_user
         current = billing_ledger_service.active_pricing_metadata(db)
     except billing_ledger_service.BillingError as exc:
         raise HTTPException(status_code=503, detail="当前计费目录不可用，已停止报价与计费") from exc
+    channels = {
+        channel: _sales_ready(channel, db, model_pricing_ready=current["model_pricing_ready"])
+        for channel in ("alipay", "wechat")
+    }
     return Resp(data={
         "currency": "CNY",
         "billing_unit": {
@@ -196,8 +204,8 @@ def pricing(db: Session = Depends(get_db), user: User = Depends(get_current_user
         "model_pricing_ready": current["model_pricing_ready"],
         "tool_milli_credits_per_success": current["tool_milli_credits_per_success"],
         "billable_models": current["billable_models"],
-        "channels": {"alipay": _sales_ready("alipay"), "wechat": _sales_ready("wechat")},
-        "sales_enabled": _sales_ready("alipay") or _sales_ready("wechat"),
+        "channels": channels,
+        "sales_enabled": any(channels.values()),
     })
 
 
@@ -671,7 +679,7 @@ def enterprise_orders(enterprise_id: int, db: Session = Depends(get_db),
                        "payment_status": r.payment_status, "created_at": r.created_at} for r in rows])
 
 
-def _sales_ready(channel: str) -> bool:
+def _sales_ready(channel: str, db: Session, *, model_pricing_ready: bool | None = None) -> bool:
     gates_open = (
         BILLING_SALES_CODE_GATE_OPEN
         and settings.billing_sales_enabled
@@ -680,7 +688,12 @@ def _sales_ready(channel: str) -> bool:
     )
     if not gates_open:
         return False
-    return gates_open and _gateway_configured(channel)
+    if model_pricing_ready is None:
+        try:
+            model_pricing_ready = billing_ledger_service.active_pricing_metadata(db).get("model_pricing_ready") is True
+        except billing_ledger_service.BillingError:
+            return False
+    return model_pricing_ready is True and _gateway_configured(channel)
 
 
 def _gateway_configured(channel: str) -> bool:
@@ -836,7 +849,7 @@ def _provider_order(order: BillingOrder) -> dict[str, str]:
 
 @router.post("/orders")
 def create_payment_order(payload: OrderRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    if not _sales_ready(payload.channel):
+    if not _sales_ready(payload.channel, db):
         raise HTTPException(status_code=503, detail="支付销售尚未通过计量、权益和商户配置门禁")
     if not payload.client_request_id:
         raise HTTPException(status_code=422, detail="缺少幂等请求编号")
@@ -844,9 +857,16 @@ def create_payment_order(payload: OrderRequest, db: Session = Depends(get_db), u
         order = billing_checkout_service.create_order(
             db, user_id=user.id, product=payload.product, quantity=payload.quantity, channel=payload.channel,
             client_request_id=payload.client_request_id, enterprise_id=payload.enterprise_id,
-            enterprise_name=payload.enterprise_name,
+            enterprise_name=payload.enterprise_name, expected_pricing_version=payload.expected_pricing_version,
+            expected_amount_fen=payload.expected_amount_fen,
         )
         db.commit()
+    except billing_checkout_service.BillingQuoteChanged as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "PRICING_CHANGED", "message": str(exc)},
+        ) from exc
     except billing_ledger_service.BillingError as exc:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1068,6 +1088,8 @@ def _reservation_reconciliation_event_view(event: BillingReservationReconciliati
         "input_tokens": event.input_tokens,
         "output_tokens": event.output_tokens,
         "tool_successful_calls": event.tool_successful_calls,
+        "model_search_calls_evidence": event.model_search_calls_evidence,
+        "model_fetch_calls_evidence": event.model_fetch_calls_evidence,
         "actual_milli": event.actual_milli,
         "evidence_reference": event.evidence_reference,
         "evidence_sha256": event.evidence_sha256,
@@ -1111,11 +1133,13 @@ def _reservation_reconciliation_view(db: Session, reservation: BillingReservatio
     else:
         if not model_rate_snapshot:
             settlement_reasons.append("缺少模型费率快照")
-        if not tool_usage_complete:
-            settlement_reasons.append("缺少供应商 Search/Fetch 用量计数，不能推断为零")
+        if not tool_usage_complete and (reservation.server_tool_search_calls is not None
+                                        or reservation.server_tool_fetch_calls is not None):
+            settlement_reasons.append("供应商 Search/Fetch 用量记录不完整")
         elif any(tool_usage):
             settlement_reasons.append("存在未计价供应商内置 Search/Fetch 用量")
-    if reservation.provider_attempt_started_at is not None:
+    if (reservation.provider_attempt_started_at is not None
+            and not billing_reservation_reconciliation_service._fenced_team_model_attempt(db, reservation)):
         release_reasons.append("provider attempt 已开始，不能按从未发送释放")
     if reservation.input_tokens is not None or reservation.output_tokens is not None:
         release_reasons.append("已记录 Token 用量，与未发送释放提案冲突")
@@ -1164,9 +1188,12 @@ def _reservation_reconciliation_view(db: Session, reservation: BillingReservatio
         "has_tool_rate_snapshot": tool_rate_snapshot if is_tool else False,
         "has_provider_snapshot": provider_snapshot,
         "can_settle": can_submit and not settlement_reasons,
+        "requires_model_tool_evidence": (not is_tool and reservation.server_tool_search_calls is None
+                                          and reservation.server_tool_fetch_calls is None),
         "can_release_not_sent": can_submit and not release_reasons,
-        "can_recover_stale_attempt": billing_reservation_reconciliation_service.can_recover_stale_tool_attempt(
-            db, reservation,
+        "can_recover_stale_attempt": (
+            billing_reservation_reconciliation_service.can_recover_stale_tool_attempt(db, reservation)
+            or billing_reservation_reconciliation_service.can_recover_stale_team_model_attempt(db, reservation)
         ),
         "settlement_block_reasons": settlement_reasons,
         "release_block_reasons": release_reasons,
@@ -1236,13 +1263,16 @@ def recover_stale_reservation_attempt(
     admin: User = Depends(require_super_admin),
 ):
     try:
-        reservation = billing_reservation_reconciliation_service.recover_stale_tool_attempt(
-            db,
-            reservation_id=reservation_id,
-            actor_id=int(admin.id),
-            actor_name=str(admin.username or f"admin-{admin.id}"),
-            note=payload.note,
-        )
+        candidate = db.query(BillingReservation).filter_by(id=reservation_id).first()
+        if candidate is not None and candidate.billable_kind == "model":
+            reservation = billing_reservation_reconciliation_service.recover_stale_team_model_attempt(
+                db, reservation_id=reservation_id, actor_id=int(admin.id), note=payload.note,
+            )
+        else:
+            reservation = billing_reservation_reconciliation_service.recover_stale_tool_attempt(
+                db, reservation_id=reservation_id, actor_id=int(admin.id),
+                actor_name=str(admin.username or f"admin-{admin.id}"), note=payload.note,
+            )
         db.commit()
         parts = db.query(BillingReservationPart).filter_by(reservation_id=reservation.id).all()
         event = (
@@ -1277,6 +1307,8 @@ def propose_reservation_reconciliation(
             resolution=payload.resolution, provider_request_id=payload.provider_request_id,
             input_tokens=payload.input_tokens, output_tokens=payload.output_tokens,
             tool_successful_calls=payload.tool_successful_calls,
+            model_search_calls_evidence=payload.model_search_calls_evidence,
+            model_fetch_calls_evidence=payload.model_fetch_calls_evidence,
             evidence_reference=payload.evidence_reference,
             evidence_sha256=payload.evidence_sha256, note=payload.note,
         )

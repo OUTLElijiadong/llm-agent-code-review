@@ -59,6 +59,7 @@ current_state="$release_dir/current.env"
 previous_state="$release_dir/previous.env"
 pending_state="$release_dir/pending.env"
 f2_activation_state="$release_dir/xiaoling-f2-activation.env"
+billing_evidence_activation_state="$release_dir/billing-evidence-activation.env"
 lock_dir="$(maintenance_lock_path)"
 mkdir -p "$(dirname "$lock_dir")"
 if [[ "$from_deploy_failure" == "1" ]]; then
@@ -94,6 +95,10 @@ assert_checkpoint_rollback_compatible
 assert_project_member_rollback_compatible
 assert_chat_authority_rollback_compatible
 assert_xiaoling_f2_rollback_compatible "$current_release_version" "$f2_activation_state"
+assert_billing_evidence_database_compatible "$billing_evidence_activation_state"
+if [[ "$BILLING_EVIDENCE_DATABASE_STATE" == complete ]]; then
+  assert_billing_evidence_image_compatible "$BOUND_BACKEND_IMAGE_ID"
+fi
 
 log_warn "开始应用层回滚(target=$target, release=$previous_sha)；数据库保持当前 revision"
 if [[ "$target" == "all" || "$target" == "backend" ]]; then
