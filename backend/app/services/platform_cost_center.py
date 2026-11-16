@@ -19,7 +19,12 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.billing_ledger import BillingRateCatalog, BillingRateCatalogItem
-from app.models.platform_cost_center import PlatformCostAttempt, PlatformCostBudget, PlatformCostCenter
+from app.models.platform_cost_center import (
+    PlatformCostAttempt,
+    PlatformCostBudget,
+    PlatformCostCenter,
+    PlatformCostSettlement,
+)
 from app.services import billing_ledger_service as ledger
 from app.services import billing_rate_catalog_service, billing_runtime_gate, rbac_service
 
@@ -121,6 +126,50 @@ def _cost_snapshot(db: Session, model_name: str, now: datetime):
     return version, item.provider_input_cny_micros_per_million, item.provider_output_cny_micros_per_million
 
 
+def _assert_budget_integrity(db: Session, budget: PlatformCostBudget) -> None:
+    """Under the budget lock, compare synthetic details with its aggregates.
+
+    This intentionally locks all same-budget history. It is test-only and does
+    not prove provider provenance, external-writer isolation, or scalability.
+    """
+    attempts = (db.query(PlatformCostAttempt).filter_by(budget_id=budget.id)
+                .order_by(PlatformCostAttempt.id).populate_existing().with_for_update().all())
+    receipts = (db.query(PlatformCostSettlement)
+                .join(PlatformCostAttempt, PlatformCostAttempt.id == PlatformCostSettlement.attempt_id)
+                .filter(PlatformCostAttempt.budget_id == budget.id)
+                .order_by(PlatformCostSettlement.attempt_id).populate_existing().with_for_update().all())
+    by_attempt = {receipt.attempt_id: receipt for receipt in receipts}
+    if len(by_attempt) != len(receipts):
+        raise ledger.BillingError('平台回执明细与预算不一致')
+    held_total = 0
+    spent_total = 0
+    for attempt in attempts:
+        held = attempt.reserved_cny_micros
+        if type(held) is not int or held <= 0:
+            raise ledger.BillingError('平台预占明细与预算不一致')
+        receipt = by_attempt.pop(attempt.id, None)
+        if attempt.status in {'reserved', 'unknown'}:
+            if receipt is not None:
+                raise ledger.BillingError('未结算尝试含回执，预算不一致')
+            held_total += held
+            continue
+        if attempt.status != 'settled' or receipt is None:
+            raise ledger.BillingError('已结算尝试缺少回执，预算不一致')
+        rates = (attempt.input_cost_cny_micros_per_million, attempt.output_cost_cny_micros_per_million)
+        if (any(type(rate) is not int or rate <= 0 for rate in rates)
+                or type(receipt.input_tokens) is not int or type(receipt.output_tokens) is not int
+                or not 0 <= receipt.input_tokens <= attempt.input_limit
+                or not 0 <= receipt.output_tokens <= attempt.output_limit
+                or not isinstance(receipt.receipt_digest, bytes) or len(receipt.receipt_digest) != 32):
+            raise ledger.BillingError('合成回执无效，预算不一致')
+        amount = (receipt.input_tokens * rates[0] + receipt.output_tokens * rates[1] + 999_999) // 1_000_000
+        if type(receipt.actual_cny_micros) is not int or receipt.actual_cny_micros != amount or amount > held:
+            raise ledger.BillingError('合成回执成本与预算不一致')
+        spent_total += amount
+    if by_attempt or held_total != budget.reserved_cny_micros or spent_total != budget.spent_cny_micros:
+        raise ledger.BillingError('平台预占或支出明细与预算不一致')
+
+
 def reserve_model_attempt(db: Session, *, actor_id: int, attempt_key: AttemptKey, model_name: str,
                           provider_name: str, base_url: str, credential_source: str,
                           payload: Mapping) -> PlatformCostAttempt:
@@ -153,6 +202,7 @@ def reserve_model_attempt(db: Session, *, actor_id: int, attempt_key: AttemptKey
     ).order_by(PlatformCostBudget.id).populate_existing().with_for_update().limit(2).all())
     if len(budgets) != 1:
         raise ledger.BillingError('平台预算未配置或存在重叠')
+    _assert_budget_integrity(db, budgets[0])
     # A wait on either the centre, rate or budget lock may cross the expiry.
     now = _now()
     budget = budgets[0]

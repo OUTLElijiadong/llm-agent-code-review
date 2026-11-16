@@ -563,6 +563,74 @@ def test_two_holds_with_corrupt_aggregate_cannot_consume_other_hold(db, admin_us
     assert db.query(PlatformCostBudget).one().reserved_cny_micros == held
 
 
+@pytest.mark.parametrize('corrupted_spent', [0, 181])
+def test_spent_mismatch_blocks_settlement_replay_and_new_reservation(
+    db, admin_user, monkeypatch, synthetic_settlement, corrupted_spent
+):
+    monkeypatch.setattr(platform, '_FOUNDATION_ENABLED', True)
+    run_pk, run_secret = create(db, admin_user.id)
+    db.commit()
+    settled, settled_secret = reserve(db, admin_user.id, run_pk, run_secret)
+    settled_id = settled.id
+    db.commit()
+    receipt = hashlib.sha256(b'spent-mismatch-existing').digest()
+    args = dict(actor_id=admin_user.id, run_pk=run_pk, session_key='admin-session', run_secret=run_secret,
+                attempt_id=settled_id, attempt_secret=settled_secret,
+                receipt_digest=receipt, input_tokens=10, output_tokens=20)
+    assert owner.settle_owned_attempt(db, **args) == 180
+    db.commit()
+    pending, pending_secret = reserve(db, admin_user.id, run_pk, run_secret)
+    pending_id, held = pending.id, pending.reserved_cny_micros
+    db.commit()
+    db.query(PlatformCostBudget).one().spent_cny_micros = corrupted_spent
+    db.commit()
+    pending_args = args | dict(attempt_id=pending_id, attempt_secret=pending_secret,
+                               receipt_digest=hashlib.sha256(b'spent-mismatch-next').digest())
+    for action in (lambda: owner.settle_owned_attempt(db, **pending_args),
+                   lambda: owner.settle_owned_attempt(db, **args),
+                   lambda: reserve(db, admin_user.id, run_pk, run_secret)):
+        with pytest.raises(BillingError, match='不一致'):
+            action()
+        db.commit()
+    budget = db.query(PlatformCostBudget).one()
+    assert (budget.reserved_cny_micros, budget.spent_cny_micros) == (held, corrupted_spent)
+    assert db.query(PlatformCostSettlement).count() == 1
+    assert db.get(PlatformCostAttempt, pending_id).status == 'reserved'
+
+
+@pytest.mark.parametrize('corruption', ['missing_receipt', 'receipt_for_pending', 'wrong_cost', 'over_limit'])
+def test_inconsistent_receipt_state_blocks_writes_even_when_totals_match(
+    db, admin_user, monkeypatch, synthetic_settlement, corruption
+):
+    monkeypatch.setattr(platform, '_FOUNDATION_ENABLED', True)
+    run_pk, run_secret = create(db, admin_user.id)
+    db.commit()
+    first, _ = reserve(db, admin_user.id, run_pk, run_secret)
+    first_id, first_hold = first.id, first.reserved_cny_micros
+    db.commit()
+    target, target_secret = reserve(db, admin_user.id, run_pk, run_secret)
+    target_id, target_hold = target.id, target.reserved_cny_micros
+    db.commit()
+    if corruption != 'missing_receipt':
+        db.add(PlatformCostSettlement(attempt_id=first_id, receipt_digest=hashlib.sha256(corruption.encode()).digest(),
+                                      input_tokens=107 if corruption == 'over_limit' else 1,
+                                      output_tokens=1, actual_cny_micros=0, created_at=datetime.utcnow()))
+    if corruption != 'receipt_for_pending':
+        db.get(PlatformCostAttempt, first_id).status = 'settled'
+        db.query(PlatformCostBudget).one().reserved_cny_micros -= first_hold
+    db.commit()
+    args = dict(actor_id=admin_user.id, run_pk=run_pk, session_key='admin-session', run_secret=run_secret,
+                attempt_id=target_id, attempt_secret=target_secret,
+                receipt_digest=hashlib.sha256(b'unaffected-target').digest(), input_tokens=1, output_tokens=1)
+    for action in (lambda: owner.settle_owned_attempt(db, **args),
+                   lambda: reserve(db, admin_user.id, run_pk, run_secret)):
+        with pytest.raises(BillingError, match='不一致'):
+            action()
+        db.commit()
+    assert db.get(PlatformCostAttempt, target_id).status == 'reserved'
+    assert db.query(PlatformCostBudget).one().reserved_cny_micros >= target_hold
+
+
 def test_settlement_receipt_and_status_are_immutable(db, admin_user, monkeypatch, synthetic_settlement):
     monkeypatch.setattr(platform, '_FOUNDATION_ENABLED', True)
     run_pk, run_secret = create(db, admin_user.id)

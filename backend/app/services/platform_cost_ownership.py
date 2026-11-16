@@ -247,16 +247,7 @@ def settle_owned_attempt(db: Session, *, actor_id: int, run_pk: int, session_key
               .populate_existing().with_for_update().one_or_none())
     if budget is None:
         raise BillingError('模型尝试预算不存在')
-    # With the center and budget locked, take current locks on every outstanding
-    # hold before any release. This is an intentionally conservative experiment:
-    # its lock footprint and external-writer contract are not yet production-ready.
-    pending = (db.query(PlatformCostAttempt.id, PlatformCostAttempt.reserved_cny_micros)
-               .filter(PlatformCostAttempt.budget_id == budget.id,
-                       PlatformCostAttempt.status.in_(('reserved', 'unknown')))
-               .order_by(PlatformCostAttempt.id).with_for_update().all())
-    if (any(type(amount) is not int or amount <= 0 for _, amount in pending)
-            or sum(amount for _, amount in pending) != budget.reserved_cny_micros):
-        raise BillingError('平台预占明细与预算不一致')
+    platform._assert_budget_integrity(db, budget)
     binding = (db.query(PlatformAttemptOwner).filter_by(attempt_id=attempt_id)
                .populate_existing().with_for_update().one_or_none())
     if (binding is None or binding.run_owner_id != run_owner.id or binding.generation != run_owner.generation

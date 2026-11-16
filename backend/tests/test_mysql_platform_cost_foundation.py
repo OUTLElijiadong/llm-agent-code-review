@@ -523,6 +523,21 @@ def test_platform_center_and_budget_mysql_lock_order(monkeypatch):
             with pytest.raises(BillingError):
                 owner.settle_owned_attempt(db, **(settle_args | {'input_tokens': 11}))
             db.rollback()
+        with factory.begin() as db:
+            db.query(PlatformCostCenter).filter_by(id=1).with_for_update().one()
+            budget = db.query(PlatformCostBudget).filter_by(id=1).with_for_update().one()
+            budget.spent_cny_micros -= 180
+        with factory() as db:
+            with pytest.raises(BillingError, match='不一致'):
+                owner.settle_owned_attempt(db, **settle_args)
+            db.commit()
+            with pytest.raises(BillingError, match='不一致'):
+                owned_reserve(db, pk=settle_run, secret=settle_secret, attempt_key=platform.new_attempt_key())
+            db.commit()
+            assert db.query(PlatformCostSettlement).filter_by(attempt_id=settle_id).count() == 1
+        with factory.begin() as db:
+            db.query(PlatformCostCenter).filter_by(id=1).with_for_update().one()
+            db.query(PlatformCostBudget).filter_by(id=1).with_for_update().one().spent_cny_micros += 180
 
         with factory.begin() as db:
             cancel_run, cancel_secret = owner.create_owned_run(db, actor_id=501, run_id='mysql-settle-cancel',
