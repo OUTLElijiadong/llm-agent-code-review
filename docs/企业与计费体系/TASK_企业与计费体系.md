@@ -10,7 +10,7 @@
 | F2-4 | 部署兼容 probe 识别 4.1.48 回滚能力、新 rank 写入/门禁和 F2 激活中的回滚边界，并把运维执行器加入构建上下文清洁检查 | 本地完成 | 完整 `test_scripts.sh` 已通过，发布绑定 **53 passed、0 failed**；覆盖后端切换后前端构建/HTTPS 故障注入、普通部署拒绝 F2 降级、激活标记持久化、锁内刷新回滚状态、手工内部回滚标记绕锁拒绝/持锁 deploy.sh 子进程复用锁，以及预算追加顺序和异常后重置 withheld 的 probe 突变。独立 `deploy/tests` pytest 套件 **236 passed、3 skipped、1 warning（16.67 秒）**；3 个 skip 依赖 Linux `/proc` 或 opt-in 内核环境 |
 | F2-5 | 后端企业小菱/聊天/API/119 迁移定向回归、Ruff、diff 检查 | 本地完成 | 相关组合 **237 passed、20 MySQL skipped**；发送/工具硬门、64/2000 上限与权限上下文预算回归已纳入；后端应用 Ruff、Python 编译与 `git diff --check` 通过 |
 | F2-6 | 一次性 MySQL 8.0 新库链与目标并发测试 | 待 CI/环境 | 本机 Docker daemon 未运行，`PRISM_FRESH_CHAIN_MYSQL_URL` 未设置；不能把 MySQL 20 项 skip 记为通过 |
-| F2-7 | PR 必需 CI/CodeQL、合并、精确 SHA 4.1.49 发布和生产健康/备份/迁移/观察 | PR 待创建 | 当前提交已提交并推送；需建立 PR 并等待必需 CI/CodeQL，之后再合并和发布 |
+| F2-7 | PR 必需 CI/CodeQL、合并、精确 SHA 4.1.49 发布和生产健康/备份/迁移/观察 | PR #14 检查中 | head `8ba4b6a39f360be00cc70bd73918cbb532cb721b` 已推送；5 项必需 CI/CodeQL 检查 pending，之后再合并和发布 |
 | F2-8 | 企业 owner/admin、组长、员工及个人双账号真实浏览器验证 | 外部待验收 | 需专用隔离租户账号；不在生产制造客户数据，不以单测代替 |
 | F2-9 | 支付商户、真实模型账单和全量成本审计 | 外部待验收 | 支付宝沙箱凭据、微信受控交易/退款及供应商账单未齐；不开售门继续关闭 |
 

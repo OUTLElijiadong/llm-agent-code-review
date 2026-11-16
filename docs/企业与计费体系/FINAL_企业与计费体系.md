@@ -10,7 +10,7 @@ T+15、T+30、T+60 定时巡检与手动终检均通过，容器 healthy，公�
 
 ## 2026-11-16 最新续验状态（4.1.49 候选；待 PR/CI）
 
-当前工作树版本 `4.1.49`，基于已发布生产 SHA `c038c0a1acb2141a8c6387820aa2893aa91feb21`。F2 为小菱执行同一当前讨论权限冲突的服务端硬门：记录发送时权限等级、识别无 @ 的同级/更高权限候选、使来源之后的有效高权限发言令旧运行失效，并在模型发送、工具副作用和结果发布前复核。低权限消息不覆盖高权限任务。本轮相关后端自动化为 **237 passed、20 MySQL skipped、4 warnings（13.04 秒）**；完整 `deploy/tests/test_scripts.sh` Bash 矩阵通过，发布绑定 **53 passed、0 failed**，覆盖前端构建/HTTPS 故障注入、F2 标记持久化与普通部署降级拒绝、回滚锁内刷新状态、内部回滚绕锁拒绝及权限/预算/最终发布门探针突变拒绝；独立 `deploy/tests` pytest 套件 **236 passed、3 skipped、1 warning（16.67 秒）**。3 个 skip 依赖 Linux `/proc` 或 opt-in 内核环境，未记作通过。后端应用 Ruff、Python 编译、Bash 语法与 `git diff --check` 均已通过。当前提交已推送，尚未建立 PR/运行 CI、合并或发布生产；当前阶段不能据此宣称 F2 已通过真实账号验收。详细范围见[验收记录](ACCEPTANCE_企业与计费体系.md)，剩余事项见[TODO](TODO_企业与计费体系.md)。
+当前工作树版本 `4.1.49`，基于已发布生产 SHA `c038c0a1acb2141a8c6387820aa2893aa91feb21`。F2 为小菱执行同一当前讨论权限冲突的服务端硬门：记录发送时权限等级、识别无 @ 的同级/更高权限候选、使来源之后的有效高权限发言令旧运行失效，并在模型发送、工具副作用和结果发布前复核。低权限消息不覆盖高权限任务。本轮相关后端自动化为 **237 passed、20 MySQL skipped、4 warnings（13.04 秒）**；完整 `deploy/tests/test_scripts.sh` Bash 矩阵通过，发布绑定 **53 passed、0 failed**，覆盖前端构建/HTTPS 故障注入、F2 标记持久化与普通部署降级拒绝、回滚锁内刷新状态、内部回滚绕锁拒绝及权限/预算/最终发布门探针突变拒绝；独立 `deploy/tests` pytest 套件 **236 passed、3 skipped、1 warning（16.67 秒）**。3 个 skip 依赖 Linux `/proc` 或 opt-in 内核环境，未记作通过。后端应用 Ruff、Python 编译、Bash 语法与 `git diff --check` 均已通过。PR #14 已打开，head `8ba4b6a39f360be00cc70bd73918cbb532cb721b` 的 5 项必需 CI/CodeQL 检查于 `2026-11-16T07:47Z` 均为 pending；尚未合并或发布生产；当前阶段不能据此宣称 F2 已通过真实账号验收。详细范围见[验收记录](ACCEPTANCE_企业与计费体系.md)，剩余事项见[TODO](TODO_企业与计费体系.md)。
 
 ## 2026-11-16 4.1.46 发布前生产站匿名浏览器补验（历史快照）
 
