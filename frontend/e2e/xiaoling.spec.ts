@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { isolatedBackendVerified } from './isolatedGate'
+import { isIgnoredConsoleError } from './consoleNoise'
 
 const USER = process.env.E2E_USER || 'lijiadong'
 const USER_PW = process.env.E2E_USER_PW ?? ''
@@ -59,7 +60,7 @@ test('管理端：打开管理副驾驶是新对话且无控制台报错', async
   const tab = page.locator('.session-current').first()
   await expect(tab).toHaveText(/(新对话|默认对话)/, { timeout: 8_000 })
   await page.waitForTimeout(1_000)
-  expect(errors.filter((item) => !item.includes('Statsig') && !item.includes('ab.chatgpt.com'))).toEqual([])
+  expect(errors.filter((item) => !isIgnoredConsoleError(item))).toEqual([])
 })
 
 test('用户端：页面操作显示虚拟鼠标彩框与操作提示', async ({ page }) => {

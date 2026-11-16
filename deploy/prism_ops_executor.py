@@ -1311,7 +1311,7 @@ def _write_ledger(request_id: str, payload: dict[str, Any]) -> None:
 
 
 def _backup_file(name: str) -> Path:
-    if not re.fullmatch(r"code_review_[A-Za-z0-9_.-]+\.sql\.gz", name):
+    if len(name) > 200 or not re.fullmatch(r"code_review_[A-Za-z0-9_.-]{1,181}\.sql\.gz", name):
         raise ValueError("备份文件名不合法")
     backup_dir = _configured_backup_dir()
     path = (backup_dir / name).resolve()
