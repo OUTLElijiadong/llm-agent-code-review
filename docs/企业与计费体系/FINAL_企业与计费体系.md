@@ -4,7 +4,7 @@
 
 PR [#15](https://github.com/OUTLElijiadong/llm-agent-code-review/pull/15) 合并 SHA `999d047baa9ebfdcbd0a904342924b0025ff9496`，Git tree `c2f1b031c6221fa00a7df45ef33286af43432aee`，版本 `4.1.49`。PR 必需 CI、CodeQL、前端、部署门禁和后端完整回归通过；后端结果 `11,859 passed, 5 xfailed, 14 warnings`，包含真实 MySQL 迁移 120 fresh-chain。
 
-发布账本时间为 `2026-11-16T11:58:51Z`，部署脚本于 `11:59:23Z` 输出完成。生产 Git HEAD、`VERSION`、Backend/Frontend 镜像和 `APP_RELEASE` 一致；decoy 为 `4.1.49`；Alembic current/head 为 `120_discussion_turn_watermark`。发布前约 1.1 GB 数据库备份 SHA-256 `5a92680d55526726c2734a1985fc011262699ebe0c5429e0c6c90238c935b501`，隔离恢复验证 177 张表。公网 health/ready、HTTP→HTTPS、`12:01:25Z` 与 `12:04:04Z` 即时运维检查通过；T+15 窗口巡检在 `12:15:02Z`（T+16:11）通过，`status=ok`、无阻断项，磁盘 76%、内存 27%。T+30/T+60 尚待观察。
+发布账本时间为 `2026-11-16T11:58:51Z`，部署脚本于 `11:59:23Z` 输出完成。生产 Git HEAD、`VERSION`、Backend/Frontend 镜像和 `APP_RELEASE` 一致；decoy 为 `4.1.49`；Alembic current/head 为 `120_discussion_turn_watermark`。发布前约 1.1 GB 数据库备份 SHA-256 `5a92680d55526726c2734a1985fc011262699ebe0c5429e0c6c90238c935b501`，隔离恢复验证 177 张表。公网 health/ready、HTTP→HTTPS、`12:01:25Z` 与 `12:04:04Z` 即时运维检查通过；T+15 窗口巡检在 `12:15:02Z`（T+16:11）通过，`status=ok`、无阻断项，磁盘 76%、内存 27%；`12:16:30Z` 独立复跑仍通过。T+30/T+60 尚待观察。
 
 本次证明该 SHA 已部署且即时运维状态正常，不表示企业功能完成真实多账号业务验收，也不表示支付宝/微信支付、供应商账单或整体利润已通过。真实角色浏览器、支付及渠道资金对账、模型成本和销售门仍待完成；本轮未读取生产运行时开售门/计量配置，不能确认当前运行值。在这些验收通过前不得批准开售或开放企业群/私聊跨会话计费。完整证据见[验收记录](ACCEPTANCE_企业与计费体系.md)，待办见[TODO](TODO_企业与计费体系.md)。
 
