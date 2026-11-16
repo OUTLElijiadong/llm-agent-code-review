@@ -50,7 +50,7 @@ def _checks_is_none(node: ast.AST, attribute: str) -> bool:
         and isinstance(item.left, ast.Attribute)
         and item.left.attr == attribute
         and len(item.ops) == 1
-        and isinstance(item.ops[0], ast.Is)
+        and isinstance(item.ops[0], (ast.Is, ast.IsNot))
         and len(item.comparators) == 1
         and isinstance(item.comparators[0], ast.Constant)
         and item.comparators[0].value is None
@@ -83,6 +83,27 @@ def _is_rank_unknown_guard(node: ast.AST) -> bool:
         for statement in node.body
     )
     return sets_superseded and any(isinstance(statement, ast.Break) for statement in node.body)
+
+
+def _has_legacy_unknown_directive_guard(node: ast.AST) -> bool:
+    return any(
+        isinstance(item, ast.BoolOp)
+        and isinstance(item.op, ast.And)
+        and _checks_is_none(item, "sender_authority_rank")
+        and _has_string(item, "@小菱")
+        for item in ast.walk(node)
+    )
+
+
+def _has_rank_read(node: ast.AST) -> bool:
+    return any(
+        isinstance(item, ast.Call)
+        and isinstance(item.func, ast.Name)
+        and item.func.id == "int"
+        and any(isinstance(child, ast.Attribute) and child.attr == "sender_authority_rank"
+                for argument in item.args for child in ast.walk(argument))
+        for item in ast.walk(node)
+    )
 
 
 def _blocks_when_superseded(node: ast.AST) -> bool:
@@ -131,7 +152,7 @@ def _probe(root: pathlib.Path) -> bool:
                 for keyword in item.keywords)
         for item in ast.walk(send)
     )
-    if not writes_rank or not _has_string(send, "@小菱"):
+    if not writes_rank:
         return False
 
     runtime = ast.parse((root / "services/enterprise_assistant_runtime_service.py").read_text(encoding="utf-8"))
@@ -139,10 +160,12 @@ def _probe(root: pathlib.Path) -> bool:
     runtime_guard = _find_function(runtime, "_assert_no_newer_authority_directive")
     if not _calls_guard_directly(live_snapshot, "_assert_no_newer_authority_directive"):
         return False
-    if not any(
+    legacy_fail_closed = any(
         isinstance(item, ast.For) and any(_is_rank_unknown_guard(child) for child in item.body)
         for item in runtime_guard.body
-    ):
+    )
+    current_fail_closed = _has_legacy_unknown_directive_guard(runtime_guard)
+    if not (legacy_fail_closed or current_fail_closed) or not _has_rank_read(runtime_guard):
         return False
     if not _blocks_when_superseded(runtime_guard):
         return False
@@ -151,9 +174,11 @@ def _probe(root: pathlib.Path) -> bool:
         encoding="utf-8",
     ))
     context = _find_function(clarification, "_context")
-    if not _checks_is_none(context, "sender_authority_rank"):
-        return False
-    return _has_name(context, "superseding_directives") and _has_string(context, "authority_unknown")
+    legacy_clarification = _has_string(context, "authority_unknown")
+    current_clarification = _has_name(context, "legacy_directive") and _has_string(context, "@小菱")
+    return (_checks_is_none(context, "sender_authority_rank")
+            and _has_name(context, "superseding_directives")
+            and (legacy_clarification or current_clarification))
 
 
 def main() -> int:

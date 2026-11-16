@@ -5,7 +5,7 @@ run_deploy_failure_matrix() {
   local member_capability member_probe_failure
   local old_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   local new_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-  for scenario in tls backup verify backend_build migration backend_up backend_health backend_smoke frontend_build frontend_up assets frontend_health https ops_check rollback_failed ledger_empty_rollback_refused ledger_written_rollback_refused ledger_probe_failed member_empty_old_refused member_unknown_refused member_probe_failed legacy_head_partial_schema legacy_head_schema_mismatch legacy_head_database_ahead chat_multiple_revisions chat_confirmation_missing chat_partial_preexisting chat_database_ahead chat_complete_unversioned chat_revision_unknown chat_schema_query_failure chat_migration_graph_invalid chat_stop_failure chat_stop_verification_failure chat_partial_migration chat_migration_success chat_already_migrated_success chat_future_head_success chat_post_migration_health chat_post_migration_health_compatible; do
+  for scenario in tls backup verify backend_build migration backend_up backend_health backend_smoke frontend_build frontend_up assets frontend_health https ops_check rollback_failed ledger_empty_rollback_refused ledger_written_rollback_refused ledger_probe_failed member_empty_old_refused member_unknown_refused member_probe_failed legacy_head_partial_schema legacy_head_schema_mismatch legacy_head_database_ahead chat_multiple_revisions chat_confirmation_missing chat_partial_preexisting chat_database_ahead chat_complete_unversioned chat_revision_unknown chat_schema_query_failure chat_migration_graph_invalid chat_stop_failure chat_stop_verification_failure chat_partial_migration chat_migration_success chat_already_migrated_success chat_future_head_success chat_post_migration_health chat_post_migration_health_compatible f2_frontend_build f2_https f2_downgrade_preflight_refused f2_success; do
     workspace="$test_root/failure-matrix-$scenario"
     mkdir -p "$workspace/repo/deploy/lib" "$workspace/repo/backend/alembic" "$workspace/bin" "$workspace/releases"
     cp deploy.sh rollback.sh "$workspace/repo/deploy/"
@@ -33,20 +33,30 @@ SCRIPT
     cp lib/checkpoint_compatibility.py "$workspace/repo/deploy/lib/"
     cp lib/project_member_compatibility.py "$workspace/repo/deploy/lib/"
     cp lib/chat_authority_compatibility.py "$workspace/repo/deploy/lib/"
+    cp lib/xiaoling_f2_compatibility.py "$workspace/repo/deploy/lib/"
     cp lib/chat_authority_schema_compatibility.py "$workspace/repo/deploy/lib/"
     cp lib/alembic_revision_compatibility.py "$workspace/repo/deploy/lib/"
     cp -R ../backend/alembic/versions "$workspace/repo/backend/alembic/"
     python3 "$workspace/repo/deploy/lib/chat_authority_schema_compatibility.py" \
       "$workspace/repo/backend/alembic/versions/119_chat_message_authority.py" --fixture \
       > "$workspace/chat-authority-complete-schema.json"
-    printf '3.8.4\n' > "$workspace/repo/VERSION"
+    release_version=3.8.4
+    current_version=3.8.2
+    if [[ "$scenario" == f2_frontend_build || "$scenario" == f2_https || "$scenario" == f2_success ]]; then
+      release_version=4.1.49
+      current_version=4.1.48
+    elif [[ "$scenario" == f2_downgrade_preflight_refused ]]; then
+      release_version=4.1.48
+      current_version=4.1.49
+    fi
+    printf '%s\n' "$release_version" > "$workspace/repo/VERSION"
     printf 'isolated geolite fixture\n' > "$workspace/repo/backend/GeoLite2-City.mmdb"
     write_strong_database_test_env "$workspace/repo/deploy/.env"
     write_frontend_tls_test_assets "$workspace/repo/deploy"
     cat >> "$workspace/repo/deploy/.env" <<ENV
 GEOLITE_DB_HOST_PATH=$workspace/repo/backend/GeoLite2-City.mmdb
 APP_RELEASE=$old_sha
-APP_VERSION=3.8.2
+APP_VERSION=$current_version
 BACKEND_RELEASE=$old_sha
 FRONTEND_RELEASE=$old_sha
 ENV
@@ -57,7 +67,7 @@ ENV
     printf 'fixture\n' | gzip -c > "$workspace/backup.sql.gz"
     cat > "$workspace/releases/current.env" <<STATE
 RELEASE_SHA=$old_sha
-APP_VERSION=3.8.2
+APP_VERSION=$current_version
 BACKEND_RELEASE=$old_sha
 FRONTEND_RELEASE=$old_sha
 TARGET=all
@@ -95,7 +105,8 @@ case "$*" in
   'inspect --format {{if .State.Health}}'*'cid-backend') stage=backend_health ;;
   'inspect --format {{if .State.Health}}'*'cid-frontend') stage=frontend_health ;;
 esac
-if [[ "${APP_RELEASE:-}" == bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb && "$stage" == "$FAIL_SCENARIO" ]]; then
+if [[ "${APP_RELEASE:-}" == bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
+  && ( "$stage" == "$FAIL_SCENARIO" || ( "$FAIL_SCENARIO" == f2_frontend_build && "$stage" == frontend_build ) ) ]]; then
   printf 'injected:%s\n' "$stage" >> "$FAKE_DOCKER_LOG"
   case "$stage" in *_health) printf 'unhealthy\n'; exit 0 ;; esac
   exit 44
@@ -125,7 +136,7 @@ SCRIPT
 #!/usr/bin/env bash
 set -eu
 if [[ "${APP_RELEASE:-}" == bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb ]]; then
-  case "$FAIL_SCENARIO:$*" in backend_smoke:*healthz*|rollback_failed:*healthz*|ledger_empty_rollback_refused:*healthz*|ledger_written_rollback_refused:*healthz*|ledger_probe_failed:*healthz*|member_empty_old_refused:*healthz*|member_unknown_refused:*healthz*|member_probe_failed:*healthz*|https:*https://*) exit 22 ;; esac
+  case "$FAIL_SCENARIO:$*" in backend_smoke:*healthz*|rollback_failed:*healthz*|ledger_empty_rollback_refused:*healthz*|ledger_written_rollback_refused:*healthz*|ledger_probe_failed:*healthz*|member_empty_old_refused:*healthz*|member_unknown_refused:*healthz*|member_probe_failed:*healthz*|https:*https://*|f2_https:*https://*) exit 22 ;; esac
 fi
 case "$*" in
   *healthz*) printf '{"status":"ok","version":"%s","release":"%s"}' "$APP_VERSION" "$APP_RELEASE" ;;
@@ -140,8 +151,8 @@ case "$*" in
   *'rev-parse --git-dir'*) printf '.git\n' ;;
   *'rev-parse'*) printf 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n' ;;
   *'status --porcelain'*) exit 0 ;;
-  *'show aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:VERSION'*) printf '3.8.2\n' ;;
-  *'show bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:VERSION'*) printf '3.8.4\n' ;;
+  *'show aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:VERSION'*) printf '%s\n' "${FAKE_BASE_VERSION:-3.8.2}" ;;
+  *'show bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:VERSION'*) printf '%s\n' "${FAKE_TARGET_VERSION:-3.8.4}" ;;
   *) exit 97 ;;
 esac
 SCRIPT
@@ -207,9 +218,26 @@ branch_labels = None
 depends_on = None
 PY
         ;;
+      f2_frontend_build|f2_https|f2_success|f2_downgrade_preflight_refused)
+        chat_revision=119_chat_message_authority
+        chat_head=119_chat_message_authority
+        chat_capability=supported
+        printf '%s\n' "$chat_revision" > "$db_revision_file"
+        printf 'complete\n' > "$chat_schema_file"
+        ;;
     esac
     ledger_schema=0 ledger_reference=0 probe_failure=0
     member_capability=supported member_probe_failure=0
+    f2_capability=unsupported
+    f2_target_capability=unsupported
+    f2_old_capability=unsupported
+    f2_target_image_id="sha256:$(printf '%064d' 0 | tr 0 3)"
+    f2_old_image_id="sha256:$(printf '%064d' 0 | tr 0 1)"
+    if [[ "$scenario" == f2_frontend_build || "$scenario" == f2_https || "$scenario" == f2_success ]]; then
+      f2_target_capability=supported
+    elif [[ "$scenario" == f2_downgrade_preflight_refused ]]; then
+      f2_old_capability=supported
+    fi
     case "$scenario" in
       ledger_empty_rollback_refused) ledger_schema=1 ;;
       ledger_written_rollback_refused) ledger_schema=1; ledger_reference=1 ;;
@@ -222,11 +250,17 @@ PY
     if [[ "$scenario" == chat_confirmation_missing || "$scenario" == chat_partial_preexisting \
       || "$scenario" == chat_database_ahead || "$scenario" == chat_complete_unversioned ]]; then
       env PATH="$workspace/bin:$PATH" FAIL_SCENARIO="$scenario" FAKE_RELEASE_SHA="$old_sha" \
-        FAKE_RELEASE_VERSION=3.8.2 FAKE_ALEMBIC_REVISION="$chat_revision" FAKE_ALEMBIC_HEAD="$chat_head" \
+        FAKE_BASE_VERSION="$current_version" FAKE_TARGET_VERSION="$release_version" \
+        FAKE_RELEASE_VERSION="$current_version" FAKE_ALEMBIC_REVISION="$chat_revision" FAKE_ALEMBIC_HEAD="$chat_head" \
         FAKE_ALEMBIC_CURRENT_ROWS="$chat_revision_rows" \
         FAKE_DB_REVISION_FILE="$db_revision_file" FAKE_CHAT_AUTHORITY_SCHEMA_FILE="$chat_schema_file" \
         FAKE_CHAT_AUTHORITY_COMPLETE_FIXTURE="$workspace/chat-authority-complete-schema.json" \
         FAKE_CHAT_OLD_CAPABILITY="$chat_capability" \
+        FAKE_XIAOLING_F2_CAPABILITY="$f2_capability" \
+        FAKE_XIAOLING_F2_TARGET_IMAGE_ID="$f2_target_image_id" \
+        FAKE_XIAOLING_F2_OLD_IMAGE_ID="$f2_old_image_id" \
+        FAKE_XIAOLING_F2_TARGET_CAPABILITY="$f2_target_capability" \
+        FAKE_XIAOLING_F2_OLD_CAPABILITY="$f2_old_capability" \
         FAKE_CHECKPOINT_SCHEMA="$ledger_schema" FAKE_CHECKPOINT_REFERENCE="$ledger_reference" \
         FAKE_CHECKPOINT_PROBE_FAILURE="$probe_failure" \
         FAKE_MEMBER_CAPABILITY="$member_capability" FAKE_MEMBER_PROBE_FAILURE="$member_probe_failure" \
@@ -236,11 +270,17 @@ PY
         "$workspace/repo/deploy/deploy.sh" all --revision "$new_sha" > "$workspace/output.log" 2>&1
     else
       env PATH="$workspace/bin:$PATH" FAIL_SCENARIO="$scenario" FAKE_RELEASE_SHA="$old_sha" \
-        FAKE_RELEASE_VERSION=3.8.2 FAKE_ALEMBIC_REVISION="$chat_revision" FAKE_ALEMBIC_HEAD="$chat_head" \
+        FAKE_BASE_VERSION="$current_version" FAKE_TARGET_VERSION="$release_version" \
+        FAKE_RELEASE_VERSION="$current_version" FAKE_ALEMBIC_REVISION="$chat_revision" FAKE_ALEMBIC_HEAD="$chat_head" \
         FAKE_ALEMBIC_CURRENT_ROWS="$chat_revision_rows" \
         FAKE_DB_REVISION_FILE="$db_revision_file" FAKE_CHAT_AUTHORITY_SCHEMA_FILE="$chat_schema_file" \
         FAKE_CHAT_AUTHORITY_COMPLETE_FIXTURE="$workspace/chat-authority-complete-schema.json" \
         FAKE_CHAT_OLD_CAPABILITY="$chat_capability" \
+        FAKE_XIAOLING_F2_CAPABILITY="$f2_capability" \
+        FAKE_XIAOLING_F2_TARGET_IMAGE_ID="$f2_target_image_id" \
+        FAKE_XIAOLING_F2_OLD_IMAGE_ID="$f2_old_image_id" \
+        FAKE_XIAOLING_F2_TARGET_CAPABILITY="$f2_target_capability" \
+        FAKE_XIAOLING_F2_OLD_CAPABILITY="$f2_old_capability" \
         FAKE_CHECKPOINT_SCHEMA="$ledger_schema" FAKE_CHECKPOINT_REFERENCE="$ledger_reference" \
         FAKE_CHECKPOINT_PROBE_FAILURE="$probe_failure" \
         FAKE_MEMBER_CAPABILITY="$member_capability" FAKE_MEMBER_PROBE_FAILURE="$member_probe_failure" \
@@ -252,12 +292,17 @@ PY
     rc=$?
     set -e
     if [[ "$scenario" == chat_migration_success || "$scenario" == chat_already_migrated_success \
-      || "$scenario" == chat_future_head_success ]]; then
+      || "$scenario" == chat_future_head_success || "$scenario" == f2_success ]]; then
       [[ "$rc" == 0 ]] || { cat "$workspace/output.log"; printf '119 success fixture failed: rc=%s\n' "$rc" >&2; exit 1; }
       assert_contains "$workspace/releases/current.env" "RELEASE_SHA=$new_sha"
       [[ ! -f "$workspace/releases/pending.env" ]]
       [[ "$(cat "$db_revision_file")" == "$chat_head" ]]
       [[ "$(cat "$chat_schema_file")" == complete ]]
+      if [[ "$scenario" == f2_success ]]; then
+        assert_contains "$workspace/docker.log" 'xiaoling_f2_probe_invoked'
+        [[ -f "$workspace/releases/xiaoling-f2-activation.env" ]]
+        assert_contains "$workspace/releases/xiaoling-f2-activation.env" 'APP_VERSION=4.1.49'
+      fi
       python3 - "$workspace/docker.log" <<'PY'
 import sys
 entries = open(sys.argv[1], encoding="utf-8").read().splitlines()
@@ -275,7 +320,7 @@ PY
       tls) assert_contains "$workspace/output.log" 'Frontend TLS / ACME 持久化挂载未通过预检' ;;
       backup) expected_rc=41 ;;
       verify) expected_rc=42 ;;
-      backend_build|migration|backend_up|frontend_build|frontend_up|chat_partial_migration) expected_rc=44 ;;
+      backend_build|migration|backend_up|frontend_build|frontend_up|chat_partial_migration|f2_frontend_build) expected_rc=44 ;;
       assets) expected_rc=43 ;;
       chat_stop_failure|chat_stop_verification_failure) expected_rc=1 ;;
     esac
@@ -300,7 +345,7 @@ PY
       }
     fi
     case "$scenario" in
-      tls|backup|verify|backend_build|migration)
+      tls|backup|verify|backend_build|migration|f2_downgrade_preflight_refused)
         expected_rollback=not_switched
         cmp "$workspace/original.env" "$workspace/releases/current.env"
         assert_not_contains "$workspace/docker.log" 'compose up -d --no-deps --no-build --pull never'
@@ -310,6 +355,13 @@ PY
           assert_not_contains "$workspace/docker.log" 'compose build backend'
           assert_not_contains "$workspace/docker.log" 'compose build frontend'
           assert_not_contains "$workspace/docker.log" 'backup.sh'
+        fi
+        if [[ "$scenario" == f2_downgrade_preflight_refused ]]; then
+          assert_contains "$workspace/output.log" '当前发布已启用或正在切换至 F2；目标镜像不含同等小菱权限门'
+          assert_contains "$workspace/docker.log" 'xiaoling_f2_probe_invoked'
+          assert_not_contains "$workspace/docker.log" 'upgrade head'
+          assert_not_contains "$workspace/docker.log" 'compose up -d --no-deps --no-build --pull never backend'
+          [[ ! -f "$workspace/releases/xiaoling-f2-activation.env" ]]
         fi
         ;;
       chat_migration_graph_invalid)
@@ -394,6 +446,15 @@ PY
           [[ ! -f "$workspace/releases/pending.env" ]]
           assert_contains "$workspace/releases/current.env" "RELEASE_SHA=$old_sha"
         fi
+        ;;
+      f2_frontend_build|f2_https)
+        expected_rollback=f2_compatibility_gated
+        assert_contains "$workspace/output.log" '当前发布已启用或正在切换至 F2'
+        assert_contains "$workspace/docker.log" 'xiaoling_f2_probe_invoked'
+        assert_not_contains "$workspace/docker.log" "compose up -d --no-deps --no-build --pull never backend | release=$old_sha"
+        [[ -f "$workspace/releases/xiaoling-f2-activation.env" ]]
+        [[ -f "$workspace/releases/pending.env" ]]
+        assert_contains "$workspace/releases/xiaoling-f2-activation.env" 'APP_VERSION=4.1.49'
         ;;
       rollback_failed|ledger_empty_rollback_refused|ledger_written_rollback_refused|ledger_probe_failed|member_empty_old_refused|member_unknown_refused|member_probe_failed)
         expected_rollback=failed

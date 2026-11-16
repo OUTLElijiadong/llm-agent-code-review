@@ -32,6 +32,8 @@ def test_runtime_context_includes_only_attachment_search_hits(monkeypatch):
                                     "search_mode": "local_hash_vector_and_terms",
                                 }]
                             ))
+        monkeypatch.setattr(runtime, "_current_discussion_messages", lambda *_args, **_kwargs: [])
+        monkeypatch.setattr(runtime, "_role_snapshot", lambda *_args, **_kwargs: {"messages": []})
         prompt, references = runtime._render_runtime_context(
             db, enterprise_id=10, user_id=2, room=SimpleNamespace(id=20, kind="company", group_id=None),
             source=messages[0], snapshot={"messages": [{
@@ -60,6 +62,8 @@ def test_long_context_retains_authority_rules_and_complete_recent_message(monkey
         ])
         monkeypatch.setattr(runtime.enterprise_knowledge_attachment_service, "search_attachments",
                             lambda *_args, **_kwargs: [])
+        monkeypatch.setattr(runtime, "_current_discussion_messages", lambda *_args, **_kwargs: [])
+        monkeypatch.setattr(runtime, "_role_snapshot", lambda *_args, **_kwargs: {"messages": []})
         snapshot = {"messages": [
             {"message_id": m.id, "sender_id": 2, "username": "成员甲", "member_role": "member", "rank": 1}
             for m in messages

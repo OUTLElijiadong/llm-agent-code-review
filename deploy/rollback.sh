@@ -58,14 +58,23 @@ release_dir="${RELEASE_STATE_DIR:-.releases}"
 current_state="$release_dir/current.env"
 previous_state="$release_dir/previous.env"
 pending_state="$release_dir/pending.env"
-[[ -f "$previous_state" ]] || fatal "不存在上一发布状态: $previous_state"
-
+f2_activation_state="$release_dir/xiaoling-f2-activation.env"
 lock_dir="$(maintenance_lock_path)"
 mkdir -p "$(dirname "$lock_dir")"
-if [[ "$from_deploy_failure" != "1" ]]; then
+if [[ "$from_deploy_failure" == "1" ]]; then
+  assert_deploy_failure_lock_owner "$lock_dir"
+else
   acquire_directory_lock "$lock_dir"
   trap 'release_directory_lock "$lock_dir"' EXIT
 fi
+
+# 读当前/上一版本状态必须在持锁后，避免排队等待部署期间版本已经改变。
+[[ -f "$previous_state" ]] || fatal "不存在上一发布状态: $previous_state"
+[[ -f "$current_state" ]] \
+  || fatal "当前发布账本缺失，无法确认已运行版本的权限语义；拒绝回滚并要求前向核对"
+current_release_version="$(read_release_value "$current_state" APP_VERSION || true)"
+[[ -n "$current_release_version" ]] || fatal "当前发布账本缺少 APP_VERSION，拒绝判断 F2 回滚兼容性"
+validate_app_version "$current_release_version"
 
 load_release_environment "$previous_state"
 [[ "$target" == all ]] || fatal "回滚必须使用 all，禁止前后端版本分离"
@@ -84,6 +93,7 @@ fi
 assert_checkpoint_rollback_compatible
 assert_project_member_rollback_compatible
 assert_chat_authority_rollback_compatible
+assert_xiaoling_f2_rollback_compatible "$current_release_version" "$f2_activation_state"
 
 log_warn "开始应用层回滚(target=$target, release=$previous_sha)；数据库保持当前 revision"
 if [[ "$target" == "all" || "$target" == "backend" ]]; then

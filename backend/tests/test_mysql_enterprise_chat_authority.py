@@ -1,5 +1,6 @@
 """MySQL RR: enterprise-chat authority must be current at result publication."""
 
+import json
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 from uuid import uuid4
@@ -15,6 +16,7 @@ from app.models.enterprise_assistant_runtime import EnterpriseAssistantRuntimeSt
 from app.models.enterprise_chat import EnterpriseAssistantRun, EnterpriseChatMessage, EnterpriseConversation
 from app.models.enterprise_org import Enterprise, EnterpriseGroup, EnterpriseGroupMember, EnterpriseMember
 from app.models.user import User
+from app.services import enterprise_assistant_clarification_service as clarification
 from app.services import enterprise_assistant_runtime_service as runtime
 from app.services import enterprise_assistant_service, enterprise_chat_service, enterprise_org_service
 
@@ -22,7 +24,14 @@ fresh_chain = chain.fresh_chain
 fresh_chain_url = chain.fresh_chain_url
 
 
-def _seed(engine, *, prior_authority_before_source=False):
+def _seed(
+    engine,
+    *,
+    prior_authority_before_source=False,
+    actor_role="member",
+    source_authority_rank=1,
+    include_prior_message=True,
+):
     sessions = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     key = uuid4().hex[:12]
     with sessions.begin() as db:
@@ -43,7 +52,7 @@ def _seed(engine, *, prior_authority_before_source=False):
         db.add_all(
             [
                 EnterpriseMember(enterprise_id=company.id, user_id=owner.id, role="owner", status="active"),
-                EnterpriseMember(enterprise_id=company.id, user_id=actor.id, role="member", status="active"),
+                EnterpriseMember(enterprise_id=company.id, user_id=actor.id, role=actor_role, status="active"),
                 EnterpriseMember(enterprise_id=company.id, user_id=author.id, role="admin", status="active"),
                 EnterpriseGroupMember(
                     enterprise_id=company.id, group_id=group.id, user_id=actor.id, role="member", status="active"
@@ -70,7 +79,7 @@ def _seed(engine, *, prior_authority_before_source=False):
             sender_type="human",
             client_message_id="source",
             content="@小菱 回答",
-            sender_authority_rank=1,
+            sender_authority_rank=source_authority_rank,
         )
         earlier = EnterpriseChatMessage(
             enterprise_id=company.id,
@@ -81,14 +90,17 @@ def _seed(engine, *, prior_authority_before_source=False):
             content="@小菱 原管理员指令" if prior_authority_before_source else "原管理员指令",
             sender_authority_rank=3 if prior_authority_before_source else None,
         )
-        if prior_authority_before_source:
+        if include_prior_message and prior_authority_before_source:
             db.add(earlier)
             db.flush()
             db.add(source)
             snapshot_messages = [earlier, source]
-        else:
+        elif include_prior_message:
             db.add_all([source, earlier])
             snapshot_messages = [source, earlier]
+        else:
+            db.add(source)
+            snapshot_messages = [source]
         db.flush()
         snapshot = runtime._role_snapshot(
             db, enterprise_id=company.id, room=room, messages=snapshot_messages, initiator_id=actor.id
@@ -136,26 +148,97 @@ def _seed(engine, *, prior_authority_before_source=False):
         return sessions, company.id, group.id, owner.id, author.id, room.id, run.public_id
 
 
-def _change(db, kind, enterprise_id, group_id, owner_id, author_id):
+def _install_not_required_model_send_clearance(sessions, run_public_id):
+    with sessions.begin() as db:
+        run = db.query(EnterpriseAssistantRun).filter_by(public_id=run_public_id).one()
+        state = db.query(EnterpriseAssistantRuntimeState).filter_by(assistant_run_id=run.id).one()
+        checkpoint = runtime.RunCheckpoint.from_dict(json.loads(state.checkpoint_json or "{}"))
+        evidence = clarification.model_send_evidence(db, run)
+        checkpoint.context_metadata["model_send_clearance"] = {
+            "status": "not_required",
+            "candidate_message_ids": [],
+            "fingerprint": evidence["fingerprint"],
+            "authority_version_sha256": evidence["authority_version_sha256"],
+        }
+        state.checkpoint_json = runtime._json(checkpoint.to_dict())
+
+
+def _initiator_user_id(sessions, run_public_id):
+    with sessions() as db:
+        run = db.query(EnterpriseAssistantRun).filter_by(public_id=run_public_id).one()
+        return int(run.initiator_user_id)
+
+
+def test_published_answer_persists_the_latest_human_message_boundary(fresh_chain, monkeypatch):
+    sessions, enterprise_id, group_id, _owner_id, _author_id, room_id, public_id = _seed(
+        fresh_chain, actor_role="admin", source_authority_rank=3, include_prior_message=False,
+    )
+    with sessions.begin() as db:
+        employee = User(username=f"chat-boundary-{uuid4().hex[:12]}", password="x", role="user", status=1)
+        db.add(employee)
+        db.flush()
+        db.add_all([
+            EnterpriseMember(enterprise_id=enterprise_id, user_id=employee.id, role="member", status="active"),
+            EnterpriseGroupMember(
+                enterprise_id=enterprise_id, group_id=group_id, user_id=employee.id,
+                role="member", status="active",
+            ),
+        ])
+        employee_id = int(employee.id)
+    _install_not_required_model_send_clearance(sessions, public_id)
+    monkeypatch.setattr(enterprise_assistant_service, "_require_subscription", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "app.services.billing_checkout_service.enterprise_subscription_status", lambda *_a, **_k: "active"
+    )
+    monkeypatch.setattr(
+        "app.services.billing_checkout_service.enterprise_subscription_refund_pending", lambda *_a, **_k: False
+    )
+    monkeypatch.setattr(
+        runtime, "_reservations_for_run", lambda *_a: [type("Reservation", (), {"status": "settled"})()]
+    )
+
+    with sessions() as db:
+        intervening = enterprise_chat_service.send_message(
+            db, enterprise_id, employee_id, room_id, "message-during-answer", "请补充背景信息",
+        )
+        intervening_id = int(intervening.id)
+
+    result = runtime._finalize_runtime(
+        sessions, enterprise_id=enterprise_id, conversation_id=room_id, run_public_id=public_id,
+    )
+    assert result["status"] == "completed"
+    with sessions() as db:
+        answer = db.query(EnterpriseChatMessage).filter_by(assistant_run_id=(
+            db.query(EnterpriseAssistantRun.id).filter_by(public_id=public_id).scalar()
+        )).one()
+        assert answer.discussion_closed_through_message_id == intervening_id
+
+
+def _change(db, kind, enterprise_id, group_id, owner_id, target_user_id):
     if kind == "group":
-        enterprise_org_service.remove_group_member(db, enterprise_id, group_id, owner_id, author_id)
+        enterprise_org_service.remove_group_member(db, enterprise_id, group_id, owner_id, target_user_id)
     elif kind == "member":
-        enterprise_org_service.remove_enterprise_member(db, enterprise_id, owner_id, author_id)
+        enterprise_org_service.remove_enterprise_member(db, enterprise_id, owner_id, target_user_id)
     elif kind == "role":
-        enterprise_org_service.set_enterprise_role(db, enterprise_id, owner_id, author_id, "member")
+        enterprise_org_service.set_enterprise_role(db, enterprise_id, owner_id, target_user_id, "member")
     else:
-        db.query(User).filter_by(id=author_id).one().status = 0
+        db.query(User).filter_by(id=target_user_id).one().status = 0
         db.flush()
 
 
 def test_mysql_directive_snapshot_is_required_and_message_is_immutable(fresh_chain):
     sessions, enterprise_id, _group_id, _owner_id, author_id, room_id, _run_id = _seed(fresh_chain)
-    with sessions.begin() as db:
+    with sessions() as db:
         directive = enterprise_chat_service.send_message(
             db, enterprise_id, author_id, room_id, "immutable-directive", "@小菱 请暂停并核对",
         )
         directive_id = int(directive.id)
         assert directive.sender_authority_rank == 3
+    with sessions() as db:
+        ordinary = enterprise_chat_service.send_message(
+            db, enterprise_id, author_id, room_id, "ordinary-authority", "请先暂停并核对",
+        )
+        assert ordinary.sender_authority_rank == 3
     with sessions() as db:
         directive = db.get(EnterpriseChatMessage, directive_id)
         params = {
@@ -232,7 +315,11 @@ def test_mysql_directive_identity_uses_byte_comparison(fresh_chain, field, value
 
 @pytest.mark.parametrize("kind", ["group", "member", "role", "disabled"])
 def test_revoked_message_author_cannot_publish_from_old_rr_snapshot(fresh_chain, monkeypatch, kind):
-    sessions, enterprise_id, group_id, owner_id, author_id, room_id, public_id = _seed(fresh_chain)
+    sessions, enterprise_id, group_id, owner_id, _author_id, room_id, public_id = _seed(
+        fresh_chain, actor_role="admin", source_authority_rank=3, include_prior_message=False,
+    )
+    initiator_id = _initiator_user_id(sessions, public_id)
+    _install_not_required_model_send_clearance(sessions, public_id)
     monkeypatch.setattr(enterprise_assistant_service, "_require_subscription", lambda *_a, **_k: None)
     monkeypatch.setattr(
         "app.services.billing_checkout_service.enterprise_subscription_status", lambda *_a, **_k: "active"
@@ -265,7 +352,7 @@ def test_revoked_message_author_cannot_publish_from_old_rr_snapshot(fresh_chain,
         assert paused.wait(15)
         try:
             with sessions.begin() as db:
-                _change(db, kind, enterprise_id, group_id, owner_id, author_id)
+                _change(db, kind, enterprise_id, group_id, owner_id, initiator_id)
         finally:
             proceed.set()
         assert result.result(timeout=20) == "suppressed"
@@ -281,7 +368,11 @@ def test_publication_wins_before_later_authority_change(fresh_chain, monkeypatch
 
     from sqlalchemy import text
 
-    sessions, enterprise_id, group_id, owner_id, author_id, room_id, public_id = _seed(fresh_chain)
+    sessions, enterprise_id, group_id, owner_id, _author_id, room_id, public_id = _seed(
+        fresh_chain, actor_role="admin", source_authority_rank=3, include_prior_message=False,
+    )
+    initiator_id = _initiator_user_id(sessions, public_id)
+    _install_not_required_model_send_clearance(sessions, public_id)
     monkeypatch.setattr(enterprise_assistant_service, "_require_subscription", lambda *_a, **_k: None)
     monkeypatch.setattr(
         "app.services.billing_checkout_service.enterprise_subscription_status", lambda *_a, **_k: "active"
@@ -312,7 +403,7 @@ def test_publication_wins_before_later_authority_change(fresh_chain, monkeypatch
         with sessions.begin() as db:
             connection_id.append(db.execute(text("SELECT CONNECTION_ID()")).scalar_one())
             mutating.set()
-            _change(db, kind, enterprise_id, group_id, owner_id, author_id)
+            _change(db, kind, enterprise_id, group_id, owner_id, initiator_id)
         return "changed"
 
     with ThreadPoolExecutor(max_workers=2) as pool:

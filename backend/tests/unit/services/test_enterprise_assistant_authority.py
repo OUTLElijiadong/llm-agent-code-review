@@ -21,8 +21,10 @@ from app.services.enterprise_assistant_runtime_service import (
     _digest,
     _finalize_runtime,
     _rank,
+    _require_model_send_clearance,
     _role_snapshot,
 )
+from app.services import enterprise_assistant_clarification_service as clarification
 
 
 @pytest.mark.parametrize(
@@ -83,7 +85,7 @@ def test_newer_admin_or_group_leader_directive_blocks_member_run(tmp_path, sende
     try:
         db.add(EnterpriseChatMessage(
             id=101, enterprise_id=10, conversation_id=30, sender_id=sender_id,
-            sender_type="human", client_message_id="new", content="@小菱 暂停并先复核",
+            sender_type="human", client_message_id="new", content="暂停并先复核",
             sender_authority_rank=3 if sender_id == 2 else 2,
         ))
         db.commit()
@@ -106,7 +108,7 @@ def test_newer_lower_rank_or_non_xiaoling_message_does_not_override_owner(tmp_pa
         db.add_all([
             EnterpriseChatMessage(
                 id=101, enterprise_id=10, conversation_id=30, sender_id=3,
-                sender_type="human", client_message_id="lower", content="@小菱 继续处理",
+                sender_type="human", client_message_id="lower", content="继续处理",
                 sender_authority_rank=1,
             ),
             EnterpriseChatMessage(
@@ -130,7 +132,7 @@ def test_same_rank_peer_directive_blocks_member_run(tmp_path):
     try:
         db.add(EnterpriseChatMessage(
             id=101, enterprise_id=10, conversation_id=30, sender_id=5,
-            sender_type="human", client_message_id="peer", content="@小菱 先停止",
+            sender_type="human", client_message_id="peer", content="先停止",
             sender_authority_rank=1,
         ))
         db.commit()
@@ -205,7 +207,7 @@ def test_removed_enterprise_member_cannot_keep_group_leader_authority(tmp_path):
 
 
 @pytest.mark.parametrize("revocation", ["group", "account"])
-def test_send_time_authority_survives_later_author_revocation(tmp_path, revocation):
+def test_sent_authority_remains_effective_after_access_revocation(tmp_path, revocation):
     engine, db = _authority_db(tmp_path)
     try:
         if revocation == "group":
@@ -319,7 +321,7 @@ def test_completed_answer_is_suppressed_if_authority_directive_arrives_before_pu
         db.add(EnterpriseChatMessage(
             id=101, enterprise_id=10, conversation_id=30, sender_id=2,
             sender_type="human", client_message_id="new-admin-directive",
-            content="@小菱 请先暂停并处理新问题",
+            content="请先暂停并处理新问题",
         ))
         reservation = BillingReservation(
             request_key="enterprise-assistant:authority-race:1:1", model_name="deepseek-flash",
@@ -354,6 +356,128 @@ def test_completed_answer_is_suppressed_if_authority_directive_arrives_before_pu
         assert "新的同级或更高权限" in saved_message.content
         assert "过期回答" not in saved_message.content
         assert db.query(BillingReservation).filter_by(request_key=reservation.request_key).one().status == "settled"
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.parametrize("valid_clearance", [False, True])
+def test_finalizer_rechecks_model_send_clearance_before_publishing(tmp_path, monkeypatch, valid_clearance):
+    engine, db = _authority_db(tmp_path)
+    try:
+        db.add(Enterprise(id=10, name="甲企业", owner_id=1, seat_limit=5,
+                          status="active", paid_order_id="paid-10"))
+        room = EnterpriseConversation(
+            id=30, enterprise_id=10, kind="group", conversation_key="group:20",
+            group_id=20, created_by=1,
+        )
+        run = EnterpriseAssistantRun(
+            public_id="model-send-clearance-race", request_key="assistant:model-send-clearance-race",
+            enterprise_id=10, conversation_id=30, group_id=20,
+            initiator_user_id=3, source_message_id=100, status="running",
+            attempt_count=1, model_name="deepseek-flash", prompt_sha256="c" * 64,
+        )
+        db.add_all([room, run])
+        db.flush()
+        source = db.query(EnterpriseChatMessage).filter_by(id=100).one()
+        snapshot = _role_snapshot(
+            db, enterprise_id=10, room=room, messages=[source], initiator_id=3,
+        )
+        checkpoint = RunCheckpoint(
+            run_id=run.public_id, model="deepseek-flash", transcript=[], tools=[],
+            status="completed", output_text="不应绕过最终权限门发布",
+        )
+        state = EnterpriseAssistantRuntimeState(
+            assistant_run_id=run.id, enterprise_id=10, conversation_id=30,
+            group_id=20, initiator_user_id=3, source_message_id=100,
+            status="completed", checkpoint_json=json.dumps(checkpoint.to_dict()),
+            permission_snapshot_json=json.dumps(snapshot), permission_snapshot_sha256=_digest(snapshot),
+            lease_generation=1, billing_invocation_count=1, version=1,
+        )
+        placeholder = EnterpriseChatMessage(
+            enterprise_id=10, conversation_id=30, sender_id=None, sender_type="assistant",
+            assistant_run_id=run.id, client_message_id=run.public_id, content="小菱已收到请求，正在处理。",
+        )
+        reservation = BillingReservation(
+            request_key="enterprise-assistant:model-send-clearance-race:1:1",
+            model_name="deepseek-flash", requested_milli=1000, enterprise_id=10,
+            user_id=3, usage_kind="member", status="settled", actual_milli=10,
+            input_tokens=20, output_tokens=10,
+        )
+        db.add_all([state, placeholder, reservation])
+        db.commit()
+
+        if valid_clearance:
+            monkeypatch.setattr("app.services.billing_checkout_service.enterprise_subscription_refund_pending",
+                                lambda *_args, **_kwargs: False)
+            monkeypatch.setattr("app.services.billing_checkout_service.enterprise_subscription_status",
+                                lambda *_args, **_kwargs: "active")
+            evidence = clarification.model_send_evidence(db, run)
+            checkpoint.context_metadata["model_send_clearance"] = {
+                "status": "not_required",
+                "candidate_message_ids": [],
+                "fingerprint": evidence["fingerprint"],
+                "authority_version_sha256": evidence["authority_version_sha256"],
+            }
+            state.checkpoint_json = json.dumps(checkpoint.to_dict())
+            db.commit()
+
+        monkeypatch.setattr("app.services.enterprise_assistant_proactive_service.require_live_policy",
+                            lambda *_args, **_kwargs: None)
+        monkeypatch.setattr("app.services.enterprise_assistant_service._require_subscription",
+                            lambda *_args, **_kwargs: None)
+        monkeypatch.setattr("app.services.enterprise_assistant_runtime_service._live_role_snapshot",
+                            lambda *_args, **_kwargs: {})
+        checks = []
+        original_gate = _require_model_send_clearance
+
+        def record_gate(*args, **kwargs):
+            checks.append(kwargs.get("run").public_id)
+            return original_gate(*args, **kwargs)
+
+        monkeypatch.setattr(
+            "app.services.enterprise_assistant_runtime_service._require_model_send_clearance",
+            record_gate,
+        )
+        factory = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
+
+        if valid_clearance:
+            result = _finalize_runtime(
+                factory, enterprise_id=10, conversation_id=30,
+                run_public_id="model-send-clearance-race",
+            )
+            assert result["status"] == "completed"
+        else:
+            with pytest.raises(ForbiddenError, match="权限或订阅已变化"):
+                _finalize_runtime(
+                    factory, enterprise_id=10, conversation_id=30,
+                    run_public_id="model-send-clearance-race",
+                )
+
+        db.expire_all()
+        saved_run = db.query(EnterpriseAssistantRun).filter_by(
+            public_id="model-send-clearance-race",
+        ).one()
+        saved_state = db.query(EnterpriseAssistantRuntimeState).filter_by(
+            assistant_run_id=saved_run.id,
+        ).one()
+        saved_message = db.query(EnterpriseChatMessage).filter_by(
+            assistant_run_id=saved_run.id,
+        ).one()
+        assert checks == ["model-send-clearance-race"]
+        if valid_clearance:
+            assert saved_run.status == "completed"
+            assert saved_run.response_text == "不应绕过最终权限门发布"
+            assert saved_state.status == "completed"
+            assert saved_message.content == "不应绕过最终权限门发布"
+        else:
+            assert saved_run.status == "suppressed"
+            assert saved_run.response_text is None
+            assert saved_state.status == "suppressed"
+            assert saved_message.content == "小菱已收到请求，正在处理。"
+        assert db.query(BillingReservation).filter_by(
+            request_key=reservation.request_key,
+        ).one().status == "settled"
     finally:
         db.close()
         engine.dispose()

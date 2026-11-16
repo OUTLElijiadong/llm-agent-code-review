@@ -22,9 +22,10 @@ fresh_chain = chain.fresh_chain
 fresh_chain_url = chain.fresh_chain_url
 
 
-def _seed(engine):
+def _seed(engine, *, actor_role="member", source_authority_rank=1):
     return _seed_chat_authority(
         engine, prior_authority_before_source=True,
+        actor_role=actor_role, source_authority_rank=source_authority_rank,
     )
 
 
@@ -210,13 +211,14 @@ def test_sent_directive_rank_survives_author_revocation_and_is_immutable(fresh_c
                               request_id=request_id) == "stale"
 
 
-def test_lower_authority_and_initiator_followup_do_not_supersede(fresh_chain):
-    factory, enterprise_id, group_id, _owner_id, _author_id, room_id, run_public_id = _seed(fresh_chain)
+def test_lower_authority_does_not_supersede_but_initiator_followup_does(fresh_chain):
+    factory, enterprise_id, group_id, _owner_id, _author_id, room_id, run_public_id = _seed(
+        fresh_chain, actor_role="admin", source_authority_rank=3,
+    )
     with factory.begin() as db:
         run = db.query(EnterpriseAssistantRun).filter_by(public_id=run_public_id).one()
         state = db.query(EnterpriseAssistantRuntimeState).filter_by(assistant_run_id=run.id).one()
         actor_id = int(run.initiator_user_id)
-        db.query(EnterpriseMember).filter_by(enterprise_id=enterprise_id, user_id=actor_id).one().role = "admin"
         run.status = state.status = "running"
         lower = User(username="later-lower", password="x", role="user", status=1)
         db.add(lower)
@@ -242,12 +244,18 @@ def test_lower_authority_and_initiator_followup_do_not_supersede(fresh_chain):
         lower_message = enterprise_chat_service.send_message(
             db, enterprise_id, lower_id, room_id, "lower-directive", "@小菱 请继续",
         )
-        own_message = enterprise_chat_service.send_message(
-            db, enterprise_id, actor_id, room_id, "initiator-followup", "@小菱 我补充说明",
-        )
         assert lower_message.sender_authority_rank == 1
-        assert own_message.sender_authority_rank == 3
 
     with factory.begin() as db:
         assert service.status(db, enterprise_id=enterprise_id, conversation_id=room_id,
                               request_id=request_id) == "waiting"
+
+    with factory() as db:
+        own_message = enterprise_chat_service.send_message(
+            db, enterprise_id, actor_id, room_id, "initiator-followup", "补充说明",
+        )
+        assert own_message.sender_authority_rank == 3
+
+    with factory.begin() as db:
+        assert service.status(db, enterprise_id=enterprise_id, conversation_id=room_id,
+                              request_id=request_id) == "stale"

@@ -277,7 +277,7 @@ assert_deploy_sources_clean() {
   local repo_dir="$1"
   local dirty
   dirty="$(git -C "$repo_dir" status --porcelain --untracked-files=all -- \
-    VERSION backend frontend deploy/docker-compose.yml deploy/lib deploy/*.sh 2>/dev/null || true)"
+    VERSION backend frontend deploy/docker-compose.yml deploy/lib deploy/*.sh deploy/prism_ops_executor.py 2>/dev/null || true)"
   if [[ -n "$dirty" ]]; then
     log_warn "部署构建上下文存在未提交变更："
     printf '%s\n' "$dirty" >&2
@@ -452,6 +452,35 @@ assert_chat_authority_rollback_compatible() {
       fatal "小菱权限快照结构状态未知；Backend 已停，拒绝回滚并前向修复"
       ;;
   esac
+}
+
+# 一旦 current 发布账本已启用 F2，不能回滚到只理解 119 schema 的旧权限语义。
+# 首次部署 F2 失败时 current.env 仍记录旧生产版本，允许恢复原有应用基线。
+# 参数: $1 回滚前 current.env 中的应用版本。
+assert_xiaoling_f2_rollback_compatible() {
+  local current_version="$1" activation_state="${2:-}" force_required="${3:-0}"
+  local image_id="${4:-${BOUND_BACKEND_IMAGE_ID:-}}" capability probe_file f2_required=0
+  if [[ -n "$current_version" ]] && app_version_at_least "$current_version" "4.1.49"; then
+    f2_required=1
+  fi
+  [[ "$force_required" != "1" ]] || f2_required=1
+  if [[ -n "$activation_state" && ( -e "$activation_state" || -L "$activation_state" ) ]]; then
+    [[ -f "$activation_state" && ! -L "$activation_state" && -r "$activation_state" ]] \
+      || fatal "F2 激活阶段标记无法安全读取，拒绝切换镜像"
+    f2_required=1
+  fi
+  [[ "$f2_required" == "1" ]] || return 0
+  probe_file="$(dirname "${BASH_SOURCE[0]}")/xiaoling_f2_compatibility.py"
+  [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] \
+    || fatal "F2 回滚门缺少已绑定 Backend 镜像 ID"
+  [[ -r "$probe_file" ]] || fatal "F2 回滚能力 probe 不可读，拒绝切换镜像"
+  capability="$(docker run --rm -i --memory 128m --pids-limit 32 \
+    --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+    --entrypoint python "$image_id" - < "$probe_file")" \
+    || fatal "目标镜像 F2 权限行为 probe 失败，拒绝回滚并前向修复"
+  [[ "$capability" == supported ]] \
+    || fatal "当前发布已启用或正在切换至 F2；目标镜像不含同等小菱权限门，拒绝回滚以免降级权限语义"
+  log_info "小菱 F2 回滚行为门通过(reader=$capability, current_version=${current_version:-unknown})"
 }
 
 # 在切换容器前拒绝不认识当前检查点格式的目标镜像。
@@ -752,6 +781,37 @@ release_directory_lock() {
   rmdir "$lock_dir" 2>/dev/null || true
 }
 
+# 自动部署失败时，rollback.sh 子进程可复用父 deploy.sh 持有的维护锁；
+# 命令行标记本身不能授权跳过锁，必须同时证明锁记录仍属于当前 deploy.sh 父进程。
+# 参数: $1 为维护锁目录。
+# 返回: 父进程持有且锁记录有效时返回 0，否则失败关闭。
+assert_deploy_failure_lock_owner() {
+  local lock_dir="$1" owner_pid owner_command owner_start owner_boot current_identity current_start current_boot
+  local alive_rc=0
+  [[ -d "$lock_dir" ]] || fatal "自动回滚缺少 deploy.sh 持有的维护锁"
+  owner_pid="$(lock_owner_field "$lock_dir" pid || true)"
+  owner_command="$(lock_owner_field "$lock_dir" command || true)"
+  [[ "$owner_pid" == "$PPID" && "$owner_command" == "deploy.sh" ]] \
+    || fatal "--from-deploy-failure 只能由当前持锁的 deploy.sh 子进程使用"
+  if [[ -d /proc ]]; then
+    owner_start="$(lock_owner_field "$lock_dir" process_start_ticks || true)"
+    owner_boot="$(lock_owner_field "$lock_dir" boot_id || true)"
+    current_identity="$(PRISM_PROC_ROOT=/proc linux_process_identity "$PPID" 2>/dev/null || true)"
+    current_start="${current_identity#* }"
+    current_boot="$(PRISM_PROC_ROOT=/proc linux_boot_id 2>/dev/null || true)"
+    [[ "$owner_start" =~ ^[0-9]+$ && "$owner_boot" =~ ^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$ \
+      && "$current_identity" == *" "* && "$current_start" == "$owner_start" \
+      && -n "$current_boot" && "$current_boot" == "$owner_boot" ]] \
+      || fatal "自动回滚的 deploy.sh 锁持有者身份无法验证"
+  fi
+  if [[ -d /proc ]]; then
+    PRISM_PROC_ROOT=/proc lock_owner_alive "$lock_dir" || alive_rc=$?
+  else
+    lock_owner_alive "$lock_dir" || alive_rc=$?
+  fi
+  [[ "$alive_rc" == "0" ]] || fatal "自动回滚的 deploy.sh 维护锁持有者已失效或无法验证"
+}
+
 # 返回备份、验证、恢复、发布、回滚和清理共用的维护锁路径。
 # 参数: 无。
 # 返回: stdout 输出锁目录路径。
@@ -949,6 +1009,22 @@ validate_release_token() {
 validate_app_version() {
   [[ "$1" =~ ^(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})$ ]] \
     || fatal "应用版本必须是 x.y.z 版本，且每段为 0-999 的无前导零整数"
+}
+
+app_version_at_least() {
+  local actual="$1" required="$2"
+  local actual_major actual_minor actual_patch required_major required_minor required_patch
+  validate_app_version "$actual"
+  validate_app_version "$required"
+  IFS='.' read -r actual_major actual_minor actual_patch <<< "$actual"
+  IFS='.' read -r required_major required_minor required_patch <<< "$required"
+  if (( 10#$actual_major != 10#$required_major )); then
+    (( 10#$actual_major > 10#$required_major ))
+  elif (( 10#$actual_minor != 10#$required_minor )); then
+    (( 10#$actual_minor > 10#$required_minor ))
+  else
+    (( 10#$actual_patch >= 10#$required_patch ))
+  fi
 }
 
 release_image_id() {

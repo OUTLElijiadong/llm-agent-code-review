@@ -85,7 +85,8 @@ def orgdb():
 
 def test_company_history_and_cross_company_denial(orgdb):
     room = chat.open_conversation(orgdb, 10, 1, "company")
-    chat.send_message(orgdb, 10, 1, room.id, "msg-1", "欢迎加入")
+    message = chat.send_message(orgdb, 10, 1, room.id, "msg-1", "欢迎加入")
+    assert message.sender_authority_rank == 4
     # 后加入成员可见公司群历史，其他企业不可通过全局 ID 读取。
     assert [m.content for m in chat.list_messages(orgdb, 10, 2, room.id)] == ["欢迎加入"]
     with pytest.raises(ForbiddenError):
@@ -148,10 +149,17 @@ def test_direct_private_even_against_company_owner_and_stable_pair(orgdb):
 def test_message_idempotence_requires_same_content(orgdb):
     room = chat.open_conversation(orgdb, 10, 2, "company")
     first = chat.send_message(orgdb, 10, 2, room.id, "request-1", "原消息")
-    assert chat.send_message(orgdb, 10, 2, room.id, "request-1", "原消息").id == first.id
+    assert first.sender_authority_rank == 1
+    orgdb.query(EnterpriseMember).filter_by(enterprise_id=10, user_id=2).one().role = "admin"
+    orgdb.commit()
+    replayed = chat.send_message(orgdb, 10, 2, room.id, "request-1", "原消息")
+    assert replayed.id == first.id and replayed.sender_authority_rank == 1
+    assert chat.send_message(orgdb, 10, 2, room.id, "request-2", "新消息").sender_authority_rank == 3
     with pytest.raises(ConflictError):
         chat.send_message(orgdb, 10, 2, room.id, "request-1", "不同消息")
-    assert len(chat.list_messages(orgdb, 10, 2, room.id)) == 1
+    messages = chat.list_messages(orgdb, 10, 2, room.id)
+    assert len(messages) == 2
+    assert [message.sender_authority_rank for message in messages] == [1, 3]
 
 
 def test_queued_run_is_durable_listable_and_claimed_with_a_new_fencing_lease(orgdb):

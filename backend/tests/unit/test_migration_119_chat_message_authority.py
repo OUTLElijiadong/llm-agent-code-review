@@ -21,12 +21,12 @@ def _migration():
     return backend, module
 
 
-def test_119_is_the_single_head_and_follows_118():
+def test_119_follows_118_before_the_discussion_watermark_head():
     backend, module = _migration()
     config = Config(str(backend / "alembic.ini"))
     config.set_main_option("script_location", str(backend / "alembic"))
     script = ScriptDirectory.from_config(config)
-    assert script.get_heads() == ["119_chat_message_authority"]
+    assert script.get_revision("120_discussion_turn_watermark").down_revision == "119_chat_message_authority"
     assert module.down_revision == "118_clarification_authority"
 
 
