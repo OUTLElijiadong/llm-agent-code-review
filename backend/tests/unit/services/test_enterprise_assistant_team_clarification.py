@@ -203,7 +203,7 @@ def test_untagged_higher_authority_message_outside_frozen_30_is_candidate(record
     assert "不要建队" in prompt
 
 
-def test_only_completed_xiaoling_answer_closes_prior_discussion_scope(records_db):
+def test_completed_answer_watermark_closes_in_flight_source(records_db):
     prior_source = records_db.get(EnterpriseChatMessage, 101)
     records_db.delete(prior_source)
     records_db.flush()
@@ -250,12 +250,12 @@ def test_only_completed_xiaoling_answer_closes_prior_discussion_scope(records_db
     prior_run.status = "completed"
     prior_run.response_text = "上一轮已完成"
     assistant_reply.content = "上一轮已完成"
+    # Completed post-migration answers persist the human-message high-water mark.
+    assistant_reply.discussion_closed_through_message_id = 106
     records_db.flush()
 
-    _room, candidates, _rows, _fingerprint, superseded = clarification._context(records_db, run)
-
-    assert candidates == []
-    assert not superseded
+    with pytest.raises(ForbiddenError, match="来源消息或发起人权限已变化"):
+        clarification._context(records_db, run)
 
 
 def test_authority_candidate_limit_fails_closed():

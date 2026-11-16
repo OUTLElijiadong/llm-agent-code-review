@@ -277,7 +277,7 @@ def _last_completed_assistant_discussion_cutoff(
             EnterpriseChatMessage.conversation_id == int(conversation_id),
             EnterpriseChatMessage.sender_type == "assistant",
             EnterpriseChatMessage.discussion_closed_through_message_id.is_not(None),
-            EnterpriseChatMessage.discussion_closed_through_message_id < int(before_message_id),
+            EnterpriseChatMessage.discussion_closed_through_message_id <= int(before_message_id),
             EnterpriseAssistantRun.status == "completed",
             EnterpriseAssistantRun.response_text.is_not(None),
             EnterpriseAssistantRun.response_text != "",
