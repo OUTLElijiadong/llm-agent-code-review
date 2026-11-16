@@ -72,3 +72,37 @@ class PlatformCostAttempt(PlatformCostBase):
     output_limit = Column(BigInteger, nullable=False)
     reserved_cny_micros = Column(BigInteger, nullable=False)
     created_at = Column(DateTime, nullable=False)
+
+
+class PlatformRunOwner(PlatformCostBase):
+    """Detached owner identity; run_pk references the actual Responses run logically.
+
+    No cross-metadata foreign key is claimed by this test-only schema.
+    """
+    __tablename__ = 'platform_cost_run_owner'
+    __table_args__ = (
+        CheckConstraint('generation > 0', name='ck_platform_run_owner_generation'),
+        CheckConstraint("status IN ('active', 'cancelled')", name='ck_platform_run_owner_status'),
+        CheckConstraint('length(owner_digest) = 32', name='ck_platform_run_owner_digest'),
+    )
+
+    id = Column(_PK, primary_key=True, autoincrement=True)
+    run_pk = Column(BigInteger, nullable=False, unique=True)
+    actor_id = Column(BigInteger, nullable=False)
+    generation = Column(BigInteger, nullable=False)
+    owner_digest = Column(_DIGEST, nullable=False)
+    status = Column(String(16), nullable=False)
+
+
+class PlatformAttemptOwner(PlatformCostBase):
+    __tablename__ = 'platform_cost_attempt_owner'
+    __table_args__ = (
+        CheckConstraint('generation > 0', name='ck_platform_attempt_owner_generation'),
+        CheckConstraint('length(owner_digest) = 32', name='ck_platform_attempt_owner_digest'),
+    )
+
+    id = Column(_PK, primary_key=True, autoincrement=True)
+    attempt_id = Column(_PK, ForeignKey('platform_cost_attempt.id', ondelete='RESTRICT'), nullable=False, unique=True)
+    run_owner_id = Column(_PK, ForeignKey('platform_cost_run_owner.id', ondelete='RESTRICT'), nullable=False)
+    generation = Column(BigInteger, nullable=False)
+    owner_digest = Column(_DIGEST, nullable=False)

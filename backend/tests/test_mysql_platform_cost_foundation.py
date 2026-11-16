@@ -228,5 +228,214 @@ def test_platform_center_and_budget_mysql_lock_order(monkeypatch):
             row = db.get(PlatformCostBudget, 1)
             assert row.reserved_cny_micros <= row.limit_cny_micros
             assert db.query(PlatformCostAttempt).count() == 2
+
+        # Detached owner experiment uses the same exclusive marker database.
+        from app.models.agent_response_run import AgentResponseRun
+        from app.models.platform_cost_center import PlatformAttemptOwner
+        from app.services import platform_cost_ownership as owner
+
+        with factory.begin() as db:
+            db.query(PlatformCostCenter).filter_by(id=1).with_for_update().one()
+            db.query(PlatformCostBudget).filter_by(id=1).with_for_update().one().limit_cny_micros = 1_000_000
+        with factory.begin() as db:
+            run_pk, run_secret = owner.create_owned_run(db, actor_id=501, run_id='mysql-owner-run',
+                                                        session_key='admin-session')
+        key = platform.new_attempt_key()
+
+        def owned_reserve(db, actor=501, pk=run_pk, secret=run_secret, attempt_key=key):
+            return owner.reserve_owned_attempt(
+                db, actor_id=actor, run_pk=pk, session_key='admin-session', run_secret=secret,
+                attempt_key=attempt_key, model_name='deepseek-flash', provider_name='deepseek',
+                base_url='https://api.deepseek.com/v1', credential_source='system',
+                payload={'model': 'deepseek-flash', 'input': 'hello', 'max_output_tokens': 100},
+            )
+
+        barrier = Barrier(2, timeout=5)
+
+        def owner_compete(_):
+            with factory() as db:
+                barrier.wait()
+                try:
+                    attempt, secret = owned_reserve(db)
+                    result = (attempt.id, secret, attempt.reserved_cny_micros)
+                    db.commit()
+                    return result
+                except BillingError:
+                    db.rollback()
+                    return None
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            winners = [value for value in pool.map(owner_compete, range(2)) if value is not None]
+        assert len(winners) == 1
+        attempt_id, attempt_secret, attempt_held = winners[0]
+        with factory() as db:
+            held_before_cancel = db.query(PlatformCostBudget).filter_by(id=1).one().reserved_cny_micros
+            assert db.query(PlatformAttemptOwner).count() == 1
+
+        # A prior uncommitted permission revocation serializes before reservation.
+        started = Event()
+
+        def revoked_reserve():
+            with factory() as db:
+                started.set()
+                try:
+                    owned_reserve(db, attempt_key=platform.new_attempt_key())
+                    db.commit()
+                    return 'reserved'
+                except BillingError:
+                    db.rollback()
+                    return 'rejected'
+
+        with factory() as blocker, ThreadPoolExecutor(max_workers=1) as pool:
+            blocker.query(User).filter_by(id=501).with_for_update().one().status = 0
+            blocker.flush()
+            future = pool.submit(revoked_reserve)
+            assert started.wait(5)
+            _must_wait(future)
+            blocker.commit()
+            assert future.result(timeout=5) == 'rejected'
+        with factory.begin() as db:
+            db.query(User).filter_by(id=501).with_for_update().one().status = 1
+
+        # When reservation owns authorization locks first, revocation waits;
+        # once revoked, the old owner cannot write unknown and the hold remains.
+        with factory.begin() as db:
+            auth_run, auth_secret = owner.create_owned_run(db, actor_id=501, run_id='mysql-reserve-revoke',
+                                                           session_key='admin-session')
+        authorized = Event()
+        finish_authorized = Event()
+        revoking = Event()
+
+        def reserve_before_revoke():
+            with factory() as db:
+                attempt, secret = owned_reserve(db, pk=auth_run, secret=auth_secret,
+                                                attempt_key=platform.new_attempt_key())
+                value = (attempt.id, secret, attempt.reserved_cny_micros)
+                authorized.set()
+                assert finish_authorized.wait(5)
+                db.commit()
+                return value
+
+        def revoke_waiting():
+            with factory.begin() as db:
+                revoking.set()
+                db.query(User).filter_by(id=501).with_for_update().one().status = 0
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(reserve_before_revoke)
+            assert authorized.wait(5)
+            second = pool.submit(revoke_waiting)
+            assert revoking.wait(5)
+            _must_wait(second)
+            finish_authorized.set()
+            auth_attempt, auth_attempt_secret, auth_held = first.result(timeout=5)
+            second.result(timeout=5)
+        with factory() as db:
+            with pytest.raises(BillingError, match='管理员'):
+                owner.mark_owned_attempt_unknown(db, actor_id=501, run_pk=auth_run, session_key='admin-session',
+                                                 run_secret=auth_secret, attempt_id=auth_attempt,
+                                                 attempt_secret=auth_attempt_secret)
+            db.rollback()
+            assert db.get(PlatformCostAttempt, auth_attempt).status == 'reserved'
+        with factory.begin() as db:
+            db.query(User).filter_by(id=501).with_for_update().one().status = 1
+
+        barrier = Barrier(2, timeout=5)
+
+        def cancel_or_unknown(action):
+            with factory() as db:
+                barrier.wait()
+                try:
+                    if action == 'cancel':
+                        owner.cancel_owned_run(db, actor_id=501, run_pk=run_pk, session_key='admin-session')
+                    else:
+                        owner.mark_owned_attempt_unknown(db, actor_id=501, run_pk=run_pk,
+                                                         session_key='admin-session', run_secret=run_secret,
+                                                         attempt_id=attempt_id, attempt_secret=attempt_secret)
+                    db.commit()
+                    return 'ok'
+                except BillingError:
+                    db.rollback()
+                    return 'rejected'
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(cancel_or_unknown, ('cancel', 'unknown')))
+        assert results[0] == 'ok' and results[1] in {'ok', 'rejected'}
+        with factory() as db:
+            assert db.get(AgentResponseRun, run_pk).status == 'cancelled'
+            assert db.get(PlatformCostAttempt, attempt_id).status == 'unknown'
+            budget = db.query(PlatformCostBudget).filter_by(id=1).one()
+            assert budget.reserved_cny_micros == held_before_cancel + auth_held and attempt_held > 0
+
+        # Hold reservation locks while cancellation waits, then check the reverse order.
+        with factory.begin() as db:
+            race_run, race_secret = owner.create_owned_run(db, actor_id=501, run_id='mysql-reserve-cancel',
+                                                            session_key='admin-session')
+        reserved = Event()
+        allow_commit = Event()
+        cancelling = Event()
+
+        def reserve_before_cancel():
+            with factory() as db:
+                attempt, secret = owned_reserve(db, pk=race_run, secret=race_secret,
+                                                attempt_key=platform.new_attempt_key())
+                result = (attempt.id, secret)
+                reserved.set()
+                assert allow_commit.wait(5)
+                db.commit()
+                return result
+
+        def cancel_waiting():
+            with factory.begin() as db:
+                cancelling.set()
+                owner.cancel_owned_run(db, actor_id=501, run_pk=race_run, session_key='admin-session')
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(reserve_before_cancel)
+            assert reserved.wait(5)
+            second = pool.submit(cancel_waiting)
+            assert cancelling.wait(5)
+            _must_wait(second)
+            allow_commit.set()
+            race_attempt, _ = first.result(timeout=5)
+            second.result(timeout=5)
+        with factory() as db:
+            assert db.get(PlatformCostAttempt, race_attempt).status == 'unknown'
+            with pytest.raises(BillingError):
+                owned_reserve(db, pk=race_run, secret=race_secret, attempt_key=platform.new_attempt_key())
+            db.rollback()
+
+        # Distinct admins and runs serialize at the common budget, not only at a run lock.
+        with factory.begin() as db:
+            first_run, first_secret = owner.create_owned_run(db, actor_id=501, run_id='mysql-budget-run-1',
+                                                              session_key='admin-session')
+        with factory.begin() as db:
+            second_run, second_secret = owner.create_owned_run(db, actor_id=502, run_id='mysql-budget-run-2',
+                                                                session_key='admin-session')
+        with factory.begin() as db:
+            db.query(PlatformCostCenter).filter_by(id=1).with_for_update().one()
+            budget = db.query(PlatformCostBudget).filter_by(id=1).with_for_update().one()
+            budget.limit_cny_micros = budget.reserved_cny_micros + 1_500
+        barrier = Barrier(2, timeout=5)
+
+        def distinct_run_reserve(args):
+            actor, pk, secret = args
+            with factory() as db:
+                barrier.wait()
+                try:
+                    owned_reserve(db, actor=actor, pk=pk, secret=secret, attempt_key=platform.new_attempt_key())
+                    db.commit()
+                    return 'reserved'
+                except BillingError:
+                    db.rollback()
+                    return 'rejected'
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(distinct_run_reserve,
+                                     ((501, first_run, first_secret), (502, second_run, second_secret))))
+        assert sorted(outcomes) == ['rejected', 'reserved']
+        with factory() as db:
+            budget = db.query(PlatformCostBudget).filter_by(id=1).one()
+            assert budget.reserved_cny_micros <= budget.limit_cny_micros
     finally:
         engine.dispose()
