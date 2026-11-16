@@ -204,7 +204,7 @@ def test_published_answer_persists_the_latest_human_message_boundary(fresh_chain
         intervening_id = int(intervening.id)
 
     result = runtime._finalize_runtime(
-        sessions, enterprise_id=enterprise_id, conversation_id=room_id, run_public_id=public_id,
+        sessions, enterprise_id=enterprise_id, conversation_id=room_id, run_public_id=public_id, expected_generation=1,
     )
     assert result["status"] == "completed"
     with sessions() as db:
@@ -341,7 +341,8 @@ def test_revoked_message_author_cannot_publish_from_old_rr_snapshot(fresh_chain,
     def publish():
         try:
             runtime._finalize_runtime(
-                sessions, enterprise_id=enterprise_id, conversation_id=room_id, run_public_id=public_id
+                sessions, enterprise_id=enterprise_id, conversation_id=room_id,
+                run_public_id=public_id, expected_generation=1,
             )
             return "published"
         except ForbiddenError:
@@ -396,7 +397,8 @@ def test_publication_wins_before_later_authority_change(fresh_chain, monkeypatch
 
     def publish():
         return runtime._finalize_runtime(
-            sessions, enterprise_id=enterprise_id, conversation_id=room_id, run_public_id=public_id
+            sessions, enterprise_id=enterprise_id, conversation_id=room_id,
+                run_public_id=public_id, expected_generation=1,
         )["status"]
 
     def revoke():
@@ -467,3 +469,212 @@ def test_revoked_message_author_blocks_stale_tool_executor(fresh_chain, monkeypa
         )
         with pytest.raises(ForbiddenError, match="会话成员角色已变化"):
             executor._current()
+
+
+def test_reclaimed_retry_cannot_adopt_new_generation_after_claim(fresh_chain, monkeypatch):
+    """Pause a real retry between its committed claim and reload, then reclaim it."""
+    import asyncio
+    from datetime import timedelta
+    from threading import get_ident
+
+    from app.core.exceptions import ConflictError
+    from app.models.billing_ledger import BillingReservation, BillingWallet
+
+    sessions, enterprise_id, _group, _owner, _author, room_id, public_id = _seed(
+        fresh_chain, include_prior_message=False,
+    )
+    actor = _initiator_user_id(sessions, public_id)
+    with sessions.begin() as db:
+        run = db.query(EnterpriseAssistantRun).filter_by(public_id=public_id).one()
+        state = db.query(EnterpriseAssistantRuntimeState).filter_by(assistant_run_id=run.id).one()
+        checkpoint = runtime.RunCheckpoint.from_dict(json.loads(state.checkpoint_json))
+        checkpoint.status = "failed"
+        state.checkpoint_json = runtime._json(checkpoint.to_dict())
+        state.status = "failed"
+        state.lease_expires_at = None
+        run.status = "retryable"
+        db.add(BillingWallet(owner_type="enterprise", owner_id=enterprise_id))
+
+    monkeypatch.setattr(runtime, "_live_role_snapshot", lambda *_a, **_k: {})
+    monkeypatch.setattr(runtime.assistant_service, "_require_subscription", lambda *_a, **_k: None)
+    monkeypatch.setattr(runtime.assistant_service, "_require_active_limit", lambda *_a, **_k: None)
+    model_calls = []
+    monkeypatch.setattr(runtime.assistant_service, "_model_config", lambda *_a: model_calls.append(1))
+    original = runtime._run_record
+    held, release = Event(), Event()
+    worker_id = []
+
+    def pause_reload(db, *args, **kwargs):
+        if worker_id and get_ident() == worker_id[0] and not kwargs.get("lock") and not held.is_set():
+            held.set()
+            if not release.wait(10):
+                raise TimeoutError("reload barrier timed out")
+        return original(db, *args, **kwargs)
+
+    monkeypatch.setattr(runtime, "_run_record", pause_reload)
+
+    def retry():
+        worker_id.append(get_ident())
+        with sessions() as db:
+            try:
+                asyncio.run(runtime.retry_run(
+                    db, enterprise_id=enterprise_id, user_id=actor,
+                    conversation_id=room_id, run_public_id=public_id,
+                ))
+            except ConflictError:
+                return "fenced"
+            return "unexpected success"
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(retry)
+            assert held.wait(10)
+            with sessions.begin() as db:
+                state = db.query(EnterpriseAssistantRuntimeState).filter_by(
+                    enterprise_id=enterprise_id, conversation_id=room_id,
+                ).with_for_update().one()
+                assert state.lease_generation == 2
+                state.lease_expires_at = runtime._now() - timedelta(seconds=1)
+            with sessions.begin() as db:
+                _run, state = runtime._claim_new_invocation(
+                    db, enterprise_id=enterprise_id, conversation_id=room_id,
+                    run_public_id=public_id, allow_statuses=runtime._RETRYABLE,
+                    actor_user_id=actor,
+                )
+                assert state.lease_generation == 3
+            release.set()
+            assert future.result(timeout=10) == "fenced"
+        assert model_calls == []
+        with sessions() as db:
+            run = db.query(EnterpriseAssistantRun).filter_by(public_id=public_id).one()
+            state = db.query(EnterpriseAssistantRuntimeState).filter_by(assistant_run_id=run.id).one()
+            assert state.lease_generation == 3
+            assert run.status == "running"
+            assert db.query(BillingReservation).filter_by(enterprise_id=enterprise_id).count() == 0
+    finally:
+        release.set()
+
+
+@pytest.mark.parametrize("late_status", ["failed", "completed"])
+def test_cancelled_run_rejects_late_result_and_preserves_unknown_charge(fresh_chain, late_status):
+    """Real cancellation wins against an old in-flight worker without touching its charge."""
+    from app.core.exceptions import ConflictError
+    from app.models.billing_ledger import BillingReservation
+    from app.services.deepseek_responses_runtime import RuntimeResult
+
+    sessions, enterprise_id, group_id, _owner, _author, room_id, public_id = _seed(
+        fresh_chain, include_prior_message=False,
+    )
+    actor = _initiator_user_id(sessions, public_id)
+    with sessions.begin() as db:
+        run = db.query(EnterpriseAssistantRun).filter_by(public_id=public_id).one()
+        state = db.query(EnterpriseAssistantRuntimeState).filter_by(assistant_run_id=run.id).one()
+        checkpoint = runtime.RunCheckpoint.from_dict(json.loads(state.checkpoint_json))
+        checkpoint.status = "running"
+        checkpoint.output_text = ""
+        state.status = "running"
+        state.checkpoint_json = runtime._json(checkpoint.to_dict())
+        db.add(BillingReservation(
+            request_key=f"enterprise-assistant:{public_id}:1:1", model_name="test",
+            enterprise_id=enterprise_id, group_id=group_id, user_id=actor,
+            requested_milli=1000, status="unknown", usage_state="pending",
+        ))
+    with sessions() as db:
+        result = runtime.cancel_run(
+            db, enterprise_id=enterprise_id, user_id=actor,
+            conversation_id=room_id, run_public_id=public_id, reason="用户停止",
+        )
+        assert result["status"] == "cancelled"
+    with pytest.raises(ConflictError):
+        runtime._result_for_runtime(
+            sessions, enterprise_id=enterprise_id, conversation_id=room_id, run_public_id=public_id,
+            expected_generation=1, result=RuntimeResult(run_id=public_id, status=late_status),
+        )
+    with sessions() as db:
+        run = db.query(EnterpriseAssistantRun).filter_by(public_id=public_id).one()
+        state = db.query(EnterpriseAssistantRuntimeState).filter_by(assistant_run_id=run.id).one()
+        messages = db.query(EnterpriseChatMessage).filter_by(assistant_run_id=run.id).all()
+        reservation = db.query(BillingReservation).filter_by(enterprise_id=enterprise_id).one()
+        assert (run.status, state.status, state.lease_generation) == ("cancelled", "cancelled", 2)
+        assert len(messages) == 1 and "用户停止" in messages[0].content
+        assert reservation.status == "unknown" and reservation.actual_milli is None
+
+
+@pytest.mark.parametrize("late_status", ["failed", "completed"])
+def test_retry_late_result_cannot_overwrite_reclaimed_generation(fresh_chain, monkeypatch, late_status):
+    """Real retry resumes after another transaction reclaims its lease; publication stays fenced."""
+    import asyncio
+    from contextlib import nullcontext
+    from datetime import timedelta
+
+    from app.core.exceptions import ConflictError
+    from app.models.billing_ledger import BillingReservation, BillingWallet
+    from app.services.deepseek_responses_runtime import RuntimeResult
+
+    sessions, enterprise_id, _group, _owner, _author, room_id, public_id = _seed(
+        fresh_chain, include_prior_message=False,
+    )
+    actor = _initiator_user_id(sessions, public_id)
+    with sessions.begin() as db:
+        run = db.query(EnterpriseAssistantRun).filter_by(public_id=public_id).one()
+        state = db.query(EnterpriseAssistantRuntimeState).filter_by(assistant_run_id=run.id).one()
+        checkpoint = runtime.RunCheckpoint.from_dict(json.loads(state.checkpoint_json))
+        checkpoint.status = "failed"
+        state.checkpoint_json = runtime._json(checkpoint.to_dict())
+        state.status, state.lease_expires_at, run.status = "failed", None, "retryable"
+        db.add(BillingWallet(owner_type="enterprise", owner_id=enterprise_id))
+    monkeypatch.setattr(runtime, "_live_role_snapshot", lambda *_a, **_k: {})
+    monkeypatch.setattr(runtime.assistant_service, "_require_subscription", lambda *_a, **_k: None)
+    monkeypatch.setattr(runtime.assistant_service, "_require_active_limit", lambda *_a, **_k: None)
+    monkeypatch.setattr(runtime, "_billing_scope", lambda *_a, **_k: nullcontext())
+    held, release = Event(), Event()
+
+    class DelayedRuntime:
+        async def retry(self, run_id):
+            held.set()
+            if not release.wait(10):
+                raise TimeoutError("result barrier timed out")
+            return RuntimeResult(run_id=run_id, status=late_status)
+
+    def build(_db, **kwargs):
+        assert kwargs["expected_generation"] == 2
+        return DelayedRuntime(), None, None, None
+
+    monkeypatch.setattr(runtime, "_build_runtime", build)
+
+    def retry():
+        with sessions() as db:
+            try:
+                asyncio.run(runtime.retry_run(
+                    db, enterprise_id=enterprise_id, user_id=actor,
+                    conversation_id=room_id, run_public_id=public_id,
+                ))
+            except ConflictError:
+                return "fenced"
+            return "unexpected success"
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(retry)
+            assert held.wait(10)
+            with sessions.begin() as db:
+                state = db.query(EnterpriseAssistantRuntimeState).filter_by(
+                    enterprise_id=enterprise_id, conversation_id=room_id,
+                ).with_for_update().one()
+                state.lease_expires_at = runtime._now() - timedelta(seconds=1)
+            with sessions.begin() as db:
+                _run, state = runtime._claim_new_invocation(
+                    db, enterprise_id=enterprise_id, conversation_id=room_id,
+                    run_public_id=public_id, allow_statuses=runtime._RETRYABLE, actor_user_id=actor,
+                )
+                assert state.lease_generation == 3
+            release.set()
+            assert future.result(timeout=10) == "fenced"
+        with sessions() as db:
+            run = db.query(EnterpriseAssistantRun).filter_by(public_id=public_id).one()
+            state = db.query(EnterpriseAssistantRuntimeState).filter_by(assistant_run_id=run.id).one()
+            assert state.lease_generation == 3 and run.status == "running"
+            assert db.query(EnterpriseChatMessage).filter_by(assistant_run_id=run.id).count() == 0
+            assert db.query(BillingReservation).filter_by(enterprise_id=enterprise_id).count() == 0
+    finally:
+        release.set()

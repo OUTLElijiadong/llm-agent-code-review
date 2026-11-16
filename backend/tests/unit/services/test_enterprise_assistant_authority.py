@@ -13,6 +13,7 @@ from app.models.enterprise_assistant_runtime import EnterpriseAssistantRuntimeSt
 from app.models.enterprise_chat import EnterpriseAssistantRun, EnterpriseChatMessage, EnterpriseConversation
 from app.models.enterprise_org import Enterprise, EnterpriseGroup, EnterpriseGroupMember, EnterpriseMember
 from app.models.user import User
+from app.services import enterprise_assistant_clarification_service as clarification
 from app.services.enterprise_assistant_runtime_service import (
     EnterpriseAssistantToolExecutor,
     RunCheckpoint,
@@ -24,7 +25,6 @@ from app.services.enterprise_assistant_runtime_service import (
     _require_model_send_clearance,
     _role_snapshot,
 )
-from app.services import enterprise_assistant_clarification_service as clarification
 
 
 @pytest.mark.parametrize(
@@ -341,7 +341,7 @@ def test_completed_answer_is_suppressed_if_authority_directive_arrives_before_pu
 
         with pytest.raises(ForbiddenError, match="权限或订阅已变化"):
             _finalize_runtime(
-                factory, enterprise_id=10, conversation_id=30, run_public_id="authority-race",
+                factory, enterprise_id=10, conversation_id=30, run_public_id="authority-race", expected_generation=1,
             )
 
         db.expire_all()
@@ -444,14 +444,14 @@ def test_finalizer_rechecks_model_send_clearance_before_publishing(tmp_path, mon
         if valid_clearance:
             result = _finalize_runtime(
                 factory, enterprise_id=10, conversation_id=30,
-                run_public_id="model-send-clearance-race",
+                run_public_id="model-send-clearance-race", expected_generation=1,
             )
             assert result["status"] == "completed"
         else:
             with pytest.raises(ForbiddenError, match="权限或订阅已变化"):
                 _finalize_runtime(
                     factory, enterprise_id=10, conversation_id=30,
-                    run_public_id="model-send-clearance-race",
+                    run_public_id="model-send-clearance-race", expected_generation=1,
                 )
 
         db.expire_all()

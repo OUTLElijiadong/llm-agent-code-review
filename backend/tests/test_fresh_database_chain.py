@@ -2293,6 +2293,7 @@ def test_enterprise_team_calls_allow_parallelism_while_revocation_cancel_and_lif
                 sessions,
                 enterprise_id=enterprise_id,
                 conversation_id=conversation_id,
+                expected_generation=1,
                 run_public_id=authority_run_public_id,
             )
         except Exception as exc:  # pragma: no cover - asserted through outcomes

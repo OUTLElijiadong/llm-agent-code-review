@@ -84,10 +84,16 @@ def test_reader_requires_reviewed_modules_and_rejects_old_or_altered_code(tmp_pa
     ('services/billing_ledger_service.py', '_release_not_sent'),
     ('services/billing_ledger_service.py', 'mark_unknown'),
     ('services/billing_ledger_service.py', 'settle'),
+    ('services/enterprise_agent_team_runtime_service.py', '_lock_assistant_control_runs'),
+    ('services/enterprise_agent_team_runtime_service.py', 'retry_task'),
+    ('services/enterprise_agent_team_runtime_service.py', 'cancel_team'),
     ('services/enterprise_agent_team_runtime_service.py', '_check_lease'),
     ('services/enterprise_agent_team_runtime_service.py', '_require_approved_plan'),
     ('services/enterprise_agent_team_runtime_service.py', '_provider_transaction_read_committed'),
     ('services/enterprise_agent_team_dispatcher.py', '_task_billing_scope'),
+    ('services/enterprise_assistant_runtime_service.py', '_build_runtime'),
+    ('services/enterprise_assistant_runtime_service.py', '_result_for_runtime'),
+    ('services/enterprise_assistant_runtime_service.py', '_finalize_runtime'),
     ('services/enterprise_assistant_runtime_service.py', '_live_role_snapshot'),
     ('services/enterprise_assistant_runtime_service.py', '_require_run_retry_controller'),
     ('services/enterprise_org_service.py', 'require_enterprise_member'),
@@ -192,3 +198,23 @@ def test_activation_marker_blocks_old_database_and_symlink(tmp_path):
     (tmp_path / 'activation.env').unlink()
     result = run_compatibility_gate(tmp_path, marker_symlink=True)
     assert result.returncode != 0 and 'ALLOWED:' not in result.stdout
+
+
+@pytest.mark.parametrize('method', ['_current', '_action_clarification', 'execute'])
+def test_reader_rejects_assistant_tool_authorization_bypass(tmp_path, method):
+    app = ROOT / 'backend/app'
+    for path in FINGERPRINTS:
+        target = tmp_path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(app / path, target)
+    target = tmp_path / 'services/enterprise_assistant_runtime_service.py'
+    tree = ast.parse(target.read_text(encoding='utf-8'))
+    classes = [node for node in tree.body if isinstance(node, ast.ClassDef)
+               and node.name == 'EnterpriseAssistantToolExecutor']
+    assert len(classes) == 1
+    matches = [node for node in classes[0].body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+               and node.name == method]
+    assert len(matches) == 1
+    matches[0].body = [ast.Return(value=ast.Constant(value=True))]
+    target.write_text(ast.unparse(ast.fix_missing_locations(tree)), encoding='utf-8')
+    assert not probe(tmp_path)

@@ -65,8 +65,10 @@ def _lock_live_context(
     require_active_billing: bool = True,
     require_project_execution: bool = True,
     require_security_scan_grant: bool = False,
+    expected_team_id: int | None = None,
+    current_authority_read: bool = False,
 ) -> dict[str, Any]:
-    locator = (
+    locator_query = (
         db.query(EnterpriseAgentTeamTask.team_id, EnterpriseAgentTeamTask.member_id)
         .join(
             EnterpriseAgentTeam,
@@ -76,8 +78,10 @@ def _lock_live_context(
             EnterpriseAgentTeamTask.id == int(task_id),
             EnterpriseAgentTeam.enterprise_id == int(enterprise_id),
         )
-        .first()
     )
+    if expected_team_id is not None:
+        locator_query = locator_query.filter(EnterpriseAgentTeam.id == int(expected_team_id))
+    locator = locator_query.first()
     if locator is None:
         raise NotFoundError("企业 Agent 团队任务不存在")
     team_id = int(locator.team_id)
@@ -134,7 +138,10 @@ def _lock_live_context(
     from app.services import enterprise_assistant_runtime_service as parent_runtime
 
     if require_active_billing:
-        parent_runtime._live_role_snapshot(db, runtime)
+        if current_authority_read:
+            parent_runtime._live_role_snapshot(db, runtime, current_authority_read=True)
+        else:
+            parent_runtime._live_role_snapshot(db, runtime)
     else:
         parent_runtime._live_role_snapshot(db, runtime, require_billing_access=False)
     if require_active_billing and (company.status != "active" or company.billing_suspended):
@@ -184,7 +191,10 @@ def _lock_live_context(
         .one()
     )
     if (
-        team.payer_owner_type != "enterprise"
+        int(team.assistant_run_id) != int(run.id)
+        or int(team.initiator_user_id) != int(run.initiator_user_id)
+        or int(team.source_message_id) != int(run.source_message_id)
+        or team.payer_owner_type != "enterprise"
         or int(team.payer_owner_id) != int(enterprise_id)
         or team.conversation_id != room.id
         or team.group_id != room.group_id
@@ -1198,6 +1208,32 @@ def fail_task(
         }
 
 
+def _lock_assistant_control_runs(
+    db: Session, *, enterprise_id: int, team_id: int, source_run_public_id: str, source_conversation_id: int,
+) -> None:
+    """Lock both parent runs in deterministic order before company or team locks."""
+    target = db.query(EnterpriseAgentTeam.assistant_run_id).filter_by(
+        id=int(team_id), enterprise_id=int(enterprise_id),
+    ).first()
+    source = db.query(EnterpriseAssistantRun.id).filter_by(
+        enterprise_id=int(enterprise_id), conversation_id=int(source_conversation_id),
+        public_id=source_run_public_id,
+    ).first()
+    if target is None or source is None:
+        raise NotFoundError("企业运行或团队不存在")
+    run_ids = sorted({int(target[0]), int(source[0])})
+    for run_id in run_ids:
+        if db.query(EnterpriseAssistantRun.id).filter_by(
+            id=run_id, enterprise_id=int(enterprise_id),
+        ).with_for_update().first() is None:
+            raise NotFoundError("企业运行不存在")
+    for run_id in run_ids:
+        if db.query(EnterpriseAssistantRuntimeState.id).filter_by(
+            assistant_run_id=run_id, enterprise_id=int(enterprise_id),
+        ).with_for_update().first() is None:
+            raise NotFoundError("企业运行状态不存在")
+
+
 def retry_task(
     session_factory,
     *,
@@ -1206,10 +1242,23 @@ def retry_task(
     task_id: int,
     actor_user_id: int,
     now: datetime | None = None,
-) -> dict[str, Any]:
+    source_run_public_id: str | None = None,
+    source_conversation_id: int | None = None,
+    assistant_preflight: Callable[[Session], Any] | None = None,
+    assistant_clarification: Callable[[Session], Any] | None = None,
+) -> Any:
     now = now or _now()
     with session_factory.begin() as db:
-        context = _lock_live_context(db, enterprise_id=enterprise_id, task_id=task_id)
+        if assistant_preflight is not None:
+            if source_run_public_id is None or source_conversation_id is None:
+                raise ValueError("小菱来源运行缺失")
+            _lock_assistant_control_runs(db, enterprise_id=enterprise_id, team_id=team_id,
+                source_run_public_id=source_run_public_id, source_conversation_id=source_conversation_id)
+            blocked = assistant_preflight(db)
+            if blocked is not None:
+                return blocked
+        context = _lock_live_context(db, enterprise_id=enterprise_id, task_id=task_id, expected_team_id=team_id,
+                                     current_authority_read=assistant_preflight is not None)
         team, task, room, run = context["team"], context["task"], context["room"], context["run"]
         if int(team.id) != int(team_id):
             raise NotFoundError("企业 Agent 团队任务不存在")
@@ -1236,6 +1285,10 @@ def retry_task(
             if not attempt_rows or any(row.status not in {"released", "settled"} for row in task_rows):
                 raise PaymentRequiredError("任务账单终态证据不完整，不能处理")
             if any(row.status == "settled" for row in task_rows):
+                if assistant_clarification is not None:
+                    blocked = assistant_clarification(db)
+                    if blocked is not None:
+                        return blocked
                 old = task.status
                 task.status = "failed"
                 task.completed_at = now
@@ -1264,6 +1317,10 @@ def retry_task(
             raise ConflictError("企业 Agent 团队任务已达到重试次数上限")
         _verify_approval_for_live_context(db, context)
         _check_team_deadline(context, now=now)
+        if assistant_clarification is not None:
+            blocked = assistant_clarification(db)
+            if blocked is not None:
+                return blocked
         old = task.status
         task.status = "queued"
         task.next_attempt_at = now
@@ -1288,9 +1345,20 @@ def cancel_team(
     actor_user_id: int,
     reason: str = "",
     now: datetime | None = None,
-) -> dict[str, Any]:
+    source_run_public_id: str | None = None,
+    source_conversation_id: int | None = None,
+    assistant_preflight: Callable[[Session], Any] | None = None,
+) -> Any:
     now = now or _now()
     with session_factory.begin() as db:
+        if assistant_preflight is not None:
+            if source_run_public_id is None or source_conversation_id is None:
+                raise ValueError("小菱来源运行缺失")
+            _lock_assistant_control_runs(db, enterprise_id=enterprise_id, team_id=team_id,
+                source_run_public_id=source_run_public_id, source_conversation_id=source_conversation_id)
+            blocked = assistant_preflight(db)
+            if blocked is not None:
+                return blocked
         locator = (
             db.query(EnterpriseAgentTeam)
             .filter_by(
@@ -1341,6 +1409,11 @@ def cancel_team(
             .with_for_update()
             .one()
         )
+        if (int(team.assistant_run_id) != int(run.id)
+                or int(team.conversation_id) != int(run.conversation_id)
+                or int(team.initiator_user_id) != int(run.initiator_user_id)
+                or int(team.source_message_id) != int(run.source_message_id)):
+            raise ConflictError("企业 Agent 团队父运行已变化")
         if team.status in {"cancelled", "completed", "failed", "suppressed"}:
             return {"team_id": int(team.id), "status": team.status}
         old = team.status
