@@ -41,6 +41,7 @@ from app.agents.tool_contracts import (
 from app.core.config import settings
 from app.core.exceptions import AppError
 from app.core.observability import database_is_ready, observe_event
+from app.core.ownership_signals import NonOwnerAbort, is_non_owner_cancellation
 from app.core.permission_codes import PermissionCode
 from app.models.agent_governance import ApprovalItem
 from app.models.agent_mesh import AgentMeshConversation, AgentMeshMessage
@@ -1161,6 +1162,7 @@ class NativeResponsesTransport:
                 self._config, "billing_credential_source", getattr(self._config, "source", "system"),
             ),
         )
+        non_owner = False
         try:
             before_stream_send(ticket)
             async for event in self._stream_without_billing(payload):
@@ -1172,12 +1174,20 @@ class NativeResponsesTransport:
                 yield event
             if ticket is not None and not ticket.get("done"):
                 finish_attempt(ticket, None)
+        except NonOwnerAbort:
+            non_owner = True
+            raise
+        except asyncio.CancelledError as exc:
+            if is_non_owner_cancellation(exc):
+                non_owner = True
+            raise
         except (httpx.TimeoutException, httpx.TransportError) as exc:
             if ticket is not None:
                 raise BillingError("模型调用结果未知，预占待对账，禁止自动重试") from exc
             raise
         finally:
-            unknown_attempt(ticket)
+            if not non_owner:
+                unknown_attempt(ticket)
 
     async def _stream_without_billing(self, payload: Mapping[str, Any]) -> AsyncIterator[Mapping[str, Any]]:
         url = _responses_url(self._config.base_url)

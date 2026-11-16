@@ -315,6 +315,14 @@ case "${1:-}" in
       build) : ;;
       exec)
         case "$*" in
+          *'prism_assistant_owner_schema'*)
+            case "${FAKE_ASSISTANT_OWNER_SCHEMA_STATE:-absent}" in
+              absent) printf '{"tables":[],"columns":[],"indexes":[],"foreign_keys":[],"checks":[],"triggers":[]}\n' ;;
+              partial) printf '{"tables":[{}],"columns":[],"indexes":[],"foreign_keys":[],"checks":[],"triggers":[]}\n' ;;
+              complete) cat "${FAKE_ASSISTANT_OWNER_COMPLETE_FIXTURE:?}" ;;
+              invalid) exit 71 ;;
+            esac ;;
+          *'SELECT EXISTS(SELECT 1 FROM enterprise_assistant_run_owner'* ) printf '%s\n' "${FAKE_ASSISTANT_OWNER_HAS_ROWS:-0}" ;;
           *'prism_billing_evidence_schema'*)
             evidence_state="${FAKE_BILLING_EVIDENCE_SCHEMA_STATE:-absent}"
             if [[ -n "${FAKE_BILLING_EVIDENCE_SCHEMA_FILE:-}" && -f "$FAKE_BILLING_EVIDENCE_SCHEMA_FILE" ]]; then
@@ -415,7 +423,9 @@ case "${1:-}" in
     case "$*" in
       *'--entrypoint python'* )
         probe_body="$(cat)"
-        if [[ "$probe_body" == *'Check pinned, reviewed 121 evidence reader'* ]]; then
+        if [[ "$probe_body" == *'Identity gate for the reviewed, explicitly disabled 122 foundation'* ]]; then
+          printf '%s\n' "${FAKE_ASSISTANT_OWNER_CAPABILITY:-supported}"
+        elif [[ "$probe_body" == *'Check pinned, reviewed 121 evidence reader'* ]]; then
           [[ "${FAKE_BILLING_EVIDENCE_PROBE_FAILURE:-0}" != 1 ]] || exit 76
           if [[ -n "${FAKE_BILLING_OLD_IMAGE_ID:-}" && "$*" == *"$FAKE_BILLING_OLD_IMAGE_ID"* ]]; then
             printf '%s\n' "${FAKE_BILLING_OLD_CAPABILITY:-unsupported}"
@@ -492,6 +502,7 @@ run_release_binding_case() {
   [[ ! -f lib/chat_authority_schema_compatibility.py ]] || cp lib/chat_authority_schema_compatibility.py "$workspace/deploy/lib/"
   [[ ! -f lib/alembic_revision_compatibility.py ]] || cp lib/alembic_revision_compatibility.py "$workspace/deploy/lib/"
   cp lib/billing_evidence_compatibility.py lib/billing_evidence_schema_compatibility.py "$workspace/deploy/lib/"
+  cp lib/assistant_owner_schema.sql lib/assistant_owner_schema_compatibility.py lib/assistant_owner_image_compatibility.py "$workspace/deploy/lib/"
   cp -R ../backend/alembic/versions "$workspace/backend/alembic/"
   python3 "$workspace/deploy/lib/chat_authority_schema_compatibility.py" \
     "$workspace/backend/alembic/versions/119_chat_message_authority.py" --fixture \
@@ -2558,6 +2569,7 @@ run_deploy_failure_rollback_simulation() {
   cp lib/alembic_revision_compatibility.py "$repo/deploy/lib/alembic_revision_compatibility.py"
   cp lib/chat_authority_schema_compatibility.py "$repo/deploy/lib/chat_authority_schema_compatibility.py"
   cp lib/billing_evidence_compatibility.py lib/billing_evidence_schema_compatibility.py "$repo/deploy/lib/"
+  cp lib/assistant_owner_schema.sql lib/assistant_owner_schema_compatibility.py lib/assistant_owner_image_compatibility.py "$repo/deploy/lib/"
   cp -R ../backend/alembic/versions "$repo/backend/alembic/"
   printf '%s\n' '3.7.0' > "$repo/VERSION"
   printf '%s\n' 'test database' > "$repo/backend/GeoLite2-City.mmdb"

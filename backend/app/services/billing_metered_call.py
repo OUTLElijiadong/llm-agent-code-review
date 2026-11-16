@@ -8,6 +8,7 @@ from collections.abc import Callable, Mapping
 
 import httpx
 
+from app.core.ownership_signals import NonOwnerAbort
 from app.services import billing_ledger_service as ledger
 from app.services.ai_usage_context import usage_tokens
 
@@ -106,6 +107,8 @@ def metered_call(*, session_factory, request_key: str, model_name: str, user_id:
                 raise ledger.BillingError("模型返回用量缺失，待人工对账")
             if input_tokens > max_input_tokens or output_tokens > max_output_tokens:
                 raise ledger.BillingError("模型实际用量超过预占上限，待人工对账")
+        except NonOwnerAbort:
+            raise
         except BaseException as exc:
             raise MeteredUsageValidationError(exc, tool_counts=counts if "counts" in locals() else None) from exc
         return result, usage
@@ -167,6 +170,8 @@ def metered_call(*, session_factory, request_key: str, model_name: str, user_id:
             if on_unknown is not None:
                 on_unknown(db, request_key)
         raise ledger.BillingError("模型调用结果未知，预占待对账，禁止自动重试") from exc
+    except NonOwnerAbort:
+        raise
     except BaseException:
         with session_factory.begin() as db:
             ledger.mark_unknown(

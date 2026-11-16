@@ -438,6 +438,90 @@ assert_billing_evidence_database_compatible() {
   fi
 }
 
+# 122 is an irreversible MySQL DDL chain. Missing or partially applied
+# objects cannot be inferred from alembic_version and must fail closed.
+assistant_owner_database_state() {
+  local dir result state
+  dir="$(dirname "${BASH_SOURCE[0]}")"
+  [[ -r "$dir/assistant_owner_schema.sql" && -r "$dir/assistant_owner_schema_compatibility.py" ]] || return 1
+  result="$(checkpoint_database_query "$(cat "$dir/assistant_owner_schema.sql")" | tr -d '\r')" || return 1
+  state="$(printf '%s' "$result" | python3 "$dir/assistant_owner_schema_compatibility.py")" || return 1
+  case "$state" in absent|complete|partial) printf '%s\n' "$state" ;; *) return 1 ;; esac
+}
+
+assistant_owner_has_rows() {
+  local result
+  result="$(checkpoint_database_query "SELECT EXISTS(SELECT 1 FROM enterprise_assistant_run_owner LIMIT 1) OR EXISTS(SELECT 1 FROM enterprise_assistant_tool_owner LIMIT 1) OR EXISTS(SELECT 1 FROM enterprise_assistant_model_attempt_owner LIMIT 1)" | tr -d '\r')" || return 1
+  case "$result" in 0|1) printf '%s\n' "$result" ;; *) return 1 ;; esac
+}
+
+assert_assistant_owner_database_compatible() {
+  local marker="$1" schema revision relation versions_dir marker_value=""
+  if ! schema="$(assistant_owner_database_state)"; then
+    stop_chat_authority_writers
+    fatal "无法读取 122 ownership 结构；Backend 已停"
+  fi
+  revision="$(current_alembic_revision)"
+  if [[ "$revision" == unknown || "$revision" == ambiguous ]]; then
+    stop_chat_authority_writers
+    fatal "无法确定 122 ownership 数据库 revision；Backend 已停"
+  fi
+  versions_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../backend/alembic/versions" && pwd -P)" \
+    || { stop_chat_authority_writers; fatal "122 迁移图不可读"; }
+  relation="$(python3 "$(dirname "${BASH_SOURCE[0]}")/alembic_revision_compatibility.py" \
+    "$versions_dir" "$revision" 122_assistant_call_owner)" \
+    || { stop_chat_authority_writers; fatal "无法判断 122 迁移链"; }
+  if [[ -e "$marker" || -L "$marker" ]]; then
+    [[ -f "$marker" && ! -L "$marker" && -r "$marker" ]] \
+      || { stop_chat_authority_writers; fatal "122 ownership 标记不可安全读取"; }
+    marker_value="$(cat "$marker")"
+    [[ "$marker_value" == pending || "$marker_value" == active ]] \
+      || { stop_chat_authority_writers; fatal "122 ownership 标记无效"; }
+  fi
+  if [[ "$schema" == absent && "$relation" == descendant && "$marker_value" != active ]]; then
+    ASSISTANT_OWNER_DATABASE_STATE="${marker_value:-absent}"
+  elif [[ "$schema" == complete && "$relation" == compatible ]]; then
+    # An ownership row means the protocol may have been activated. The current
+    # disabled reader has no proof of compatibility with live owned calls.
+    local has_rows
+    if ! has_rows="$(assistant_owner_has_rows)" || [[ "$has_rows" != 0 ]]; then
+      stop_chat_authority_writers
+      fatal "122 ownership 已有记录或无法确认无记录；拒绝禁用基础版 reader"
+    fi
+    ASSISTANT_OWNER_DATABASE_STATE=complete
+  else
+    stop_chat_authority_writers
+    fatal "122 ownership 表、约束、触发器、标记与 revision 不一致；Backend 已停，须前向核验"
+  fi
+}
+
+write_assistant_owner_marker() {
+  local marker="$1" value="$2" tmp
+  [[ "$value" == pending || "$value" == active ]] || fatal "122 ownership 标记值无效"
+  [[ ! -L "$marker" ]] || fatal "122 ownership 标记不能是符号链接"
+  tmp="$(mktemp "$(dirname "$marker")/.assistant-owner-activation.XXXXXX")" || fatal "无法创建 122 标记"
+  (umask 077; printf '%s\n' "$value") > "$tmp"
+  mv -f "$tmp" "$marker" || fatal "无法持久化 122 标记"
+}
+
+# This identity only covers the reviewed disabled foundation. The caller must
+# also run the 121 reader identity gate; it does not authorize activation.
+assert_assistant_owner_image_compatible() {
+  local image_id="$1" capability probe_file
+  probe_file="$(dirname "${BASH_SOURCE[0]}")/assistant_owner_image_compatibility.py"
+  [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ && -r "$probe_file" ]] \
+    || fatal "122 ownership 镜像身份探针或 digest 不可用"
+  capability="$(docker run --rm -i --memory 128m --pids-limit 32 \
+    --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+    --entrypoint python "$image_id" - < "$probe_file")" \
+    || fatal "122 ownership 镜像身份检查失败"
+  [[ "$capability" == supported ]] \
+    || fatal "122 ownership reader 身份未经核验；拒绝启动"
+  # Reviewed identity only demonstrates the disabled scaffold. Old workers,
+  # ledger fencing and recovery are not complete, so production stays blocked.
+  fatal "122 ownership 尚未完成接线与旧 worker 隔离；禁止发布或回滚到该数据库"
+}
+
 # 检查目标 Backend 镜像是否实现迁移 119 的消息写入和权限快照读取契约。
 # 参数: $1 已按 digest 绑定的 Backend 镜像。
 # 返回: 完整实现时 0；未知、旧版本或 probe 故障时终止发布/回滚。

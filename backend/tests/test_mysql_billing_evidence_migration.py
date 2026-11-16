@@ -19,7 +19,7 @@ def test_migration_121_mysql_rejects_partial_or_nonzero_evidence(fresh_chain):
         transaction = db.begin()
         try:
             version = db.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            assert version == "121_billing_model_evidence"
+            assert version == "122_assistant_call_owner"
             sql = text("INSERT INTO billing_reservation_reconciliation_event "
                        "(reservation_id,actor_id,decision,resolution,evidence_reference,evidence_sha256,note,created_at,"
                        "model_search_calls_evidence,model_fetch_calls_evidence) "

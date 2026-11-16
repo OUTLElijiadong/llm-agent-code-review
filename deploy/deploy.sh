@@ -77,6 +77,7 @@ previous_state="$release_dir/previous.env"
 pending_state="$release_dir/pending.env"
 f2_activation_state="$release_dir/xiaoling-f2-activation.env"
 billing_evidence_activation_state="$release_dir/billing-evidence-activation.env"
+assistant_owner_activation_state="$release_dir/assistant-owner-activation"
 current_release_version=""
 f2_already_active=0
 target_f2_required=0
@@ -435,12 +436,37 @@ if [[ "$target" == "all" || "$target" == "backend" ]]; then
       || fatal "数据库已启用 121 计费证据，拒绝旧迁移目标" ;;
     *) fatal "目标迁移链与 121 计费证据不兼容" ;;
   esac
+  deploy_stage="assistant_owner_preflight"
+  assert_assistant_owner_database_compatible "$assistant_owner_activation_state"
+  assistant_owner_target_relation="$(python3 "$repo_dir/deploy/lib/alembic_revision_compatibility.py" \
+    "$repo_dir/backend/alembic/versions" "$MIGRATION_ALEMBIC_HEAD" "122_assistant_call_owner")" \
+    || fatal "无法确认目标迁移链是否包含 122 ownership"
+  case "$assistant_owner_target_relation" in
+    compatible)
+      assert_assistant_owner_image_compatible "$MIGRATION_BACKEND_IMAGE_ID"
+      # Persist the barrier before the first 122 DDL, even if migration fails.
+      if [[ "$ASSISTANT_OWNER_DATABASE_STATE" != complete ]]; then
+        write_assistant_owner_marker "$assistant_owner_activation_state" pending
+      fi
+      ;;
+    descendant)
+      [[ "$ASSISTANT_OWNER_DATABASE_STATE" == absent ]] \
+        || fatal "数据库已进入 122 ownership 协议，拒绝旧迁移目标"
+      ;;
+    *) fatal "目标迁移链与 122 ownership 不兼容" ;;
+  esac
   deploy_stage="migration"
   migration_attempted=1
   run_admin_alembic upgrade head
   deploy_stage="migration_verify"
   assert_alembic_at_head || fatal "Alembic 未位于唯一 head"
   assert_billing_evidence_database_compatible "$billing_evidence_activation_state"
+  assert_assistant_owner_database_compatible "$assistant_owner_activation_state"
+  if [[ "$assistant_owner_target_relation" == compatible ]]; then
+    [[ "$ASSISTANT_OWNER_DATABASE_STATE" == complete ]] \
+      || fatal "122 迁移后 ownership 结构未完整生效"
+    write_assistant_owner_marker "$assistant_owner_activation_state" active
+  fi
   if [[ "$billing_target_relation" == compatible ]]; then
     [[ "$BILLING_EVIDENCE_DATABASE_STATE" == complete ]] \
       || fatal "121 迁移后计费证据结构未完整生效"

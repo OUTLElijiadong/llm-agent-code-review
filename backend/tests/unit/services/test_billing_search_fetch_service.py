@@ -567,3 +567,43 @@ def test_provider_identity_rejects_custom_host_and_user_credentials(db, monkeypa
             api_key="sk-test-tool-key",
             authorize=_authorize,
         ))
+
+
+def test_non_owner_after_reservation_does_not_release_other_owner_hold(db, monkeypatch):
+    from app.core.ownership_signals import NonOwnerAbort
+
+    factory, wallet_id = _prepare(db, monkeypatch)
+    requests = _patch_transport(monkeypatch, httpx.Response(200, json={"results": []}))
+    checks = 0
+
+    def lose_owner(_db):
+        nonlocal checks
+        checks += 1
+        if checks == 2:
+            raise NonOwnerAbort()
+
+    with pytest.raises(NonOwnerAbort):
+        _execute(factory, wallet_id, request_key="owner-lost-before-send", authorize=lose_owner)
+    row = _reservation(factory, "owner-lost-before-send")
+    assert (row.status, row.provider_attempt_started_at) == ("reserved", None)
+    assert requests == []
+
+
+def test_non_owner_after_provider_response_does_not_mark_unknown(db, monkeypatch):
+    from app.core.ownership_signals import NonOwnerAbort
+
+    factory, wallet_id = _prepare(db, monkeypatch)
+    requests = _patch_transport(monkeypatch, httpx.Response(200, json={"results": [{"title": "result"}]}))
+    checks = 0
+
+    def lose_owner(_db):
+        nonlocal checks
+        checks += 1
+        if checks == 3:
+            raise NonOwnerAbort()
+
+    with pytest.raises(NonOwnerAbort):
+        _execute(factory, wallet_id, request_key="owner-lost-after-send", authorize=lose_owner)
+    row = _reservation(factory, "owner-lost-after-send")
+    assert row.status == "reserved" and row.provider_attempt_started_at is not None
+    assert len(requests) == 1

@@ -26,6 +26,7 @@ _MODEL_MODULES = (
     "enterprise_agent_team",
     "enterprise_security_artifact",
     "enterprise_assistant_runtime",
+    "enterprise_assistant_ownership",
     "enterprise_assistant_clarification",
     "enterprise_chat",
     "enterprise_content",

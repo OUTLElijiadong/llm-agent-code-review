@@ -1041,3 +1041,72 @@ def test_stale_reload_is_rejected_before_model_configuration(monkeypatch):
         assert model_calls == []
     finally:
         engine.dispose()
+
+
+def test_non_owner_signal_in_checkpoint_and_finalization_never_writes(monkeypatch):
+    from app.core.ownership_signals import NonOwnerAbort
+
+    engine, factory, _wallet_id, run_id, state_id, checkpoint = _runtime_db()
+    try:
+        with factory() as db:
+            store = runtime.EnterpriseAssistantCheckpointStore(
+                db, enterprise_id=10, conversation_id=20, run_public_id=checkpoint.run_id,
+                lease_generation=1, permission_snapshot={},
+            )
+            monkeypatch.setattr(store, "_state", lambda *_a, **_k: (_ for _ in ()).throw(NonOwnerAbort()))
+            with pytest.raises(NonOwnerAbort):
+                asyncio.run(store.save(checkpoint))
+        monkeypatch.setattr(runtime, "_state_for_run", lambda *_a, **_k: (_ for _ in ()).throw(NonOwnerAbort()))
+        with pytest.raises(NonOwnerAbort):
+            runtime._finalize_runtime(
+                factory, enterprise_id=10, conversation_id=20, run_public_id=checkpoint.run_id,
+                expected_generation=1,
+            )
+        with factory() as db:
+            assert db.get(EnterpriseAssistantRun, run_id).status == "running"
+            assert db.get(EnterpriseAssistantRuntimeState, state_id).status == "running"
+            assert db.query(EnterpriseChatMessage).filter_by(assistant_run_id=run_id).count() == 0
+    finally:
+        engine.dispose()
+
+
+def test_background_non_owner_signal_never_marks_failed_or_posts_message(monkeypatch):
+    from contextlib import nullcontext
+
+    from app.core.ownership_signals import NonOwnerAbort
+
+    engine, factory, _wallet_id, run_id, state_id, checkpoint = _runtime_db()
+    try:
+        with factory.begin() as db:
+            checkpoint.status = "queued"
+            state = db.get(EnterpriseAssistantRuntimeState, state_id)
+            state.status, state.lease_expires_at = "queued", None
+            state.checkpoint_json = runtime._json(checkpoint.to_dict())
+            db.get(EnterpriseAssistantRun, run_id).status = "queued"
+        for obj, name in (
+            (runtime.assistant_service, "_check_scope"),
+            (runtime.assistant_service, "_require_subscription"),
+            (runtime.assistant_service, "_require_active_limit"),
+            (runtime.proactive_service, "require_live_policy"),
+            (runtime.proactive_service, "require_fresh_event"),
+        ):
+            monkeypatch.setattr(obj, name, lambda *_a, **_k: None)
+        monkeypatch.setattr(runtime, "_live_role_snapshot", lambda *_a, **_k: {})
+        monkeypatch.setattr(runtime, "_validated_billing_group", lambda *_a, **_k: None)
+        monkeypatch.setattr(runtime.ledger, "available_milli", lambda *_a, **_k: 1)
+        monkeypatch.setattr(runtime, "_billing_scope", lambda *_a, **_k: nullcontext())
+
+        class NonOwnerDriver:
+            async def drive_persisted(self, _run_id):
+                raise NonOwnerAbort()
+
+        monkeypatch.setattr(runtime, "_build_runtime", lambda *_a, **_k: (NonOwnerDriver(), None, None, None))
+        asyncio.run(runtime.execute_queued_run(engine, enterprise_id=10, conversation_id=20,
+                                               run_public_id=checkpoint.run_id))
+        with factory() as db:
+            assert db.get(EnterpriseAssistantRun, run_id).status == "running"
+            assert db.get(EnterpriseAssistantRuntimeState, state_id).status == "running"
+            assert db.query(EnterpriseChatMessage).filter_by(assistant_run_id=run_id).count() == 0
+            assert db.query(BillingReservation).count() == 0
+    finally:
+        engine.dispose()

@@ -2677,3 +2677,154 @@ def test_registered_agent_budget_rejection_is_terminal_and_never_replayed(
         else:
             assert failure_result["status"] == "completed"
     assert runtime.claim_next_task(factory, enterprise_id=10, now=_now) is None
+
+
+@pytest.mark.parametrize("stage", ["before_marker", "after_marker"])
+def test_non_owner_team_guard_never_changes_another_hold(runtime_factory, monkeypatch, stage):
+    from app.core.ownership_signals import NonOwnerAbort
+
+    factory, now = runtime_factory
+    claim = runtime.claim_task(factory, enterprise_id=10, task_id=600, now=now)
+    provider = ledger.BillingProviderIdentity(
+        identity_version="deepseek-official-v1", provider_name="deepseek",
+        endpoint_host="api.deepseek.com", credential_source="system",
+    )
+    with factory.begin() as db:
+        wallet = ledger.get_or_create_wallet(db, "enterprise", 10)
+        ledger.grant(db, wallet_id=int(wallet.id), grant_key="owner-signal", kind="purchase", amount_milli=20_000)
+    calls = []
+    if stage == "before_marker":
+        monkeypatch.setattr(
+            ledger, "mark_model_attempt_started", lambda *_a, **_k: (_ for _ in ()).throw(NonOwnerAbort())
+        )
+
+    def send():
+        calls.append("started")
+        raise NonOwnerAbort()
+
+    with pytest.raises(NonOwnerAbort):
+        runtime.metered_team_call(
+            session_factory=factory, enterprise_id=10, task_id=600,
+            lease_token=claim["lease_token"], lease_generation=claim["lease_generation"],
+            call_index=1, model_name="deepseek-flash", max_input_tokens=200, max_output_tokens=200,
+            provider_identity=provider, send=send, now=now,
+        )
+    with factory() as db:
+        row = db.query(BillingReservation).one()
+        assert row.status == "reserved"
+        assert (row.provider_attempt_started_at is None) == (stage == "before_marker")
+        event_names = [event.event_type for event in db.query(EnterpriseAgentTeamEvent).all()]
+        assert "billing.unknown" not in event_names and "billing.not_sent" not in event_names
+    assert calls == ([] if stage == "before_marker" else ["started"])
+
+
+def test_dispatcher_non_owner_signal_does_not_fail_or_rewrite_task(monkeypatch):
+    from app.core.ownership_signals import NonOwnerAbort
+
+    claim = {"team_id": 4, "task_id": 6, "lease_token": "redacted", "lease_generation": 1}
+    claims = iter([claim, None])
+    monkeypatch.setattr(runtime, "claim_next_task", lambda *_a, **_k: next(claims))
+    writes = []
+    monkeypatch.setattr(runtime, "fail_task", lambda *_a, **_k: writes.append("failed"))
+
+    def execute(_factory, _claim):
+        raise NonOwnerAbort()
+
+    stats = enterprise_agent_team_dispatcher.dispatch_once(
+        session_factory=object(), execute_claimed=execute, enterprise_id=10, batch_size=2,
+    )
+    assert writes == []
+    assert stats == {"claimed": 1, "completed": 0, "retryable": 0, "reconciliation": 0, "failed": 0, "non_owner": 1}
+
+
+def test_dispatch_scan_with_non_owner_defers_receipt_writes(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "enterprise_assistant_worker_enabled", True)
+    monkeypatch.setattr(settings, "enterprise_assistant_worker_batch_size", 1)
+    monkeypatch.setattr(settings, "enterprise_assistant_worker_concurrency", 1)
+    query_calls = []
+
+    class Query:
+        def filter(self, *_a):
+            return self
+
+        def order_by(self, *_a):
+            return self
+
+        def limit(self, *_a):
+            return self
+
+        def all(self):
+            return [(10,)]
+
+    class Session:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+        def query(self, *_a):
+            query_calls.append("query")
+            return Query()
+
+    monkeypatch.setattr(enterprise_agent_team_dispatcher, "SessionLocal", Session)
+    monkeypatch.setattr(enterprise_agent_team_dispatcher, "dispatch_once", lambda **_kw: {
+        "claimed": 1, "completed": 0, "retryable": 0, "reconciliation": 0, "failed": 0, "non_owner": 1,
+    })
+    receipts = []
+    monkeypatch.setattr(enterprise_agent_team_dispatcher, "_publish_terminal_receipt",
+                        lambda *_a, **_kw: receipts.append("written"))
+    stats = enterprise_agent_team_dispatcher.dispatch_due_once()
+    assert stats["non_owner"] == 1
+    assert query_calls == ["query"] and receipts == []
+
+
+@pytest.mark.parametrize("stage", ["before_marker", "after_marker"])
+def test_non_owner_registered_dispatch_guard_never_changes_another_hold(runtime_factory, monkeypatch, stage):
+    from app.core.ownership_signals import NonOwnerAbort
+    from app.services import billing_metered_call, billing_runtime_gate, enterprise_agent_team_service
+
+    factory, now = runtime_factory
+    claim = runtime.claim_task(factory, enterprise_id=10, task_id=600, now=now)
+    with factory.begin() as db:
+        wallet = ledger.get_or_create_wallet(db, "enterprise", 10)
+        ledger.grant(db, wallet_id=int(wallet.id), grant_key="dispatcher-owner-signal", kind="purchase",
+                     amount_milli=20_000)
+        team, task = db.get(EnterpriseAgentTeam, 400), db.get(EnterpriseAgentTeamTask, 600)
+        member = db.get(EnterpriseAgentTeamMember, task.member_id)
+        capabilities = json.loads(member.capabilities_json)
+    monkeypatch.setattr(enterprise_agent_team_service, "_contract_snapshot", lambda _code: (None, capabilities))
+    provider = ledger.BillingProviderIdentity(
+        identity_version="deepseek-official-v1", provider_name="deepseek",
+        endpoint_host="api.deepseek.com", credential_source="system",
+    )
+    calls = []
+    if stage == "before_marker":
+        def abort_marker(*_args, **_kwargs):
+            raise NonOwnerAbort()
+
+        monkeypatch.setattr(ledger, "mark_model_attempt_started", abort_marker)
+
+    def send():
+        calls.append("started")
+        raise NonOwnerAbort()
+
+    with enterprise_agent_team_dispatcher._task_billing_scope(factory, claim, team, task, member):
+        scope = billing_runtime_gate._current_scope()
+        with pytest.raises(NonOwnerAbort):
+            billing_metered_call.metered_call(
+                session_factory=factory, request_key="ent-team:400:600:1:1", model_name="deepseek-flash",
+                user_id=2, max_input_tokens=200, max_output_tokens=200, send=send, provider_identity=provider,
+                enterprise_wallet_id=scope["enterprise_wallet_id"], enterprise_id=10, group_id=scope["group_id"],
+                attempt_guard=scope["attempt_guard"], send_guard=scope["send_guard"],
+                on_reserved=scope["on_reserved"], on_unknown=scope["on_unknown"], on_settled=scope["on_settled"],
+            )
+    with factory() as db:
+        row = db.query(BillingReservation).one()
+        assert row.status == "reserved"
+        assert (row.provider_attempt_started_at is None) == (stage == "before_marker")
+        events = [event.event_type for event in db.query(EnterpriseAgentTeamEvent).all()]
+        assert "billing.unknown" not in events and "billing.not_sent" not in events
+    assert calls == ([] if stage == "before_marker" else ["started"])

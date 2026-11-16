@@ -5,7 +5,7 @@ run_deploy_failure_matrix() {
   local member_capability member_probe_failure
   local old_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   local new_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-  for scenario in tls backup verify backend_build migration backend_up backend_health backend_smoke frontend_build frontend_up assets frontend_health https ops_check rollback_failed ledger_empty_rollback_refused ledger_written_rollback_refused ledger_probe_failed member_empty_old_refused member_unknown_refused member_probe_failed legacy_head_partial_schema legacy_head_schema_mismatch legacy_head_database_ahead chat_multiple_revisions chat_confirmation_missing chat_partial_preexisting chat_database_ahead chat_complete_unversioned chat_revision_unknown chat_schema_query_failure chat_migration_graph_invalid chat_stop_failure chat_stop_verification_failure chat_partial_migration chat_migration_success chat_already_migrated_success chat_future_head_success chat_post_migration_health chat_post_migration_health_compatible f2_frontend_build f2_https f2_downgrade_preflight_refused f2_success billing_121_success billing_partial_preexisting billing_partial_migration billing_post_migration_old_refused billing_post_migration_compatible billing_target_old_refused; do
+  for scenario in tls backup verify backend_build migration backend_up backend_health backend_smoke frontend_build frontend_up assets frontend_health https ops_check rollback_failed ledger_empty_rollback_refused ledger_written_rollback_refused ledger_probe_failed member_empty_old_refused member_unknown_refused member_probe_failed legacy_head_partial_schema legacy_head_schema_mismatch legacy_head_database_ahead chat_multiple_revisions chat_confirmation_missing chat_partial_preexisting chat_database_ahead chat_complete_unversioned chat_revision_unknown chat_schema_query_failure chat_migration_graph_invalid chat_stop_failure chat_stop_verification_failure chat_partial_migration chat_migration_success chat_already_migrated_success chat_future_head_success chat_post_migration_health chat_post_migration_health_compatible f2_frontend_build f2_https f2_downgrade_preflight_refused f2_success billing_121_success billing_partial_preexisting billing_partial_migration billing_post_migration_old_refused billing_post_migration_compatible billing_target_old_refused owner_target_refused owner_partial_preexisting owner_pending_old_refused; do
     workspace="$test_root/failure-matrix-$scenario"
     mkdir -p "$workspace/repo/deploy/lib" "$workspace/repo/backend/alembic" "$workspace/bin" "$workspace/releases"
     cp deploy.sh rollback.sh "$workspace/repo/deploy/"
@@ -37,6 +37,7 @@ SCRIPT
     cp lib/chat_authority_schema_compatibility.py "$workspace/repo/deploy/lib/"
     cp lib/alembic_revision_compatibility.py "$workspace/repo/deploy/lib/"
     cp lib/billing_evidence_compatibility.py lib/billing_evidence_schema_compatibility.py "$workspace/repo/deploy/lib/"
+    cp lib/assistant_owner_schema.sql lib/assistant_owner_schema_compatibility.py lib/assistant_owner_image_compatibility.py "$workspace/repo/deploy/lib/"
     cp -R ../backend/alembic/versions "$workspace/repo/backend/alembic/"
     python3 "$workspace/repo/deploy/lib/chat_authority_schema_compatibility.py" \
       "$workspace/repo/backend/alembic/versions/119_chat_message_authority.py" --fixture \
@@ -207,6 +208,20 @@ SCRIPT
         chat_revision=119_chat_message_authority
         printf '%s\n' "$chat_revision" > "$db_revision_file"
         printf 'complete\n' > "$chat_schema_file"
+        ;;
+    esac
+    export FAKE_ASSISTANT_OWNER_SCHEMA_STATE=absent
+    case "$scenario" in
+      owner_target_refused|owner_partial_preexisting|owner_pending_old_refused)
+        chat_revision=121_billing_model_evidence
+        chat_head=121_billing_model_evidence
+        [[ "$scenario" != owner_target_refused ]] || chat_head=122_assistant_call_owner
+        chat_capability=supported
+        printf '%s\n' "$chat_revision" > "$db_revision_file"
+        printf 'complete\n' > "$chat_schema_file"
+        printf 'complete\n' > "$billing_schema_file"
+        [[ "$scenario" != owner_partial_preexisting ]] || export FAKE_ASSISTANT_OWNER_SCHEMA_STATE=partial
+        [[ "$scenario" != owner_pending_old_refused ]] || printf 'pending\n' > "$workspace/releases/assistant-owner-activation"
         ;;
     esac
     case "$scenario" in
@@ -383,6 +398,26 @@ PY
       }
     fi
     case "$scenario" in
+      owner_target_refused|owner_partial_preexisting|owner_pending_old_refused)
+        expected_rollback=owner_compatibility_gated
+        assert_contains "$workspace/docker.log" 'compose stop backend'
+        assert_not_contains "$workspace/docker.log" 'upgrade head'
+        assert_not_contains "$workspace/docker.log" "compose up -d --no-deps --no-build --pull never backend | release=$new_sha"
+        case "$scenario" in
+          owner_target_refused)
+            assert_contains "$workspace/output.log" '禁止发布或回滚到该数据库'
+            # No 122 DDL ran, so the separately checked previous 121 image may recover.
+            assert_contains "$workspace/docker.log" "compose up -d --no-deps --no-build --pull never backend | release=$old_sha" ;;
+          owner_partial_preexisting)
+            assert_contains "$workspace/output.log" '122 ownership 表、约束、触发器、标记与 revision 不一致'
+            assert_not_contains "$workspace/docker.log" 'compose up -d --no-deps --no-build --pull never backend'
+            [[ -f "$workspace/stopped" ]] ;;
+          owner_pending_old_refused)
+            assert_contains "$workspace/output.log" '数据库已进入 122 ownership 协议'
+            assert_not_contains "$workspace/docker.log" 'compose up -d --no-deps --no-build --pull never backend'
+            [[ -f "$workspace/stopped" ]] ;;
+        esac
+        ;;
       billing_partial_preexisting|billing_partial_migration|billing_post_migration_old_refused)
         expected_rollback=billing_compatibility_gated
         assert_contains "$workspace/docker.log" 'compose stop backend'

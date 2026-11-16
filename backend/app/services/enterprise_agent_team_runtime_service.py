@@ -11,6 +11,7 @@ from typing import Any, Callable, Mapping
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, PaymentRequiredError, ValidationError
+from app.core.ownership_signals import NonOwnerAbort
 from app.models.billing_ledger import BillingReservation
 from app.models.enterprise_agent_team import (
     EnterpriseAgentTeam,
@@ -1647,6 +1648,8 @@ def metered_team_call(
                     response = send()
                     with db.begin_nested():
                         record_success(db, observed_key, response[0], response[1])
+                except NonOwnerAbort:
+                    raise
                 except BaseException as exc:
                     outcome_error = exc
                     if isinstance(exc, billing_metered_call.MeteredUsageValidationError):
@@ -1659,6 +1662,8 @@ def metered_team_call(
                     )
                     live["team"].status = "awaiting_reconciliation"
                     billing_event("billing.unknown")(db, observed_key)
+        except NonOwnerAbort:
+            raise
         except BaseException as exc:
             if send_started:
                 raise

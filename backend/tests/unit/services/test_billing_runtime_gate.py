@@ -1228,3 +1228,35 @@ def test_unscoped_embedding_fails_closed_in_legacy_mode_by_default(monkeypatch):
         embedding_service._api_embed(
             ["private"], {"base_url": "https://unit.example", "api_key": "x", "model": "embedding"}
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["before_send", "after_send"])
+async def test_non_owner_stream_signal_does_not_mark_another_owner_unknown(monkeypatch, stage):
+    from app.core.ownership_signals import NonOwnerAbort
+
+    ticket = {"key": "non-owner-hold", "done": False}
+    network = []
+    monkeypatch.setattr(billing_runtime, "begin_attempt", lambda **_kw: ticket)
+
+    def before(_ticket):
+        if stage == "before_send":
+            raise NonOwnerAbort()
+
+    async def stream(_self, _payload):
+        network.append("started")
+        raise NonOwnerAbort()
+        yield  # pragma: no cover - make this an async generator
+
+    def unknown(_ticket):
+        raise BillingError("must not obscure non-owner signal")
+
+    monkeypatch.setattr(billing_runtime, "before_stream_send", before)
+    monkeypatch.setattr(billing_runtime, "unknown_attempt", unknown)
+    monkeypatch.setattr(NativeResponsesTransport, "_stream_without_billing", stream)
+    transport = NativeResponsesTransport(ApiConfig(api_key="unit", base_url="https://api.deepseek.com/v1",
+                                                    model="deepseek-flash", provider="deepseek", source="system"))
+    with pytest.raises(NonOwnerAbort):
+        async for _event in transport._stream({"model": "deepseek-flash"}):
+            pass
+    assert network == ([] if stage == "before_send" else ["started"])

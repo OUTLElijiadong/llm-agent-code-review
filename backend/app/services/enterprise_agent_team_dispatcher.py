@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
 from app.core.database import SessionLocal
+from app.core.ownership_signals import NonOwnerAbort
 from app.models.billing_ledger import BillingReservation, BillingWallet
 from app.models.enterprise_agent_team import (
     EnterpriseAgentTeam,
@@ -118,6 +119,8 @@ def dispatch_once(
                     error_code="executor_returned_without_completion",
                 )
                 stats[_failure_stat_bucket(result["status"])] += 1
+            except NonOwnerAbort:
+                stats["non_owner"] = stats.get("non_owner", 0) + 1
             except Exception as exc:  # noqa: BLE001 - task state records retry/freeze decision
                 logger.exception(
                     "[enterprise-agent-team] task executor failed enterprise={} team={} task={}",
@@ -135,6 +138,8 @@ def dispatch_once(
                         error_code=type(exc).__name__,
                     )
                     stats[_failure_stat_bucket(result["status"])] += 1
+                except NonOwnerAbort:
+                    stats["non_owner"] = stats.get("non_owner", 0) + 1
                 except Exception:  # noqa: BLE001 - stale workers cannot replace a newer task outcome
                     logger.exception(
                         "[enterprise-agent-team] task failure state could not be persisted enterprise={} task={}",
@@ -303,6 +308,8 @@ def _task_billing_scope(
                     response = send()
                     with db.begin_nested():
                         record_success(db, request_key, response[0], response[1])
+                except NonOwnerAbort:
+                    raise
                 except BaseException as exc:
                     outcome_error = exc
                     if isinstance(exc, billing_metered_call.MeteredUsageValidationError):
@@ -315,6 +322,8 @@ def _task_billing_scope(
                     )
                     context["team"].status = "awaiting_reconciliation"
                     on_unknown(db, request_key)
+        except NonOwnerAbort:
+            raise
         except BaseException as exc:
             if sent:
                 raise
@@ -850,6 +859,11 @@ def dispatch_due_once() -> dict[str, int]:
         )
         for key in ("claimed", "completed", "retryable", "reconciliation", "failed"):
             stats[key] += int(result.get(key, 0))
+        if result.get("non_owner"):
+            stats["non_owner"] = stats.get("non_owner", 0) + int(result["non_owner"])
+            # Defer unrelated terminal receipts to the next scan when a worker
+            # could not establish ownership; no reply is published by this pass.
+            continue
         with SessionLocal() as db:
             terminal_ids = [
                 int(row[0])

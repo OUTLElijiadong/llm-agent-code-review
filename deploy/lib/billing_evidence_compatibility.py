@@ -12,13 +12,17 @@ import os
 import pathlib
 import signal
 
-# Reviewed with dual-approval, evidence provenance and provider-change regression tests.
+# Conservative identity gate for reviewed reader modules and direct signal dependencies.
+# It does not establish correctness or cover arbitrary unlisted dependencies.
 EXPECTED_MODULES = {
     'services/billing_reservation_reconciliation_service.py': 'ea7d3a4b24122b6833739278006d18d520390d5784a5e402c86f84b1edb0f226',
     'services/billing_ledger_service.py': 'd4fb310a97cdc5bd394b6a464f7e347776dd7f7dc9e3ff4ab918ecf628d92a7a',
-    'services/billing_metered_call.py': 'e188b657c8e9e90bfe3c5baab504cc3e1fa0f3265847f8f20c3f5712c7c243a3',
-    'services/enterprise_agent_team_runtime_service.py': 'f7d86d5c1de83d96a06677eab59eb72aecee3b72f3b35fad9fff8f10915a135f',
-    'services/enterprise_agent_team_dispatcher.py': 'e90afbf0bf7b0c00f9d9bae6c2e6273de013d59a943e488e6c89dea1fe4bc66e',
+    'core/ownership_signals.py': 'ac98c85853637899d1c821782fcb47584745cf69cc549050a5a482f4585066e1',
+    'services/deepseek_responses_runtime.py': '90f2586eba5c126c12f84d29c3c9595e476cdc82ac02c1b8e2441e9a35b89568',
+    'services/agent_responses_service.py': '7890bf381a7d778e9e0eb5af7d8343c2282d891b848784fa57bb4c03432f33cd',
+    'services/billing_metered_call.py': '19d686f7f966f97c4b91cbaccb71ce67793781da596b73e36235c9804e62e3c4',
+    'services/enterprise_agent_team_runtime_service.py': '554e000c51322443d0908a6afb56097f8ebafebbd51b4a851f656d9d4b533c25',
+    'services/enterprise_agent_team_dispatcher.py': '5113607dd9cc15cdc9915a7d2922d718448cabbaad0df8620bce98ffa4933385',
     'services/enterprise_assistant_billing_group.py': 'f67915278451a3bd4658c85fed9dd1e8c6a8fe8bf3cab43e67f43a3213288093',
     'services/rbac_service.py': '6e81c15b515e6725420fcc4538b8ffee46f4e8973c6768cb54fee89d5beafd5d',
     'models/billing_ledger.py': '9a6f515ae2f19e85c011e940059597a0b270c82ea86513526fdcfd24c0a8666a',
@@ -31,8 +35,8 @@ EXPECTED_MODULES = {
     'core/super_admin.py': '5acabc74bd3119c3dec2fcc8023088ad473cd75ee0d0f7d5504dff2f355e0b55',
     'schemas/common.py': 'c61d1d397875b379159ca6418cf2ac3a52acccf52c16bea6aa78de99d993509e',
     'main.py': '0debff8636df3f2fb8759dd1ebd8cf6145e3abfb4cddd252782a383715e02c5d',
-    'services/enterprise_assistant_runtime_service.py': '5f55251dae0c1adf7ad66fece72f3e72066fdbc14ebd761afe8f51cf8fb9a5e4',
-    'services/billing_search_fetch_service.py': 'cc9d988b86578c4c4ae6a0ff119349fc9ca0ca3d761154b5ad6f3fa4a1065e8d',
+    'services/enterprise_assistant_runtime_service.py': '0ce54660b58b712c02ff5f898d0fe3f7044a527c6f3d2927d3417c4c62b58c30',
+    'services/billing_search_fetch_service.py': '60e33118c77ec3926fbc2a95ee17f3e1577d318049132d831586e55f6e41973f',
     'services/billing_rate_catalog_service.py': '56b122e417386721f1319965fbbd31dbad0de5a836bf3ab3d0abfbbb2c0112c2',
     'services/enterprise_org_service.py': '7e7e62db935b6e71d5d0efa319b0746ce0f282d18e2d50399e7799e09ad9162e',
     'services/enterprise_chat_service.py': '6fca6402e731ecead8622658de5afe48b79ccf475ce02d8b0cf8ef2d1bcd6fe8',

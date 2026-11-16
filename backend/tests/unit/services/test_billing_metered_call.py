@@ -156,3 +156,43 @@ def test_metered_call_without_provider_identity_never_sends(wallet_factory):
     assert sent == []
     with Session() as db:
         assert db.query(BillingReservation).count() == 0
+
+
+@pytest.mark.parametrize("source", ["send", "send_guard", "usage_validation", "on_reserved"])
+def test_non_owner_signal_never_marks_or_releases_model_hold(wallet_factory, monkeypatch, source):
+    from app.core.ownership_signals import NonOwnerAbort
+    from app.services import billing_metered_call as module
+
+    sessions, wallet_id = wallet_factory
+    events = []
+
+    def send():
+        if source == "send":
+            raise NonOwnerAbort()
+        return "response", {"prompt_tokens": 2, "completion_tokens": 2}
+
+    def guard(run_send, _key, _record_success):
+        if source == "send_guard":
+            raise NonOwnerAbort()
+        return run_send()
+
+    def reserved(_db, _key):
+        if source == "on_reserved":
+            raise NonOwnerAbort()
+
+    if source == "usage_validation":
+        monkeypatch.setattr(module, "verify_priced_provider_usage", lambda *_a: (_ for _ in ()).throw(NonOwnerAbort()))
+    with pytest.raises(NonOwnerAbort):
+        metered_call(
+            session_factory=sessions, request_key=f"non-owner-{source}", model_name="deepseek-flash", user_id=10,
+            max_input_tokens=100, max_output_tokens=50, personal_wallet_id=wallet_id, send=send,
+            send_guard=guard if source in {"send_guard", "usage_validation"} else None,
+            on_reserved=reserved, on_unknown=lambda *_a: events.append("unknown"),
+        )
+    with sessions() as db:
+        rows = db.query(BillingReservation).all()
+        if source == "on_reserved":
+            assert rows == []
+        else:
+            assert len(rows) == 1 and rows[0].status == "reserved"
+    assert events == []

@@ -10,8 +10,8 @@
     PRISM_FRESH_CHAIN_MYSQL_URL='mysql+pymysql://root:<密码>@127.0.0.1:<端口>/' \\
         python -m pytest -q --no-cov tests/test_fresh_database_chain.py
 
-目标必须是回环地址上没有 code_review 表的服务器，否则直接失败而不是改动已有数据；
-测试结束会删除自己创建的 code_review 库。CI 设置 PRISM_FRESH_CHAIN_REQUIRED=1，
+目标必须是回环地址上不存在 code_review schema 的一次性服务器；已有空库也直接拒绝。
+测试结束仅在创建和随机标记核验成功后删除自己创建的 code_review 库。CI 设置 PRISM_FRESH_CHAIN_REQUIRED=1，
 使缺少 MySQL 时失败而不是静默跳过。
 """
 
@@ -131,20 +131,36 @@ def fresh_chain_url() -> URL:
     return url
 
 
+def _create_isolated_database(admin):
+    """Atomically create only a nonexistent schema; keep a private cleanup marker."""
+    marker = secrets.token_hex(32)
+    with admin.cursor() as cursor:
+        cursor.execute("CREATE DATABASE `code_review` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+        cursor.execute("CREATE TABLE `code_review`.`_prism_owner_test_marker` (marker CHAR(64) NOT NULL)")
+        cursor.execute("INSERT INTO `code_review`.`_prism_owner_test_marker` (marker) VALUES (%s)", (marker,))
+    return marker
+
+
+def _cleanup_isolated_database(admin, marker):
+    if marker is None:
+        return
+    try:
+        with admin.cursor() as cursor:
+            cursor.execute("SELECT marker FROM `code_review`.`_prism_owner_test_marker`")
+            rows = cursor.fetchall()
+            if rows == ((marker,),):
+                cursor.execute("DROP DATABASE `code_review`")
+    except Exception:  # noqa: BLE001 - uncertain ownership always leaves the schema intact
+        return
+
+
 @pytest.fixture(scope="module")
 def fresh_chain(fresh_chain_url: URL):
     """在空服务器上真实走完 init.sql → seed.sql → alembic upgrade head，返回连新库的引擎。"""
     admin = _connect(fresh_chain_url)
+    marker = None
     try:
-        with admin.cursor() as cursor:
-            cursor.execute(
-                "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = %s", (DATABASE,)
-            )
-            existing = cursor.fetchone()[0]
-        if existing:
-            pytest.fail(
-                f"目标 MySQL 的 {DATABASE} 已有 {existing} 张表；本测试只能在一次性空服务器上运行，已拒绝执行"
-            )
+        marker = _create_isolated_database(admin)
         try:
             _execute_sql_file(admin, INIT_SQL)
             _execute_sql_file(admin, SEED_SQL)
@@ -178,8 +194,7 @@ def fresh_chain(fresh_chain_url: URL):
             finally:
                 engine.dispose()
         finally:
-            with admin.cursor() as cursor:
-                cursor.execute(f"DROP DATABASE IF EXISTS {DATABASE}")
+            _cleanup_isolated_database(admin, marker)
     finally:
         admin.close()
 
@@ -2449,7 +2464,18 @@ def test_alembic_chain_creates_every_orm_table_and_column(fresh_chain) -> None:
 
     load_all_models()
     with fresh_chain.connect() as connection:
-        differences = compare_metadata(MigrationContext.configure(connection), Base.metadata)
+        # This marker belongs solely to the disposable-test cleanup guard; it is
+        # never an application table or part of production schema comparisons.
+        context = MigrationContext.configure(connection, opts={
+            "include_object": lambda _object, name, object_type, _reflected, _compare_to:
+                not (object_type == "table" and name == "_prism_owner_test_marker"),
+        })
+        differences = compare_metadata(context, Base.metadata)
+        assert "_prism_owner_test_marker" in inspect(connection).get_table_names()
+        assert not any(
+            isinstance(item, tuple) and item[0] == "remove_table"
+            and item[1].name == "_prism_owner_test_marker" for item in differences
+        )
 
     missing = []
     for difference in differences:

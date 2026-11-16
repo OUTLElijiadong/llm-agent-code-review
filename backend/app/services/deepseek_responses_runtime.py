@@ -33,6 +33,7 @@ from typing import (
 )
 
 from app.core.observability import observe_event
+from app.core.ownership_signals import _NON_OWNER_CANCEL_CAUSE, NonOwnerAbort, is_non_owner_cancellation
 from app.services.context_fidelity import (
     extract_protected_facts,
     extract_user_fact_ledger,
@@ -648,6 +649,8 @@ class DeepSeekResponsesRuntime:
                     pending.call,
                     reason=reason,
                 )
+            except NonOwnerAbort:
+                raise
             except Exception as exc:  # noqa: BLE001 - 审批记录失败时禁止继续模型链
                 checkpoint.status = FAILED
                 checkpoint.error = f"工具拒绝决定持久化失败: {exc}"
@@ -1240,6 +1243,8 @@ class DeepSeekResponsesRuntime:
                 response, _events = await _collect_response(
                     await _invoke_transport(self._transport, payload)
                 )
+            except NonOwnerAbort:
+                raise
             except Exception as exc:
                 observed = getattr(exc, "observed_response", {})
                 observed = dict(observed) if isinstance(observed, Mapping) else {}
@@ -1252,6 +1257,8 @@ class DeepSeekResponsesRuntime:
                             "error": str(exc),
                             "_request_payload": copy.deepcopy(payload),
                         })
+                    except NonOwnerAbort:
+                        raise
                     except Exception as log_error:
                         raise ContextBudgetError(
                             "语义压缩请求已执行，但用量审计失败"
@@ -1260,6 +1267,8 @@ class DeepSeekResponsesRuntime:
             if self._on_round is not None:
                 try:
                     self._on_round({**response, "_request_payload": copy.deepcopy(payload)})
+                except NonOwnerAbort:
+                    raise
                 except Exception as exc:
                     raise ContextBudgetError(f"语义压缩用量审计失败: {exc}") from exc
             if str(response.get("status") or "") == COMPLETED:
@@ -1497,6 +1506,8 @@ class DeepSeekResponsesRuntime:
             if has_images:
                 try:
                     projected_input = restore_image_placeholders(projected_input, self._image_assets, strict=True)
+                except NonOwnerAbort:
+                    raise
                 except Exception as exc:
                     checkpoint.status = FAILED
                     checkpoint.error = str(exc)
@@ -1555,7 +1566,11 @@ class DeepSeekResponsesRuntime:
                 try:
                     output = await _invoke_transport(self._transport, payload)
                     response, turn_events = await _collect_response(output)
+                except NonOwnerAbort:
+                    raise
                 except (Exception, asyncio.CancelledError) as exc:
+                    if isinstance(exc, asyncio.CancelledError) and is_non_owner_cancellation(exc):
+                        raise
                     observed = getattr(exc, "observed_response", {})
                     observed = dict(observed) if isinstance(observed, Mapping) else {}
                     was_interrupted = isinstance(exc, asyncio.CancelledError)
@@ -1564,6 +1579,8 @@ class DeepSeekResponsesRuntime:
                         try:
                             latest = await self._store.load(checkpoint.run_id)
                             was_user_cancelled = latest is not None and latest.status == CANCELLED
+                        except NonOwnerAbort:
+                            raise
                         except Exception:  # noqa: BLE001 - 保留原始取消/中断信号
                             was_user_cancelled = False
                     failed_response = {
@@ -1581,6 +1598,8 @@ class DeepSeekResponsesRuntime:
                             # 回调保留本轮实际发送的请求元数据；它不会写入检查点，
                             # 仅供用量审计记录输入/输出关联。兼容原有单参数回调。
                             self._on_round({**failed_response, "_request_payload": copy.deepcopy(payload)})
+                        except NonOwnerAbort:
+                            raise
                         except Exception as log_error:
                             if was_interrupted:
                                 raise exc from log_error
@@ -1591,6 +1610,8 @@ class DeepSeekResponsesRuntime:
                         # 上游 response 不包含请求 input；将请求快照随回调传递，
                         # 由服务层按审计策略脱敏后落 AiCallLog.prompt。
                         self._on_round({**response, "_request_payload": copy.deepcopy(payload)})
+                    except NonOwnerAbort:
+                        raise
                     except Exception as log_error:
                         raise RoundAccountingError("模型请求已执行，但该轮用量记账失败") from log_error
                 return response, turn_events
@@ -1624,16 +1645,44 @@ class DeepSeekResponsesRuntime:
                     )
                     if cancel_task in done:
                         cancelled_result = cancel_task.result()
+                        if model_task.done() and not model_task.cancelled():
+                            error = model_task.exception()
+                            if isinstance(error, NonOwnerAbort):
+                                raise error
                         model_task.cancel()
-                        await asyncio.gather(model_task, return_exceptions=True)
+                        cleanup = await asyncio.gather(model_task, return_exceptions=True)
+                        if isinstance(cleanup[0], NonOwnerAbort):
+                            raise cleanup[0]
                         return cancelled_result
                     cancel_task.cancel()
-                    await asyncio.gather(cancel_task, return_exceptions=True)
+                    cleanup = await asyncio.gather(cancel_task, return_exceptions=True)
+                    if isinstance(cleanup[0], NonOwnerAbort):
+                        raise cleanup[0]
                     return await model_task
-                except BaseException:
-                    model_task.cancel()
+                except NonOwnerAbort:
+                    model_task.cancel(_NON_OWNER_CANCEL_CAUSE)
                     cancel_task.cancel()
                     await asyncio.gather(model_task, cancel_task, return_exceptions=True)
+                    raise
+                except BaseException:
+                    # Never let the model continue while waiting for cleanup.
+                    # A signal already observed by the poller carries its cause;
+                    # a later signal still requires transaction-level owner fencing.
+                    owner_lost = None
+                    if cancel_task.done() and not cancel_task.cancelled():
+                        error = cancel_task.exception()
+                        if isinstance(error, NonOwnerAbort):
+                            owner_lost = error
+                    cancel_task.cancel()
+                    if owner_lost is not None:
+                        model_task.cancel(_NON_OWNER_CANCEL_CAUSE)
+                    else:
+                        model_task.cancel()
+                    cancel_cleanup = await asyncio.gather(cancel_task, return_exceptions=True)
+                    model_cleanup = await asyncio.gather(model_task, return_exceptions=True)
+                    for result in (*cancel_cleanup, *model_cleanup):
+                        if isinstance(result, NonOwnerAbort):
+                            raise result
                     raise
 
             try:
@@ -1644,6 +1693,8 @@ class DeepSeekResponsesRuntime:
                         events=tuple(copy.deepcopy(events)) + round_result.events,
                     )
                 response, turn_events = round_result
+            except NonOwnerAbort:
+                raise
             except Exception as exc:  # noqa: BLE001 - transport 错误转为可恢复检查点
                 # 只有模型不可用且尚未回退时,才在同一轮把 orchestrator 模型降级到
                 # flash/自定义降级模型并重试一次;工具调用或其他异常分支不触发回退。
@@ -1666,6 +1717,8 @@ class DeepSeekResponsesRuntime:
                                 events=tuple(copy.deepcopy(events)) + round_result.events,
                             )
                         response, turn_events = round_result
+                    except NonOwnerAbort:
+                        raise
                     except Exception as retry_exc:  # noqa: BLE001 - 回退后仍失败按原逻辑置终态
                         checkpoint.status = FAILED
                         checkpoint.error = f"Responses transport 调用失败: {retry_exc}"
@@ -1761,6 +1814,8 @@ class DeepSeekResponsesRuntime:
                     checkpoint,
                     candidate_text,
                 )
+            except NonOwnerAbort:
+                raise
             except Exception as exc:  # noqa: BLE001 - 证据校验异常必须失败关闭
                 checkpoint.last_response = {}
                 checkpoint.output_text = ""
@@ -2029,6 +2084,8 @@ class DeepSeekResponsesRuntime:
         try:
             raw_result = await _invoke_tool_executor(self._tool_executor, call, approved=approved)
             return _normalize_execution_result(raw_result)
+        except NonOwnerAbort:
+            raise
         except Exception as exc:  # noqa: BLE001 - 工具异常必须回灌模型继续推理
             return ToolExecutionResult.failure(f"工具 {call.name} 执行失败: {exc}")
 
@@ -2753,6 +2810,8 @@ async def _collect_response(output: TransportOutput) -> Tuple[Dict[str, Any], Li
             if isinstance(extra, Mapping):
                 observed.update(dict(extra))
             exc.observed_response = observed
+            raise
+        except NonOwnerAbort:
             raise
         except Exception as exc:
             if events:

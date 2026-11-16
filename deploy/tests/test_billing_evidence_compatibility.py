@@ -137,6 +137,22 @@ def test_reader_rejects_extra_monkeypatch_even_with_original_functions(tmp_path)
     assert not probe(tmp_path)
 
 
+@pytest.mark.parametrize('relative', [
+    'core/ownership_signals.py',
+    'services/deepseek_responses_runtime.py',
+    'services/agent_responses_service.py',
+])
+def test_reader_rejects_tampered_non_owner_signal_dependencies(tmp_path, relative):
+    app = ROOT / 'backend/app'
+    for path in FINGERPRINTS:
+        target = tmp_path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(app / path, target)
+    target = tmp_path / relative
+    target.write_text(target.read_text(encoding='utf-8') + '\nidentity_gate_tampered = True\n', encoding='utf-8')
+    assert not probe(tmp_path)
+
+
 def run_compatibility_gate(tmp_path, *, schema='absent', revision='120_discussion_turn_watermark',
                            capability='supported', marker=False, marker_symlink=False):
     import os

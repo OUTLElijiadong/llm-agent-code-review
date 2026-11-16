@@ -26,6 +26,7 @@ from app.core.exceptions import (
     PaymentRequiredError,
     ValidationError,
 )
+from app.core.ownership_signals import NonOwnerAbort
 from app.models.billing_ledger import (
     BillingReservation,
     BillingReservationReconciliationEvent,
@@ -1837,6 +1838,8 @@ class EnterpriseAssistantToolExecutor:
             if call.name == "propose_enterprise_announcement":
                 return self._announcement_tool(call, state, approved=approved, args=args)
             return ToolExecutionResult.failure("企业小菱没有开放此工具")
+        except NonOwnerAbort:
+            raise
         except SupersededByAuthorityDirectiveError as exc:
             if self._clarification_resuming and call.name == "create_registered_enterprise_agent_team":
                 self._db.rollback()
@@ -2234,6 +2237,8 @@ class EnterpriseAssistantToolExecutor:
                     execution_token=execution_token,
                     lease_generation=retry_generation,
                 )
+            raise
+        except NonOwnerAbort:
             raise
         except Exception as exc:  # noqa: BLE001 - ambiguous upstream outcomes remain fenced
             self._db.rollback()
@@ -3863,6 +3868,8 @@ async def execute_queued_run(engine, *, enterprise_id: int, conversation_id: int
             )
         finally:
             run_session.close()
+    except NonOwnerAbort:
+        return
     except Exception as exc:  # noqa: BLE001 - durable state is retained for explicit, metered recovery
         with factory.begin() as work:
             run = _run_record(work, enterprise_id, conversation_id, run_public_id, lock=True)

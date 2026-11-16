@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 import httpx
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.core.ownership_signals import NonOwnerAbort
 from app.models.billing_ledger import BillingReservation, BillingReservationPart, BillingToolExecutionResult
 from app.services import billing_ledger_service as ledger
 
@@ -271,6 +272,8 @@ def _finalize_result(session_factory: sessionmaker, request_key: str,
             # a recovery cannot fence the worker between these operations.
             try:
                 _authorize(authorize, db)
+            except NonOwnerAbort:
+                raise
             except Exception as exc:  # noqa: BLE001 - preserve a frozen hold after provider success
                 raise SearchFetchAuthorizationFailure from exc
             reservation = _lock_tool_reservation(db, request_key)
@@ -293,6 +296,8 @@ def _finalize_result(session_factory: sessionmaker, request_key: str,
             session_factory, request_key,
             "外呼完成后权限或运行租约复核失败，账单转待核对",
         ) from exc
+    except NonOwnerAbort:
+        raise
     except Exception as exc:  # noqa: BLE001 - a successful provider call without durable pairing is uncertain
         try:
             with session_factory.begin() as db:
@@ -300,6 +305,8 @@ def _finalize_result(session_factory: sessionmaker, request_key: str,
                 saved = _existing_result(db, request_key, result.tool_name, input_sha256)
                 if saved is not None:
                     return saved
+        except NonOwnerAbort:
+            raise
         except Exception:  # noqa: BLE001 - retain the original uncertainty
             pass
         raise _finish_unknown(session_factory, request_key, "Search/Fetch 结果与账单未能原子保存") from exc
@@ -308,6 +315,8 @@ def _finalize_result(session_factory: sessionmaker, request_key: str,
 def _finish_unknown(session_factory: sessionmaker, request_key: str, reason: str) -> SearchFetchOutcomeUnknown:
     try:
         _persist_unknown(session_factory, request_key)
+    except NonOwnerAbort:
+        raise
     except Exception:  # noqa: BLE001 - retain the frozen hold even if reconciliation status write fails
         return SearchFetchOutcomeUnknown(f"{reason}；账单状态需人工检查")
     return SearchFetchOutcomeUnknown(f"{reason}；预占已冻结，待人工对账")
@@ -403,11 +412,15 @@ async def execute_tool(
         with session_factory.begin() as db:
             _authorize(authorize, db)
             ledger.mark_tool_attempt_started(db, request_key)
+    except NonOwnerAbort:
+        raise
     except BaseException:
         # Authorization failure before the committed send marker is provably unsent.
         try:
             with session_factory.begin() as db:
                 ledger.release_not_sent(db, request_key)
+        except NonOwnerAbort:
+            raise
         except Exception:  # noqa: BLE001 - ambiguous commit keeps the reservation closed to retries
             pass
         raise
@@ -440,6 +453,8 @@ async def execute_tool(
         raise _finish_unknown(session_factory, request_key, "供应商请求已中断，结果未知") from exc
     except (httpx.TimeoutException, httpx.TransportError) as exc:
         raise _finish_unknown(session_factory, request_key, "供应商请求超时或连接中断，结果未知") from exc
+    except NonOwnerAbort:
+        raise
     except Exception as exc:  # noqa: BLE001 - any post-marker transport/runtime failure is non-retryable
         raise _finish_unknown(session_factory, request_key, "供应商请求结果未知") from exc
 
@@ -472,6 +487,8 @@ async def execute_tool(
             )
         try:
             normalized, truncated = _bound_search_results(results)
+        except NonOwnerAbort:
+            raise
         except Exception as exc:  # noqa: BLE001 - malformed output cannot erase a potentially billable result
             raise _finish_unknown(session_factory, request_key, "Search 成功结果无法安全整理") from exc
         return _finalize_result(

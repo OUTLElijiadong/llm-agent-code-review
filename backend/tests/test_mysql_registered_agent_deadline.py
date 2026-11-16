@@ -11,7 +11,8 @@ from test_mysql_enterprise_group_shared_lock import _install_live_snapshots, _re
 from app.core.exceptions import ForbiddenError
 from app.models.billing_ledger import BillingReservation
 from app.models.enterprise_agent_team import EnterpriseAgentTeam, EnterpriseAgentTeamMember, EnterpriseAgentTeamTask
-from app.services import billing_ledger_service as ledger, billing_metered_call, billing_runtime_gate
+from app.services import billing_ledger_service as ledger
+from app.services import billing_metered_call, billing_runtime_gate
 from app.services import enterprise_agent_team_dispatcher as dispatcher
 from app.services import enterprise_agent_team_runtime_service as runtime
 from app.services import enterprise_agent_team_service as team_service
@@ -100,3 +101,71 @@ def test_registered_team_deadline_fences_mysql_sends(fresh_chain, verified_model
         assert len(rows) == 1
         assert rows[0].request_key == f'ent-team:{team_id}:{task_id}:1:1'
         assert rows[0].status == ('released' if expiry == 'before-send' else 'settled')
+
+
+@pytest.mark.parametrize('stage', ['before_marker', 'after_marker'])
+def test_registered_non_owner_guard_leaves_mysql_hold_untouched(
+    fresh_chain, verified_model_catalog, monkeypatch, stage,
+):
+    from app.core.ownership_signals import NonOwnerAbort
+
+    real_snapshot = parent_runtime._live_role_snapshot
+    _ready(monkeypatch)
+    monkeypatch.setattr(parent_runtime, '_live_role_snapshot', real_snapshot)
+    factory = sessionmaker(bind=fresh_chain, autoflush=False, expire_on_commit=False)
+    company, group, _owner, users, tasks, teams = _seed(factory)
+    team_id, task_id, user_id = teams[1], tasks[1], users[1]
+    _install_live_snapshots(factory, company, [team_id], legacy=True)
+    capabilities = {'agent_code': 'code_reviewer', 'execution_mode': 'model_only', 'tools': [],
+                    'external_effects': False}
+    monkeypatch.setattr(team_service, '_contract_snapshot', lambda _code: (None, capabilities))
+    plan = {'project_id': None, 'allowed_models': ['deepseek-flash'], 'max_calls_per_task': 3,
+            'max_input_tokens_per_call': 200, 'max_output_tokens_per_call': 200,
+            'max_team_credits_milli': 10_000, 'risk_level': 'low', 'requires_approval': False}
+    initial = runtime._now().replace(microsecond=0)
+    with factory.begin() as db:
+        team = db.get(EnterpriseAgentTeam, team_id)
+        team.deadline_at = initial + timedelta(seconds=60)
+        team.plan_snapshot_json = runtime._canonical_json(plan)
+        team.plan_sha256 = runtime._digest(plan)
+        member = db.query(EnterpriseAgentTeamMember).filter_by(team_id=team_id).one()
+        member.address = 'agent:code_reviewer'
+        member.snapshot_sha256 = runtime._digest(capabilities)
+        member.capabilities_json = runtime._canonical_json(capabilities)
+        wallet = ledger.get_or_create_wallet(db, 'enterprise', company)
+        ledger.grant(db, wallet_id=wallet.id, grant_key=f'owner-signal:{uuid4().hex}',
+                     kind='purchase', amount_milli=20_000)
+    claim = runtime.claim_task(factory, enterprise_id=company, task_id=task_id, now=initial)
+    assert claim is not None
+    with factory() as db:
+        team = db.get(EnterpriseAgentTeam, team_id)
+        task = db.get(EnterpriseAgentTeamTask, task_id)
+        member = db.get(EnterpriseAgentTeamMember, task.member_id)
+    if stage == 'before_marker':
+        def abort_marker(*_args, **_kwargs):
+            raise NonOwnerAbort()
+        monkeypatch.setattr(ledger, 'mark_model_attempt_started', abort_marker)
+    sent = []
+
+    def send():
+        sent.append(True)
+        raise NonOwnerAbort()
+
+    provider = ledger.BillingProviderIdentity(identity_version='deepseek-official-v1', provider_name='deepseek',
+                                               endpoint_host='api.deepseek.com', credential_source='system')
+    with dispatcher._task_billing_scope(factory, claim, team, task, member):
+        scope = billing_runtime_gate._current_scope()
+        with pytest.raises(NonOwnerAbort):
+            billing_metered_call.metered_call(
+                session_factory=factory, request_key=f'ent-team:{team_id}:{task_id}:1:1',
+                model_name='deepseek-flash', user_id=user_id, max_input_tokens=200, max_output_tokens=200,
+                send=send, provider_identity=provider, enterprise_wallet_id=scope['enterprise_wallet_id'],
+                enterprise_id=company, group_id=group, attempt_guard=scope['attempt_guard'],
+                send_guard=scope['send_guard'], on_reserved=scope['on_reserved'],
+                on_unknown=scope['on_unknown'], on_settled=scope['on_settled'],
+            )
+    with factory() as db:
+        rows = db.query(BillingReservation).filter_by(enterprise_id=company).all()
+        assert len(rows) == 1 and rows[0].status == 'reserved'
+        assert (rows[0].provider_attempt_started_at is None) == (stage == 'before_marker')
+    assert sent == ([] if stage == 'before_marker' else [True])
