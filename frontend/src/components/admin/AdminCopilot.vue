@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { currentPageContext } from '@/utils/pageContext'
 import { pageActionTargetHint, notifyCompletedPageAction, notifyVerifiedTeamPageActions, applyTeamResultToToolCalls } from '@/utils/agentPageActions'
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from 'vue'
 import { latestAssistantTarget, useChatAutoScroll } from '@/composables/useChatAutoScroll'
 import { useRouter } from 'vue-router'
 import {
@@ -166,16 +166,16 @@ const COMPACT_DESKTOP_ACTION_GUTTER = 360
 
 const router = useRouter()
 const visible = ref(false)
-const adminHeaderTriggerSlotPresent = ref(false)
+const adminHeaderTriggerSlot = shallowRef<HTMLElement | null>(null)
 let adminHeaderTriggerObserver: MutationObserver | undefined
 const currentPath = computed(() => router?.currentRoute?.value?.path || window.location.pathname)
 const shouldUseAdminHeaderTrigger = computed(() => (
-  currentPath.value.startsWith('/admin')
+  currentPath.value.startsWith('/admin') || currentPath.value === '/support'
 ))
 const useAdminHeaderTrigger = computed(() => (
-  shouldUseAdminHeaderTrigger.value && adminHeaderTriggerSlotPresent.value
+  shouldUseAdminHeaderTrigger.value && adminHeaderTriggerSlot.value !== null
 ))
-const triggerTeleportTarget = computed(() => useAdminHeaderTrigger.value ? '#admin-copilot-trigger-slot' : 'body')
+const triggerTeleportTarget = computed(() => useAdminHeaderTrigger.value ? adminHeaderTriggerSlot.value! : 'body')
 const loading = ref(false)
 const showTyping = ref(false)
 /** 思考城市(想法可视化)展开态:默认收起，按需查看静态详情 */
@@ -253,13 +253,12 @@ function handlePanelViewportResize(): void {
 
 /**
  * 管理页统一复用页头槽位;路由 out-in 切换期间槽位会暂时卸载,此时保留 body 浮动入口。
- * MutationObserver 在 AdminLayout 挂载后再迁移 Teleport,避免 Vue 对缺失目标只告警一次后不重试。
+ * 监听槽位替换并绑定实际节点，路由切换时可迁移 Teleport 而不丢失入口。
  */
 function syncAdminHeaderTriggerSlotPresence(): void {
   const shouldUseHeader = shouldUseAdminHeaderTrigger.value
-  const targetExists = shouldUseHeader && Boolean(document.getElementById('admin-copilot-trigger-slot'))
-  adminHeaderTriggerSlotPresent.value = targetExists
-  if (!shouldUseHeader || targetExists) {
+  adminHeaderTriggerSlot.value = shouldUseHeader ? document.getElementById('admin-copilot-trigger-slot') : null
+  if (!shouldUseHeader) {
     adminHeaderTriggerObserver?.disconnect()
     adminHeaderTriggerObserver = undefined
     return

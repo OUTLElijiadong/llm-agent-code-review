@@ -489,6 +489,35 @@ it('管理员小菱启动新任务时自动附带当前管理页与栏目', asyn
   }
 })
 
+it('支持中心管理员小菱发送当前支持页和栏目', async () => {
+  const page = document.createElement('div')
+  page.dataset.xiaolingPage = '/support'
+  page.dataset.xiaolingSection = 'feedback'
+  document.body.appendChild(page)
+  const router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/support', component: {}, meta: { title: '支持中心' } },
+  ] })
+  await router.push('/support?section=feedback')
+  const wrapper = mountCopilot([router])
+  const user = useUserStore()
+  user.token = 'support-page-admin-token'
+  user.profile = { id: 88, username: 'support-admin', role: 'admin', status: 1 }
+  try {
+    const running = (wrapper.vm as any).runResponse({
+      action: 'start', surface: 'admin', session_id: 'admin-support-context',
+      messages: [{ role: 'user', content: '请检查当前页面' }],
+    })
+    await flushPromises()
+    expect(streams.records).toHaveLength(1)
+    expect(streams.records[0].body.page_context).toEqual({ path: '/support', section: 'feedback' })
+    streams.records[0].resolve()
+    await running
+  } finally {
+    wrapper.unmount()
+    page.remove()
+  }
+})
+
 describe('团队轮询复核', () => {
   const terminalStatuses: AgentTeamStatus[] = ['completed', 'failed', 'cancelled', 'expired']
   function fixture(teamId: number, status: AgentTeamStatus): AgentTeamDetail {
@@ -628,6 +657,8 @@ it('管理端按游标加载更早消息，不把当前页误当全部历史', a
 
 it.each([
   { width: 390, path: '/admin/overview' },
+  { width: 390, path: '/support' },
+  { width: 1280, path: '/support' },
   { width: 1280, path: '/admin/operations' },
   { width: 1280, path: '/admin/security-center' },
 ])('$width px从非管理页切入管理页时先保留入口，页头槽位挂载后自动迁移', async ({ width, path }) => {
@@ -636,6 +667,7 @@ it.each([
     history: createMemoryHistory(),
     routes: [
       { path: '/projects', component: { template: '<main />' } },
+      { path: '/support', component: { template: '<main />' } },
       { path: '/admin/:pathMatch(.*)*', component: { template: '<main />' } },
     ],
   })
@@ -678,6 +710,7 @@ it.each([
     await nextTick()
 
     expect(slot.querySelector('.copilot-trigger')?.classList.contains('is-header-trigger')).toBe(true)
+    expect(document.body.querySelectorAll('.copilot-trigger')).toHaveLength(1)
     expect(document.body.querySelector(':scope > .copilot-trigger')).toBeNull()
     expect(teleportWarnings).toEqual([])
   } finally {
@@ -685,6 +718,42 @@ it.each([
     slot?.remove()
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth })
     warn.mockRestore()
+  }
+})
+
+it('管理页与支持页往返时页头槽位重建仍保留唯一可用入口', async () => {
+  const router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/admin/platform', component: { template: '<main />' } },
+    { path: '/support', component: { template: '<main />' } },
+  ] })
+  await router.push('/support?section=feedback')
+  let slot = document.createElement('div')
+  slot.id = 'admin-copilot-trigger-slot'
+  document.body.append(slot)
+  const wrapper = mountCopilot([router])
+  try {
+    await flushPromises()
+    expect(slot.querySelectorAll('.copilot-trigger')).toHaveLength(1)
+    for (const path of ['/admin/platform', '/support?section=feedback']) {
+      await router.push(path)
+      await flushPromises()
+      slot.remove()
+      slot = document.createElement('div')
+      slot.id = 'admin-copilot-trigger-slot'
+      document.body.append(slot)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      await nextTick()
+      expect(slot.querySelectorAll('.copilot-trigger')).toHaveLength(1)
+      expect(document.body.querySelectorAll('.copilot-trigger')).toHaveLength(1)
+      slot.querySelector<HTMLButtonElement>('.copilot-trigger')!.click()
+      await flushSessionRestore()
+      expect(wrapper.find('[role="dialog"]').exists()).toBe(true)
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await flushPromises()
+    }
+  } finally {
+    wrapper.unmount()
+    slot.remove()
   }
 })
 

@@ -1,8 +1,14 @@
 import { mount } from '@vue/test-utils'
 import { defineComponent } from 'vue'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import source from './AppLayout.vue?raw'
 import AppLayout from './AppLayout.vue'
+
+vi.mock('@/stores/user', () => ({ useUserStore: () => ({ isAdmin: () => false }) }))
+vi.mock('vue-router', async (importOriginal) => ({
+  ...await importOriginal<typeof import('vue-router')>(),
+  useRoute: () => ({ path: '/dashboard' }),
+}))
 
 const styles = source.split('<style scoped lang="scss">')[1].split('</style>')[0]
 
