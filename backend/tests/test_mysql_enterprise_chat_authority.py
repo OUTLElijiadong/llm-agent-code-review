@@ -169,6 +169,51 @@ def _initiator_user_id(sessions, run_public_id):
         return int(run.initiator_user_id)
 
 
+def test_published_answer_persists_the_latest_human_message_boundary(fresh_chain, monkeypatch):
+    sessions, enterprise_id, group_id, _owner_id, _author_id, room_id, public_id = _seed(
+        fresh_chain, actor_role="admin", source_authority_rank=3, include_prior_message=False,
+    )
+    with sessions.begin() as db:
+        employee = User(username=f"chat-boundary-{uuid4().hex[:12]}", password="x", role="user", status=1)
+        db.add(employee)
+        db.flush()
+        db.add_all([
+            EnterpriseMember(enterprise_id=enterprise_id, user_id=employee.id, role="member", status="active"),
+            EnterpriseGroupMember(
+                enterprise_id=enterprise_id, group_id=group_id, user_id=employee.id,
+                role="member", status="active",
+            ),
+        ])
+        employee_id = int(employee.id)
+    _install_not_required_model_send_clearance(sessions, public_id)
+    monkeypatch.setattr(enterprise_assistant_service, "_require_subscription", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "app.services.billing_checkout_service.enterprise_subscription_status", lambda *_a, **_k: "active"
+    )
+    monkeypatch.setattr(
+        "app.services.billing_checkout_service.enterprise_subscription_refund_pending", lambda *_a, **_k: False
+    )
+    monkeypatch.setattr(
+        runtime, "_reservations_for_run", lambda *_a: [type("Reservation", (), {"status": "settled"})()]
+    )
+
+    with sessions() as db:
+        intervening = enterprise_chat_service.send_message(
+            db, enterprise_id, employee_id, room_id, "message-during-answer", "请补充背景信息",
+        )
+        intervening_id = int(intervening.id)
+
+    result = runtime._finalize_runtime(
+        sessions, enterprise_id=enterprise_id, conversation_id=room_id, run_public_id=public_id,
+    )
+    assert result["status"] == "completed"
+    with sessions() as db:
+        answer = db.query(EnterpriseChatMessage).filter_by(assistant_run_id=(
+            db.query(EnterpriseAssistantRun.id).filter_by(public_id=public_id).scalar()
+        )).one()
+        assert answer.discussion_closed_through_message_id == intervening_id
+
+
 def _change(db, kind, enterprise_id, group_id, owner_id, target_user_id):
     if kind == "group":
         enterprise_org_service.remove_group_member(db, enterprise_id, group_id, owner_id, target_user_id)

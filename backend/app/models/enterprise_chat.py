@@ -50,6 +50,12 @@ class EnterpriseChatMessage(Base, IdMixin, TimestampMixin):
                          name="uq_ent_chat_message_team_source"),
         UniqueConstraint("conversation_id", "sender_id", "client_message_id", name="uq_enterprise_chat_message_client"),
         Index("ix_enterprise_chat_message_conversation", "enterprise_id", "conversation_id", "id"),
+        Index(
+            "ix_ent_chat_discussion_cutoff",
+            "enterprise_id",
+            "conversation_id",
+            "discussion_closed_through_message_id",
+        ),
     )
 
     enterprise_id = Column(BigInteger, nullable=False)
@@ -60,6 +66,7 @@ class EnterpriseChatMessage(Base, IdMixin, TimestampMixin):
     client_message_id = Column(String(80), nullable=False)
     content = Column(Text, nullable=False)
     sender_authority_rank = Column(Integer, nullable=True)
+    discussion_closed_through_message_id = Column(BigInteger, nullable=True)
 
 
 class EnterpriseAssistantRun(Base, IdMixin, TimestampMixin):

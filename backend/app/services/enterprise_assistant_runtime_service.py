@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any, Mapping, Optional, Sequence
 
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -251,33 +252,89 @@ def _role_snapshot(
     }
 
 
-def _last_completed_assistant_message_id(
+def _last_completed_assistant_discussion_cutoff(
     db: Session, *, enterprise_id: int, conversation_id: int, before_message_id: int,
 ) -> int:
-    """Only a completed Xiaoling answer closes a discussion; status receipts do not."""
-    row_id = (
-        db.query(EnterpriseChatMessage.id)
+    """Return the human-message high-water mark closed by a published answer."""
+    source_create_time = (
+        db.query(EnterpriseChatMessage.create_time)
+        .filter(
+            EnterpriseChatMessage.id == int(before_message_id),
+            EnterpriseChatMessage.enterprise_id == int(enterprise_id),
+            EnterpriseChatMessage.conversation_id == int(conversation_id),
+            EnterpriseChatMessage.sender_type == "human",
+        )
+        .scalar()
+    )
+    if source_create_time is None:
+        return 0
+
+    persisted_cutoff = (
+        db.query(EnterpriseChatMessage.discussion_closed_through_message_id)
         .join(EnterpriseAssistantRun, EnterpriseAssistantRun.id == EnterpriseChatMessage.assistant_run_id)
         .filter(
             EnterpriseChatMessage.enterprise_id == int(enterprise_id),
             EnterpriseChatMessage.conversation_id == int(conversation_id),
             EnterpriseChatMessage.sender_type == "assistant",
-            EnterpriseChatMessage.id < int(before_message_id),
+            EnterpriseChatMessage.discussion_closed_through_message_id.is_not(None),
+            EnterpriseChatMessage.discussion_closed_through_message_id < int(before_message_id),
             EnterpriseAssistantRun.status == "completed",
             EnterpriseAssistantRun.response_text.is_not(None),
             EnterpriseAssistantRun.response_text != "",
         )
-        .order_by(EnterpriseChatMessage.id.desc())
+        .order_by(EnterpriseChatMessage.discussion_closed_through_message_id.desc())
         .limit(1)
         .scalar()
     )
-    return int(row_id or 0)
+
+    if persisted_cutoff is not None:
+        # Any persisted watermark comes from a post-migration publication and
+        # therefore follows every legacy answer in this conversation.
+        return int(persisted_cutoff)
+
+    # Legacy answers have no exact publication watermark. Use only an answer
+    # definitely published before this source (strict timestamp comparison),
+    # then close only human messages whose timestamps are strictly earlier
+    # than that answer. Same-second messages remain in the discussion so an
+    # ambiguous timestamp can never hide a potentially unprocessed directive.
+    legacy_answer_time = (
+        db.query(EnterpriseChatMessage.update_time)
+        .join(EnterpriseAssistantRun, EnterpriseAssistantRun.id == EnterpriseChatMessage.assistant_run_id)
+        .filter(
+            EnterpriseChatMessage.enterprise_id == int(enterprise_id),
+            EnterpriseChatMessage.conversation_id == int(conversation_id),
+            EnterpriseChatMessage.sender_type == "assistant",
+            EnterpriseChatMessage.discussion_closed_through_message_id.is_(None),
+            EnterpriseChatMessage.update_time < source_create_time,
+            EnterpriseAssistantRun.status == "completed",
+            EnterpriseAssistantRun.response_text.is_not(None),
+            EnterpriseAssistantRun.response_text != "",
+        )
+        .order_by(EnterpriseChatMessage.update_time.desc(), EnterpriseChatMessage.id.desc())
+        .limit(1)
+        .scalar()
+    )
+    legacy_cutoff = 0
+    if legacy_answer_time is not None:
+        legacy_cutoff = int(
+            db.query(func.max(EnterpriseChatMessage.id))
+            .filter(
+                EnterpriseChatMessage.enterprise_id == int(enterprise_id),
+                EnterpriseChatMessage.conversation_id == int(conversation_id),
+                EnterpriseChatMessage.sender_type == "human",
+                EnterpriseChatMessage.create_time < legacy_answer_time,
+                EnterpriseChatMessage.id < int(before_message_id),
+            )
+            .scalar()
+            or 0
+        )
+    return legacy_cutoff
 
 
 def _current_discussion_messages(
     db: Session, *, enterprise_id: int, conversation_id: int, source_message_id: int, lock: bool = False,
 ) -> list[EnterpriseChatMessage]:
-    turn_start_id = _last_completed_assistant_message_id(
+    turn_start_id = _last_completed_assistant_discussion_cutoff(
         db,
         enterprise_id=enterprise_id,
         conversation_id=conversation_id,
@@ -2827,6 +2884,23 @@ def _ensure_message(db: Session, run: EnterpriseAssistantRun, text: str) -> Ente
     return row
 
 
+def _latest_human_message_id(db: Session, *, enterprise_id: int, conversation_id: int) -> int:
+    """Read the publication boundary after the caller has acquired the shared company lock."""
+    latest_id = (
+        db.query(EnterpriseChatMessage.id)
+        .filter(
+            EnterpriseChatMessage.enterprise_id == int(enterprise_id),
+            EnterpriseChatMessage.conversation_id == int(conversation_id),
+            EnterpriseChatMessage.sender_type == "human",
+        )
+        .order_by(EnterpriseChatMessage.id.desc())
+        .limit(1)
+        .with_for_update()
+        .scalar()
+    )
+    return int(latest_id or 0)
+
+
 def _reservations_for_run(db: Session, run: EnterpriseAssistantRun):
     prefix = f"enterprise-assistant:{run.public_id}:%"
     return (
@@ -2926,6 +3000,12 @@ def _finalize_runtime(factory, *, enterprise_id: int, conversation_id: int, run_
                 state.status = COMPLETED
                 state.lease_expires_at = None
                 answer = _ensure_message(db, run, run.response_text)
+                answer.discussion_closed_through_message_id = _latest_human_message_id(
+                    db,
+                    enterprise_id=int(enterprise_id),
+                    conversation_id=int(conversation_id),
+                )
+                db.flush()
                 result = {"run_id": run.public_id, "status": run.status, "message": answer}
     if reconciliation_required:
         raise PaymentRequiredError("企业小菱用量尚未全部结算；答复暂不可发布")
