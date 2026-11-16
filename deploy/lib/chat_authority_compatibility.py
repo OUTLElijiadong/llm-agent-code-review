@@ -89,7 +89,13 @@ def _has_legacy_unknown_directive_guard(node: ast.AST) -> bool:
     return any(
         isinstance(item, ast.BoolOp)
         and isinstance(item.op, ast.And)
-        and _checks_is_none(item, "sender_authority_rank")
+        and any(
+            isinstance(part, ast.Compare) and isinstance(part.left, ast.Attribute)
+            and part.left.attr == "sender_authority_rank" and len(part.ops) == 1
+            and isinstance(part.ops[0], ast.Is) and len(part.comparators) == 1
+            and isinstance(part.comparators[0], ast.Constant) and part.comparators[0].value is None
+            for part in ast.walk(item)
+        )
         and _has_string(item, "@小菱")
         for item in ast.walk(node)
     )
@@ -132,6 +138,94 @@ def _calls_guard_directly(node: ast.AST, name: str) -> bool:
     )
 
 
+def _calls_with_name(statement: ast.stmt, function: str, argument: str) -> bool:
+    return (isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Call)
+            and isinstance(statement.value.func, ast.Name) and statement.value.func.id == function
+            and len(statement.value.args) == 1 and isinstance(statement.value.args[0], ast.Name)
+            and statement.value.args[0].id == argument and not statement.value.keywords)
+
+
+def _guard_body_for_runtime(node: ast.FunctionDef) -> ast.FunctionDef:
+    """Recognize the old direct guard or the new two-branch current-read guard.
+
+    The nested guard is meaningful only when both authorization paths actually
+    invoke it. Looking for a raise anywhere in the AST would accept a dormant
+    helper while letting the caller bypass authority enforcement.
+    """
+    helpers = [item for item in node.body if isinstance(item, ast.FunctionDef) and item.name == "check"]
+    if not helpers:
+        return node
+    if len(helpers) != 1:
+        raise ValueError("ambiguous authority guard")
+    branches = [item for item in node.body if isinstance(item, ast.If)
+                and isinstance(item.test, ast.Name) and item.test.id == "current_authority_read"]
+    if len(branches) != 1:
+        raise ValueError("missing current authority branch")
+    branch = branches[0]
+    remaining = [item for item in node.body if item is not helpers[0] and item is not branch
+                 and not (isinstance(item, ast.Expr) and isinstance(item.value, ast.Constant)
+                          and isinstance(item.value.value, str))]
+    if remaining:
+        raise ValueError("unexpected authority control flow")
+    if (len(branch.body) != 1 or not _calls_with_name(branch.body[0], "check", "db")
+            or len(branch.orelse) != 1 or not isinstance(branch.orelse[0], ast.With)):
+        raise ValueError("current authority guard is not always executed")
+    fallback = branch.orelse[0]
+    if (len(fallback.items) != 1 or not isinstance(fallback.items[0].optional_vars, ast.Name)
+            or fallback.items[0].optional_vars.id != "current_db"
+            or len(fallback.body) != 1 or not _calls_with_name(fallback.body[0], "check", "current_db")):
+        raise ValueError("fresh authority guard is not always executed")
+    session = fallback.items[0].context_expr
+    if (not isinstance(session, ast.Call) or not isinstance(session.func, ast.Name)
+            or session.func.id != "Session"):
+        raise ValueError("fresh authority session is required")
+    session_keywords = {item.arg: item.value for item in session.keywords}
+    bind = session_keywords.get("bind")
+    if (session.args or set(session_keywords) != {"bind", "autoflush"}
+            or not isinstance(bind, ast.Call) or not isinstance(bind.func, ast.Attribute)
+            or not isinstance(bind.func.value, ast.Name) or bind.func.value.id != "db"
+            or bind.func.attr != "get_bind" or bind.args or bind.keywords
+            or not isinstance(session_keywords["autoflush"], ast.Constant)
+            or session_keywords["autoflush"].value is not False):
+        raise ValueError("fresh authority session is not bound correctly")
+    helper = helpers[0]
+    if (len(helper.body) != 5 or not isinstance(helper.body[3], ast.Assign)
+            or len(helper.body[3].targets) != 1 or not isinstance(helper.body[3].targets[0], ast.Name)
+            or helper.body[3].targets[0].id != "superseded"):
+        raise ValueError("unexpected authority decision flow")
+    decision = helper.body[3].value
+    if (not isinstance(decision, ast.Call) or not isinstance(decision.func, ast.Name)
+            or decision.func.id != "any" or len(decision.args) != 1
+            or not isinstance(decision.args[0], ast.GeneratorExp)
+            or not isinstance(decision.args[0].elt, ast.BoolOp)
+            or not isinstance(decision.args[0].elt.op, ast.Or)
+            or len(decision.args[0].elt.values) != 2
+            or not _has_legacy_unknown_directive_guard(decision.args[0].elt.values[0])
+            or not isinstance(decision.args[0].elt.values[1], ast.Compare)
+            or not any(isinstance(op, ast.GtE) for op in decision.args[0].elt.values[1].ops)
+            or not _has_rank_read(decision.args[0].elt.values[1])):
+        raise ValueError("authority decision was weakened")
+    reads = [item for item in ast.walk(helper) if isinstance(item, ast.Call)
+             and isinstance(item.func, ast.Name) and item.func.id == "_newer_human_messages"]
+    if len(reads) != 1:
+        raise ValueError("missing latest authority messages")
+    keywords = {item.arg: item.value for item in reads[0].keywords}
+    if any(not isinstance(keywords.get(key), ast.Name)
+           or keywords[key].id != "current_authority_read" for key in ("lock", "shared_lock")):
+        raise ValueError("current authority messages are not locked")
+    role_reads = [item for item in ast.walk(helper) if isinstance(item, ast.Call)
+                  and isinstance(item.func, ast.Name) and item.func.id == "_role_snapshot"]
+    if len(role_reads) != 1:
+        raise ValueError("missing current member roles")
+    role_keywords = {item.arg: item.value for item in role_reads[0].keywords}
+    if (not role_reads[0].args or not isinstance(role_reads[0].args[0], ast.Name)
+            or role_reads[0].args[0].id != "current_db"
+            or not isinstance(role_keywords.get("lock_current"), ast.Constant)
+            or role_keywords["lock_current"].value is not True):
+        raise ValueError("member roles are not current locked reads")
+    return helper
+
+
 def _probe(root: pathlib.Path) -> bool:
     models = ast.parse((root / "models/enterprise_chat.py").read_text(encoding="utf-8"))
     message = _find_class(models, "EnterpriseChatMessage")
@@ -160,6 +254,7 @@ def _probe(root: pathlib.Path) -> bool:
     runtime_guard = _find_function(runtime, "_assert_no_newer_authority_directive")
     if not _calls_guard_directly(live_snapshot, "_assert_no_newer_authority_directive"):
         return False
+    runtime_guard = _guard_body_for_runtime(runtime_guard)
     legacy_fail_closed = any(
         isinstance(item, ast.For) and any(_is_rank_unknown_guard(child) for child in item.body)
         for item in runtime_guard.body

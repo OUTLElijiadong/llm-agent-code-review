@@ -1381,6 +1381,13 @@ with tempfile.TemporaryDirectory(prefix="prism-chat-authority-probe-") as tempor
     )
     run_probe("unsupported")
     print("chat authority probe: runtime that revives unknown legacy authority refused PASS")
+    runtime.write_text(
+        original[:guard_start] + guard.replace(legacy_directive_guard,
+            legacy_directive_guard.replace(" is None", " is not None"), 1) + original[guard_end:],
+        encoding="utf-8",
+    )
+    run_probe("unsupported")
+    print("chat authority probe: inverted unknown-rank guard refused PASS")
     runtime.write_text(original.replace("int(message.sender_authority_rank)", "0", 1), encoding="utf-8")
     run_probe("unsupported")
     print("chat authority probe: disabled legacy-rank branch refused PASS")
@@ -1403,13 +1410,49 @@ with tempfile.TemporaryDirectory(prefix="prism-chat-authority-probe-") as tempor
     tree = ast.parse(original)
     guard = next(node for node in tree.body
                  if isinstance(node, ast.FunctionDef) and node.name == "_assert_no_newer_authority_directive")
-    blocking_branch = next(node for node in guard.body
+    check = next((node for node in guard.body if isinstance(node, ast.FunctionDef) and node.name == "check"), guard)
+    blocking_branch = next(node for node in check.body
                            if isinstance(node, ast.If) and isinstance(node.test, ast.Name)
                            and node.test.id == "superseded")
     blocking_branch.body = [ast.Pass()]
     runtime.write_text(ast.unparse(ast.fix_missing_locations(tree)), encoding="utf-8")
     run_probe("unsupported")
     print("chat authority probe: runtime without a blocking raise refused PASS")
+    runtime.write_text(original, encoding="utf-8")
+
+    for mode in ("current", "fresh", "unlocked", "unlocked-members", "early-return", "always-false"):
+        tree = ast.parse(original)
+        guard = next(node for node in tree.body
+                     if isinstance(node, ast.FunctionDef) and node.name == "_assert_no_newer_authority_directive")
+        check = next(node for node in guard.body if isinstance(node, ast.FunctionDef) and node.name == "check")
+        branch = next(node for node in guard.body if isinstance(node, ast.If)
+                      and isinstance(node.test, ast.Name) and node.test.id == "current_authority_read")
+        if mode == "current":
+            branch.body = [ast.Pass()]
+        elif mode == "fresh":
+            branch.orelse = [ast.Pass()]
+        elif mode == "unlocked":
+            read = next(node for node in ast.walk(check) if isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Name) and node.func.id == "_newer_human_messages")
+            for keyword in read.keywords:
+                if keyword.arg == "lock":
+                    keyword.value = ast.Constant(value=False)
+        elif mode == "unlocked-members":
+            read = next(node for node in ast.walk(check) if isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Name) and node.func.id == "_role_snapshot")
+            for keyword in read.keywords:
+                if keyword.arg == "lock_current":
+                    keyword.value = ast.Constant(value=False)
+        elif mode == "early-return":
+            guard.body.insert(0, ast.Return(value=None))
+        else:
+            assignment = next(node for node in check.body if isinstance(node, ast.Assign)
+                              and any(isinstance(target, ast.Name) and target.id == "superseded"
+                                      for target in node.targets))
+            assignment.value = ast.BoolOp(op=ast.And(), values=[ast.Constant(value=False), assignment.value])
+        runtime.write_text(ast.unparse(ast.fix_missing_locations(tree)), encoding="utf-8")
+        run_probe("unsupported")
+        print(f"chat authority probe: weakened {mode} authority read refused PASS")
     runtime.write_text(original, encoding="utf-8")
 
     result = subprocess.run([sys.executable, str(graph_probe), str(versions),
