@@ -188,20 +188,21 @@ def _has_recent_context_budget_loop(function: ast.AST) -> bool:
                             if isinstance(item, ast.If) and ast.unparse(item.test) == "cost > budget"), None)
         if limit_guard is None or not any(isinstance(item, ast.Break) for item in limit_guard.body):
             continue
-        has_append = any(
-            isinstance(item, ast.Expr) and isinstance(item.value, ast.Call)
-            and isinstance(item.value.func, ast.Attribute) and item.value.func.attr == "append"
-            and isinstance(item.value.func.value, ast.Name) and item.value.func.value.id == "recent"
-            and len(item.value.args) == 1 and isinstance(item.value.args[0], ast.Name)
-            and item.value.args[0].id == "item"
-            for item in node.body
-        )
-        has_budget_decrement = any(
-            isinstance(item, ast.AugAssign) and isinstance(item.target, ast.Name)
-            and item.target.id == "budget" and isinstance(item.op, ast.Sub)
-            and isinstance(item.value, ast.Name) and item.value.id == "cost"
-            for item in node.body
-        )
+        limit_guard_index = node.body.index(limit_guard)
+        append_index = next((index for index, item in enumerate(node.body)
+                             if isinstance(item, ast.Expr) and isinstance(item.value, ast.Call)
+                             and isinstance(item.value.func, ast.Attribute) and item.value.func.attr == "append"
+                             and isinstance(item.value.func.value, ast.Name)
+                             and item.value.func.value.id == "recent"
+                             and len(item.value.args) == 1 and isinstance(item.value.args[0], ast.Name)
+                             and item.value.args[0].id == "item"), None)
+        budget_decrement_index = next((index for index, item in enumerate(node.body)
+                                       if isinstance(item, ast.AugAssign)
+                                       and isinstance(item.target, ast.Name) and item.target.id == "budget"
+                                       and isinstance(item.op, ast.Sub)
+                                       and isinstance(item.value, ast.Name) and item.value.id == "cost"), None)
+        has_append = append_index is not None
+        has_budget_decrement = budget_decrement_index is not None
         has_cost_assignment = any(
             isinstance(item, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "cost"
                                                  for target in item.targets)
@@ -220,13 +221,28 @@ def _has_recent_context_budget_loop(function: ast.AST) -> bool:
                                      for target in item.targets)
                              and _has_name(item.value, "prefix") and _has_name(item.value, "recent")
                              and _has_name(item.value, "suffix") and _has_attribute(item.value, "join")), None)
-        if (has_append and has_budget_decrement and has_cost_assignment and budget_index is not None
+        if (has_append and has_budget_decrement and limit_guard_index < append_index
+                and limit_guard_index < budget_decrement_index
+                and has_cost_assignment and budget_index is not None
                 and prompt_index is not None and guard_index < budget_index < loop_index < prompt_index):
             return True
     return False
 
 
 def _has_finalizer_clearance_before_publication(function: ast.AST) -> bool:
+    def withholds_after_exception(handler: ast.ExceptHandler) -> bool:
+        writes = [
+            node for node in ast.walk(handler)
+            if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "withheld" for target in node.targets)
+        ]
+        return (
+            len(writes) == 1
+            and writes[0] in handler.body
+            and isinstance(writes[0].value, ast.Constant)
+            and writes[0].value.value is True
+        )
+
     for parent in ast.walk(function):
         for _field, value in ast.iter_fields(parent):
             if not isinstance(value, list):
@@ -244,35 +260,29 @@ def _has_finalizer_clearance_before_publication(function: ast.AST) -> bool:
                 handles_superseded = any(
                     handler.type is not None
                     and _has_name(handler.type, "SupersededByAuthorityDirectiveError")
-                    and any(isinstance(item, ast.Assign)
-                            and any(isinstance(target, ast.Name) and target.id == "withheld"
-                                    for target in item.targets)
-                            and isinstance(item.value, ast.Constant) and item.value.value is True
-                            for item in handler.body)
+                    and withholds_after_exception(handler)
                     for handler in statement.handlers
                 )
                 handles_forbidden = any(
                     handler.type is not None and _has_name(handler.type, "ForbiddenError")
-                    and any(isinstance(item, ast.Assign)
-                            and any(isinstance(target, ast.Name) and target.id == "withheld"
-                                    for target in item.targets)
-                            and isinstance(item.value, ast.Constant) and item.value.value is True
-                            for item in handler.body)
+                    and withholds_after_exception(handler)
                     for handler in statement.handlers
                 )
                 if not (direct_clearance and handles_superseded and handles_forbidden):
                     continue
-                for following in value[index + 1 :]:
-                    if not isinstance(following, ast.If) or ast.unparse(following.test) != "not withheld":
-                        continue
-                    publishes_response = any(
-                        isinstance(node, ast.Assign)
-                        and any(isinstance(target, ast.Attribute) and target.attr == "response_text"
-                                for target in node.targets)
-                        for node in following.body
-                    )
-                    if publishes_response:
-                        return True
+                if index + 1 >= len(value):
+                    continue
+                following = value[index + 1]
+                if not isinstance(following, ast.If) or ast.unparse(following.test) != "not withheld":
+                    continue
+                publishes_response = any(
+                    isinstance(node, ast.Assign)
+                    and any(isinstance(target, ast.Attribute) and target.attr == "response_text"
+                            for target in node.targets)
+                    for node in following.body
+                )
+                if publishes_response:
+                    return True
     return False
 
 

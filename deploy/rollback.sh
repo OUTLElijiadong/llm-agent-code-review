@@ -61,7 +61,9 @@ pending_state="$release_dir/pending.env"
 f2_activation_state="$release_dir/xiaoling-f2-activation.env"
 lock_dir="$(maintenance_lock_path)"
 mkdir -p "$(dirname "$lock_dir")"
-if [[ "$from_deploy_failure" != "1" ]]; then
+if [[ "$from_deploy_failure" == "1" ]]; then
+  assert_deploy_failure_lock_owner "$lock_dir"
+else
   acquire_directory_lock "$lock_dir"
   trap 'release_directory_lock "$lock_dir"' EXIT
 fi

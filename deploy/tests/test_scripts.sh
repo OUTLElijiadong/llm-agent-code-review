@@ -631,6 +631,26 @@ PY
         assert_not_contains "$docker_log" 'DROP DATABASE'
         assert_not_contains "$docker_log" 'upgrade head'
       fi ;;
+    rollback_internal_flag_no_lock_refused)
+      status_code=0
+      ./rollback.sh all --confirm ROLLBACK_APPLICATION --from-deploy-failure > "$output_file" 2>&1 || status_code=$?
+      [[ "$status_code" != 0 ]] || { echo '手工传入内部标记仍可绕过维护锁' >&2; exit 1; }
+      assert_contains "$output_file" '自动回滚缺少 deploy.sh 持有的维护锁'
+      assert_not_contains "$docker_log" 'compose up '
+      [[ ! -e "$MAINTENANCE_LOCK_DIR" ]] ;;
+    rollback_internal_flag_parent_allowed)
+      common_file="$PWD/lib/common.sh"
+      bash -c '
+        set -Eeuo pipefail
+        source "$1"
+        trap '\''release_directory_lock "$2"'\'' EXIT
+        mkdir "$2"
+        write_lock_owner "$2"
+        ./rollback.sh all --confirm ROLLBACK_APPLICATION --from-deploy-failure
+      ' deploy.sh "$common_file" "$MAINTENANCE_LOCK_DIR" > "$output_file" 2>&1
+      assert_contains "$docker_log" "compose up -d --no-deps --no-build --pull never backend | release=$previous_sha"
+      assert_contains "$workspace/releases/current.env" "RELEASE_SHA=$previous_sha"
+      [[ ! -e "$MAINTENANCE_LOCK_DIR" ]] ;;
     rollback_version|rollback_legacy|rollback_missing_evidence)
       if [[ "$test_case" != rollback_version ]]; then
         sed '/^APP_VERSION=/d' "$workspace/releases/previous.env" > "$workspace/releases/legacy.env"
@@ -859,7 +879,7 @@ run_release_binding_tests() {
   local workspace="$1/release-binding"
   local test_case failed=0 passed=0
   mkdir -p "$workspace"
-      for test_case in stopped_release_binding stopped_release_oneoff write_version legacy_labels legacy_git missing_evidence conflicting_labels wrong_revision invalid_version digest_changed ops_default_drift ops_masked_drift ops_running_drift ops_consistent ops_stopped_container restore_missing_image restore_missing_evidence restore_invalid_heads restore_pinned_image rollback_version rollback_legacy rollback_missing_evidence rollback_ledger_compatible rollback_ledger_empty_old rollback_ledger_written_old rollback_ledger_reference_without_schema rollback_ledger_invalid_json rollback_ledger_probe_failure rollback_ledger_probe_unknown rollback_ledger_db_failure rollback_ledger_schema_unknown rollback_ledger_legacy rollback_member_supported rollback_member_old rollback_member_unknown rollback_member_probe_failure rollback_chat_authority_compatible rollback_chat_authority_old_refused rollback_chat_authority_absent_119_aware_refused rollback_chat_authority_partial_refused rollback_chat_authority_revision_mismatch rollback_chat_authority_schema_unknown rollback_chat_authority_multiple_revisions rollback_chat_authority_graph_invalid rollback_f2_downgrade_refused rollback_f2_capable_allowed rollback_f2_initial_baseline_allowed rollback_f2_activation_pending_refused rollback_f2_activation_marker_symlink_refused rollback_f2_current_state_missing_refused rollback_f2_lock_state_refresh; do
+      for test_case in stopped_release_binding stopped_release_oneoff write_version legacy_labels legacy_git missing_evidence conflicting_labels wrong_revision invalid_version digest_changed ops_default_drift ops_masked_drift ops_running_drift ops_consistent ops_stopped_container restore_missing_image restore_missing_evidence restore_invalid_heads restore_pinned_image rollback_version rollback_legacy rollback_missing_evidence rollback_internal_flag_no_lock_refused rollback_internal_flag_parent_allowed rollback_ledger_compatible rollback_ledger_empty_old rollback_ledger_written_old rollback_ledger_reference_without_schema rollback_ledger_invalid_json rollback_ledger_probe_failure rollback_ledger_probe_unknown rollback_ledger_db_failure rollback_ledger_schema_unknown rollback_ledger_legacy rollback_member_supported rollback_member_old rollback_member_unknown rollback_member_probe_failure rollback_chat_authority_compatible rollback_chat_authority_old_refused rollback_chat_authority_absent_119_aware_refused rollback_chat_authority_partial_refused rollback_chat_authority_revision_mismatch rollback_chat_authority_schema_unknown rollback_chat_authority_multiple_revisions rollback_chat_authority_graph_invalid rollback_f2_downgrade_refused rollback_f2_capable_allowed rollback_f2_initial_baseline_allowed rollback_f2_activation_pending_refused rollback_f2_activation_marker_symlink_refused rollback_f2_current_state_missing_refused rollback_f2_lock_state_refresh; do
     if bash "$PWD/tests/test_scripts.sh" --release-case "$test_case" "$workspace/$test_case" > "$workspace/$test_case.log" 2>&1; then
       passed=$((passed + 1)); printf 'PASS %s\n' "$test_case"
     else
@@ -1036,6 +1056,37 @@ with tempfile.TemporaryDirectory(prefix="prism-chat-authority-probe-") as tempor
     print("xiaoling F2 probe: finalizer that swallows authority rejection refused PASS")
     runtime.write_text(original, encoding="utf-8")
 
+    class ResetWithheldAfterTrue(ast.NodeTransformer):
+        def __init__(self):
+            self.in_target = False
+            self.changed = False
+
+        def visit_FunctionDef(self, node):
+            previous = self.in_target
+            self.in_target = node.name == "_finalize_runtime"
+            node = self.generic_visit(node)
+            self.in_target = previous
+            return node
+
+        def visit_ExceptHandler(self, node):
+            if (self.in_target and node.type is not None
+                    and "SupersededByAuthorityDirectiveError" in ast.unparse(node.type)):
+                node.body.append(ast.Assign(
+                    targets=[ast.Name(id="withheld", ctx=ast.Store())], value=ast.Constant(value=False),
+                ))
+                self.changed = True
+                return node
+            return self.generic_visit(node)
+
+    tree = ast.parse(original)
+    reset_withheld = ResetWithheldAfterTrue()
+    changed_tree = reset_withheld.visit(tree)
+    assert reset_withheld.changed, "finalizer withheld reset mutation"
+    runtime.write_text(ast.unparse(ast.fix_missing_locations(changed_tree)), encoding="utf-8")
+    run_f2_probe("unsupported")
+    print("xiaoling F2 probe: finalizer cannot reset withheld after authority rejection PASS")
+    runtime.write_text(original, encoding="utf-8")
+
     tree = ast.parse(original)
     tree.body = [node for node in tree.body if not (
         isinstance(node, ast.FunctionDef) and node.name == "_authority_candidate_messages"
@@ -1116,6 +1167,25 @@ with tempfile.TemporaryDirectory(prefix="prism-chat-authority-probe-") as tempor
     runtime.write_text(ast.unparse(ast.fix_missing_locations(changed_tree)), encoding="utf-8")
     run_f2_probe("unsupported")
     print("xiaoling F2 probe: missing recent-context budget loop refused PASS")
+    runtime.write_text(original, encoding="utf-8")
+
+    tree = ast.parse(original)
+    render_context = next(node for node in tree.body
+                          if isinstance(node, ast.FunctionDef) and node.name == "_render_runtime_context")
+    recent_loop = next(node for node in render_context.body
+                       if isinstance(node, ast.For) and ast.unparse(node.iter) == "reversed(rendered)")
+    budget_guard_index = next(index for index, node in enumerate(recent_loop.body)
+                              if isinstance(node, ast.If) and ast.unparse(node.test) == "cost > budget")
+    append_index = next(index for index, node in enumerate(recent_loop.body)
+                        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+                        and isinstance(node.value.func, ast.Attribute) and node.value.func.attr == "append")
+    append_statement = recent_loop.body.pop(append_index)
+    if append_index < budget_guard_index:
+        budget_guard_index -= 1
+    recent_loop.body.insert(budget_guard_index, append_statement)
+    runtime.write_text(ast.unparse(ast.fix_missing_locations(tree)), encoding="utf-8")
+    run_f2_probe("unsupported")
+    print("xiaoling F2 probe: recent context append before budget guard refused PASS")
     runtime.write_text(original, encoding="utf-8")
 
     class HideBudgetControl(ast.NodeTransformer):
