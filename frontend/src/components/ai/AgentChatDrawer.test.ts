@@ -450,46 +450,55 @@ it('浮窗缩放柄支持键盘调整，消息滚动区与输入区保持分离'
   wrapper.unmount()
 })
 
-it.each([true, false])('本地导航持久化：审查员权限=%s，空服务端会话重开不误报未送达、不重放', async allowed => {
+it('普通端导航请求发送给团队，不直接跳转', async () => {
   const { createRouter, createMemoryHistory } = await import('vue-router')
   const router = createRouter({ history: createMemoryHistory(), routes: [
-    { path: '/', component: {} },
-    { path: '/audit', component: {}, meta: { title: '操作审计', roles: ['reviewer'], permissions: ['audit:view'] } },
+    { path: '/', component: {} }, { path: '/audit', component: {}, meta: { title: '操作审计' } },
   ] })
   await router.push('/')
-  const user = useUserStore()
-  user.profile = { id: 77, username: 'audit-reviewer', role: 'reviewer', status: 1 }
-  user.token = 'audit-token'
-  user.roles = ['reviewer']
-  user.permissions = new Set(allowed ? ['audit:view'] : [])
-  sessionApi.get.mockImplementation(async (_surface, session_id) => ({ surface: 'user', session_id, run: null, messages: [], pending: null }))
-  const push = vi.spyOn(router, 'push')
   const wrapper = await mountReadyDrawer(undefined, [router])
-  await settleAll()
-  await wrapper.get('.chat-input').setValue('打开审计')
-  await wrapper.get('.send-btn').trigger('click')
-  await settleAll()
-  const vm = wrapper.vm as any
-  const sessionId = vm.sessionId as string
-  const key = agentChatStorageKey('user', 77)
-  const saved = loadAgentChatSnapshot(sessionId, key)
-  expect(saved?.messages.filter(message => message.localAction)).toHaveLength(2)
-  expect(saved?.messages.at(-1)?.localAction?.status).toBe(allowed ? 'completed' : 'forbidden')
-  expect(router.currentRoute.value.path).toBe(allowed ? '/audit' : '/')
-  expect(streams.start).not.toHaveBeenCalled()
-  saveAgentChatSessions(key, [{ id: sessionId, title: '审计', createdAt: Date.now() }])
-  saveActiveAgentChatSession(key, sessionId)
-  wrapper.unmount()
-  push.mockClear()
-  const reopened = await mountReadyDrawer(undefined, [router])
   try {
+    await wrapper.get('.chat-input').setValue('打开审计')
+    await wrapper.get('.send-btn').trigger('click')
     await settleAll()
-    expect(reopened.text()).toContain(allowed ? '已打开「操作审计」' : '当前账号没有权限')
-    expect(reopened.text()).not.toContain('未在服务器留痕')
-    expect(reopened.find('.msg-error-card').exists()).toBe(false)
-    expect(push).not.toHaveBeenCalled()
-    expect(streams.start).not.toHaveBeenCalled()
-  } finally { reopened.unmount(); push.mockRestore() }
+    expect(streams.records).toHaveLength(1)
+    expect(streams.records[0].body.messages).toEqual([{ role: 'user', content: '打开审计' }])
+    expect(router.currentRoute.value.path).toBe('/')
+  } finally { wrapper.unmount() }
+})
+
+it('用户小菱启动新任务时自动附带当前页面位置', async () => {
+  const { createRouter, createMemoryHistory } = await import('vue-router')
+  const router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/reviews', component: {}, meta: { title: '审查任务' } },
+  ] })
+  await router.push('/reviews?section=assigned')
+  const wrapper = await mountReadyDrawer(undefined, [router])
+  try {
+    await wrapper.get('.chat-input').setValue('请帮我查看当前页面')
+    await wrapper.get('.send-btn').trigger('click')
+    await settleAll()
+
+    expect(streams.records).toHaveLength(1)
+    expect(streams.records[0].body.page_context).toEqual({ path: '/reviews', section: 'assigned' })
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('页面带非法栏目参数时仍能发起小菱对话', async () => {
+  const { createRouter, createMemoryHistory } = await import('vue-router')
+  const router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/reviews', component: {}, meta: { title: '审查任务' } },
+  ] })
+  await router.push('/reviews?section=%E5%BE%85%E5%A4%84%E7%90%86')
+  const wrapper = await mountReadyDrawer(undefined, [router])
+  try {
+    await wrapper.get('.chat-input').setValue('查看当前页面')
+    await wrapper.get('.send-btn').trigger('click')
+    await settleAll()
+    expect(streams.records[0].body.page_context).toEqual({ path: '/reviews', section: '' })
+  } finally { wrapper.unmount() }
 })
 
 it.each([
@@ -512,21 +521,18 @@ it.each([
   user.profile = profile
   user.roles = ['user']
   sessionApi.get.mockImplementation(async (surface, session_id) => ({ surface, session_id, run: null, messages: [], pending: null }))
-  const original = await mountReadyDrawer(undefined, [router])
-  await settleAll()
   const prompt = allowed ? '打开项目管理' : '打开操作审计'
-  await original.get('.chat-input').setValue(prompt)
-  await original.get('.send-btn').trigger('click')
-  await settleAll()
-  const sessionId = (original.vm as any).sessionId as string
+  const sessionId = `legacy-navigation-${allowed}-${timing}`
   const key = agentChatStorageKey('user', profile.id)
   const result = allowed ? '已打开「项目管理」。' : '当前账号没有权限'
-  expect(original.text()).toContain(result)
+  const localAction = { id: 'legacy-navigation', kind: 'navigation' as const,
+    status: allowed ? 'completed' as const : 'forbidden' as const, route: allowed ? '/projects' : '/audit' }
+  saveAgentChatSnapshot(sessionId, { messages: [
+    { role: 'user', content: prompt, localAction }, { role: 'assistant', content: result, localAction },
+  ], runStatus: null, updatedAt: Date.now() }, key)
   saveAgentChatSessions(key, [{ id: sessionId, title: prompt, createdAt: Date.now() }])
   saveActiveAgentChatSession(key, sessionId)
-  // reload 不保证触发 Vue 卸载钩子；必须在卸载补写之前已有完整快照。
   expect(loadAgentChatSnapshot(sessionId, key)?.messages.filter(message => message.localAction)).toHaveLength(2)
-  original.unmount()
 
   // 页面刷新销毁 Pinia；仅 token 已恢复，profile 由异步请求稍后写入。
   setActivePinia(createPinia())
@@ -1567,9 +1573,7 @@ describe('AgentChatDrawer Responses stream', () => {
     wrapper.unmount()
   })
 
-  it('回复正常结束后自动触发虚拟鼠标导航(小菱模拟点击跳转页面)', async () => {
-    // 装真实 memory 路由: 守卫放行 /reviews, 自动跟随会经虚拟鼠标导航事件
-    // 兜底执行 router.push(VirtualCursor 未挂载时 requestXiaolingNavigation 直接执行回调)
+  it('回复中的导航卡片等待用户点击，不自动跳转', async () => {
     const { createRouter, createMemoryHistory } = await import('vue-router')
     const router = createRouter({
       history: createMemoryHistory(),
@@ -1596,8 +1600,8 @@ describe('AgentChatDrawer Responses stream', () => {
     await finish(0)
     await settleAll()
 
-    // 虚拟鼠标导航已触发并完成跳转; 悬浮窗保持打开(跳转不关窗)
-    expect(pushSpy).toHaveBeenCalledWith('/reviews')
+    expect(pushSpy).not.toHaveBeenCalled()
+    expect(wrapper.find('.nav-directives').text()).toContain('查看审查任务')
     expect(wrapper.emitted('update:visible')).toBeFalsy()
     wrapper.unmount()
   })

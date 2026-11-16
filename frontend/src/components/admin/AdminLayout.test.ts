@@ -5,6 +5,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { useUserStore } from '@/stores/user'
 import { useWorkspaceStore } from '@/stores/workspace'
 
+vi.mock('@/services/enterpriseMembership', () => ({
+  hasEnterpriseMembership: vi.fn(async () => false),
+}))
+
 import AdminLayout from './AdminLayout.vue'
 import source from './AdminLayout.vue?raw'
 
@@ -51,10 +55,21 @@ describe('管理员手机端小菱入口', () => {
   })
 })
 
-it('管理员布局保留管理菜单，并单独显示论坛和支持入口', async () => {
+it('手机端导航按完整分组横向滚动，避免分类标题被压缩', () => {
+  const mobile = styles.split('@media (max-width: 920px)')[1]?.split('@media')[0] ?? ''
+  expect(mobile).toMatch(/\.admin-nav\s*\{[^}]*overflow-x:\s*auto;/s)
+  expect(mobile).toMatch(/\.admin-nav-group\s*\{[^}]*flex:\s*0 0 auto;/s)
+  expect(mobile).toMatch(/\.admin-nav-items\s*\{[^}]*display:\s*flex;/s)
+})
+
+it('管理员布局按平台、计费、工作区和社区分组，计费入口不再藏在另一套侧栏里', async () => {
   const paths = [
-    '/admin/governance', '/admin/operations', '/admin/security-center',
-    '/admin/access', '/admin/platform', '/forum', '/support',
+    '/admin/governance', '/admin/operations', '/admin/security-center', '/admin/access', '/admin/platform',
+    '/admin/billing-refunds', '/admin/billing-statements', '/admin/billing-reservations', '/admin/billing-reviews',
+    '/admin/billing-rate-reviews', '/admin/billing-refund-reviews', '/admin/billing-pricing',
+    '/admin/enterprise-asset-publications', '/usage', '/billing', '/enterprise', '/my-agents', '/agent-assets',
+    '/remote-pentests',
+    '/forum', '/support',
   ]
   const router = createRouter({
     history: createMemoryHistory(),
@@ -88,11 +103,30 @@ it('管理员布局保留管理菜单，并单独显示论坛和支持入口', a
   })
 
   try {
+    await flushPromises()
     expect(wrapper.find('[data-route="/admin/governance"]').exists()).toBe(true)
     expect(wrapper.find('[data-route="/admin/security-center"]').exists()).toBe(true)
     expect(wrapper.find('[data-route="/forum"]').exists()).toBe(true)
     expect(wrapper.find('[data-route="/support"]').exists()).toBe(true)
-    expect(wrapper.text()).toContain('社区与支持')
+    expect(wrapper.find('[data-route="/admin/billing-statements"]').exists()).toBe(true)
+    expect(wrapper.find('[data-route="/billing"]').exists()).toBe(true)
+    expect(wrapper.get('[data-route="/admin/platform"]').element.closest('.admin-nav-group')?.textContent)
+      .toContain('平台治理')
+    expect(wrapper.get('[data-route="/admin/billing-statements"]').element.closest('.admin-nav-group')?.textContent)
+      .toContain('计费与对账')
+    expect(wrapper.get('[data-route="/billing"]').element.closest('.admin-nav-group')?.textContent)
+      .toContain('计费与对账')
+    expect(wrapper.get('[data-route="/support"]').element.closest('.admin-nav-group')?.textContent)
+      .toContain('社区与支持')
+
+    workspace.setEnterpriseMembership(true)
+    await flushPromises()
+    expect(workspace.activeSpace).toBe('personal')
+    expect(wrapper.find('[data-route="/forum"]').exists()).toBe(false)
+
+    workspace.setEnterpriseMembership(false)
+    await flushPromises()
+    expect(wrapper.find('[data-route="/forum"]').exists()).toBe(true)
 
     workspace.activateEnterprise(25)
     await flushPromises()

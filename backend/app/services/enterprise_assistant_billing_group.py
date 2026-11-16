@@ -43,12 +43,15 @@ def frozen(run) -> int | None:
 
 
 def capture(db: Session, *, enterprise_id: int, user_id: int, conversation_id: int,
-            lock_company: bool = True, expected_token_version: int | None = None) -> BillingGroupSnapshot:
+            lock_company: bool = True, expected_token_version: int | None = None,
+            shared_member_lock: bool = False) -> BillingGroupSnapshot:
     """Take current locked attribution; caller must retain the transaction through use."""
     company = enterprise_org_service._company(db, enterprise_id, lock=lock_company)
     if company.status != "active":
         raise ForbiddenError("企业当前不可执行小菱任务")
-    member = enterprise_org_service.require_enterprise_member(db, enterprise_id, user_id, lock=True)
+    member = enterprise_org_service.require_enterprise_member(
+        db, enterprise_id, user_id, lock=True, shared_member_lock=shared_member_lock,
+    )
     room = enterprise_chat_service.get_conversation(
         db, enterprise_id, user_id, conversation_id, lock=True, shared_lock=True,
     )
@@ -57,6 +60,7 @@ def capture(db: Session, *, enterprise_id: int, user_id: int, conversation_id: i
             raise ForbiddenError("当前小组会话范围无效")
         enterprise_org_service.require_group_member(
             db, enterprise_id, int(room.group_id), user_id, allow_admin=False, lock=True, shared_group_lock=True,
+            shared_member_lock=shared_member_lock,
         )
         return BillingGroupSnapshot(group_id=int(room.group_id), membership_version=None, user_token_version=None)
     if room.kind not in {"company", "direct"}:
@@ -64,14 +68,16 @@ def capture(db: Session, *, enterprise_id: int, user_id: int, conversation_id: i
     version = member.billing_group_version
     if type(version) is not int or version < 0:
         raise ForbiddenError("成员计费归属版本无效")
-    account = db.query(User).filter_by(id=user_id, status=1).populate_existing().with_for_update().first()
+    account = (db.query(User).filter_by(id=user_id, status=1).populate_existing()
+               .with_for_update(read=shared_member_lock).first())
     if account is None or type(account.token_version) is not int or account.token_version < 0:
         raise ForbiddenError("账号状态无效，无法确定计费归属")
     if expected_token_version is not None and account.token_version != expected_token_version:
         raise ForbiddenError("登录状态已变化，请重新登录")
     memberships = (db.query(EnterpriseGroupMember)
                    .filter_by(enterprise_id=enterprise_id, user_id=user_id, status="active")
-                   .order_by(EnterpriseGroupMember.group_id.asc()).populate_existing().with_for_update().all())
+                   .order_by(EnterpriseGroupMember.group_id.asc()).populate_existing()
+                   .with_for_update(read=shared_member_lock).all())
     default_group_id = member.default_group_id
     if default_group_id is None:
         if memberships:
@@ -102,7 +108,8 @@ def validate(db: Session, run, *, lock_company: bool = True) -> int | None:
     if not runtime._CROSS_SCOPE_ATTRIBUTION_VERIFIED:
         raise BillingAttributionUnavailable("企业会话计费归属正在验证，暂不能继续执行小菱任务")
     live = capture(db, enterprise_id=int(run.enterprise_id), user_id=int(run.initiator_user_id),
-                   conversation_id=int(run.conversation_id), lock_company=lock_company)
+                   conversation_id=int(run.conversation_id), lock_company=lock_company,
+                   shared_member_lock=not lock_company)
     room = enterprise_chat_service.get_conversation(
         db, int(run.enterprise_id), int(run.initiator_user_id), int(run.conversation_id),
     )

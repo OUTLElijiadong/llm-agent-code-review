@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { currentPageContext } from '@/utils/pageContext'
 import { pageActionTargetHint, notifyCompletedPageAction, notifyVerifiedTeamPageActions, applyTeamResultToToolCalls } from '@/utils/agentPageActions'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { latestAssistantTarget, useChatAutoScroll } from '@/composables/useChatAutoScroll'
@@ -33,11 +34,10 @@ import { useAgentActivityStore } from '@/stores/agentActivity'
 import {
   extractAgentNavigations,
   isNavigationPathAllowed,
-  resolveLocalNavigationRequest,
   renderAuthorizedAgentMarkdown,
 } from '@/utils/agentNavigation'
 import { requestXiaolingNavigation } from '@/utils/xiaolingNavigation'
-import { mergeLocalNavigationMessages, performLocalNavigation, settleLocalNavigationSnapshot, type LocalNavigationAction } from '@/utils/agentLocalNavigation'
+import { mergeLocalNavigationMessages, type LocalNavigationAction } from '@/utils/agentLocalNavigation'
 import { useUserStore } from '@/stores/user'
 import type { AgentNavigateDirective } from '@/types/agentGuide'
 import type { AgentEvent, ClarifyPayload, ClarifyQuestion } from '@/types/agentEvent'
@@ -1662,8 +1662,16 @@ async function runResponse(payload: Record<string, unknown>, onDeferred?: () => 
   const requestedRunId = action === 'start'
     ? (typeof payload.run_id === 'string' && payload.run_id ? payload.run_id : createAgentResponseRunId())
     : (typeof payload.run_id === 'string' && payload.run_id ? payload.run_id : sessionRun.value?.run_id ?? '')
+  const activeRoute = router?.currentRoute?.value
   const requestPayload = action === 'start'
-    ? { ...payload, run_id: requestedRunId }
+    ? {
+      ...payload,
+      run_id: requestedRunId,
+      page_context: currentPageContext(
+        activeRoute?.path || window.location.pathname,
+        typeof activeRoute?.query?.section === 'string' ? activeRoute.query.section : '',
+      ),
+    }
     : payload
   if (action === 'start' && requestedRunId && !meshStart) {
     cancelUnconfirmedRunId.value = ''
@@ -1871,16 +1879,7 @@ async function runResponse(payload: Record<string, unknown>, onDeferred?: () => 
         )
         finishExistingTimelineToolCalls(activeRunId, terminalError)
         syncTimeline()
-        // 导航自动执行:回复正常结束后,虚拟鼠标滑向界面上的目标入口、
-        // 模拟真实点击并跳转页面(用户可见「小菱点的是这里」)。
-        // 「前往页面」按钮保留为降级入口(reduced-motion/光标未挂载时仍可手动点击);
-        // 失败/取消的回复不自动跳转;跳转不关闭悬浮窗。
-        if (event.type === 'response.completed' && !protocolError && textTarget?.navigations?.length) {
-          const directive = textTarget.navigations.find(
-            (item) => isNavigationPathAllowed(router, item.route, userStore),
-          )
-          if (directive) followNavigation(directive)
-        }
+        // 导航卡片交由用户点击；页面执行由站点团队及浏览器桥完成。
       }
       void nextTick().then(followIfPinned)
     },
@@ -2116,18 +2115,10 @@ async function sendMessage(): Promise<void> {
   const images = [...pendingImages.value]
   if ((!text && !images.length) || readingImages.value || loading.value || sessionRestoring.value || sessionBusy.value) return
 
-  const localNavigation = router && !images.length ? resolveLocalNavigationRequest(text, router, userStore) : null
-  const localAction: LocalNavigationAction | undefined = localNavigation ? {
-    id: messageId(), kind: 'navigation',
-    status: localNavigation.kind === 'navigate' ? 'pending' : 'forbidden',
-    route: localNavigation.directive?.route,
-  } : undefined
-
   messages.value.push({
     id: messageId(), role: 'user', content: text || '(图片)',
     images: images.length ? images.map((item) => item.dataUrl) : undefined,
     time: dayjs().format('HH:mm'),
-    localAction,
   })
   persistSnapshot()
   pendingImages.value = []
@@ -2141,44 +2132,6 @@ async function sendMessage(): Promise<void> {
   await nextTick()
   if (!scopeCurrent()) return
   forceScrollToBottom()
-
-  // 纯页面导航是确定性本地动作,不必为“打开某页”启动付费 Responses 循环。
-  // 权限仍由路由守卫裁决,实际跳转交给全局虚拟鼠标完成。
-  if (localNavigation && localAction) {
-    const directive = localNavigation.directive
-    messages.value.push({
-      id: messageId(),
-      role: 'assistant',
-      content: localNavigation.kind === 'navigate' && directive
-        ? `正在打开「${directive.label || '目标页面'}」…`
-        : '当前账号没有权限打开这个页面。',
-      time: dayjs().format('HH:mm'),
-      localAction,
-    })
-    persistSnapshot()
-    await nextTick()
-    if (!scopeCurrent()) return
-    scrollToBottom()
-    if (localNavigation.kind === 'navigate' && directive) {
-      const targetSessionId = sessionId.value, storageKey = chatStorageKey.value
-      const accountId = userStore.profile?.id, token = userStore.token
-      const ownsAccount = () => accountId === userStore.profile?.id && token === userStore.token
-      await performLocalNavigation(router, directive.route, directive.label || '目标页面',
-        () => scopeCurrent() && isNavigationPathAllowed(router, directive.route, userStore),
-        (status, content) => {
-          if (!ownsAccount()) return
-          settleLocalNavigationSnapshot(targetSessionId, storageKey, localAction.id, status, content)
-          if (!scopeCurrent()) return
-          for (const message of messages.value) {
-            if (message.localAction?.id !== localAction.id) continue
-            message.localAction = { ...message.localAction, status }
-            if (message.role === 'assistant') message.content = content
-          }
-          persistSnapshot()
-        }, ownsAccount)
-    }
-    return
-  }
 
   const currentUserMessage = [...conversationHistory()].reverse().find((item) => item.role === 'user')
   await runResponse({

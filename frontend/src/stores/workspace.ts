@@ -1,5 +1,6 @@
 import { defineStore, getActivePinia } from 'pinia'
 import { ref } from 'vue'
+import { hasEnterpriseMembership as requestEnterpriseMembership } from '@/services/enterpriseMembership'
 
 export type WorkspaceMode = 'personal' | 'enterprise'
 
@@ -48,7 +49,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const activeSpace = ref<WorkspaceMode>('personal')
   /** 只用于恢复 UI 选择；企业页面仍必须重新从服务端验证成员关系。 */
   const activeEnterpriseId = ref<number | null>(null)
+  /** null 表示尚未向服务端确认；公开论坛入口在确认前隐藏。 */
+  const hasEnterpriseMembership = ref<boolean | null>(null)
   let identityStamp: string | null = null
+  let identityToken: string | null = null
+  let membershipIdentity: string | null = null
+  let membershipRequestIdentity: string | null = null
+  let membershipRequest: Promise<boolean | null> | null = null
+  let membershipRevision = 0
 
   function persist(): void {
     if (!identityStamp) return
@@ -67,6 +75,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   function syncIdentity(userId: number | null | undefined, token: string | null | undefined): void {
     if (!userId || !token) {
       identityStamp = null
+      identityToken = null
+      membershipIdentity = null
+      membershipRequestIdentity = null
+      membershipRequest = null
+      membershipRevision += 1
+      hasEnterpriseMembership.value = false
       activeSpace.value = 'personal'
       activeEnterpriseId.value = null
       try { window.sessionStorage.removeItem(STORAGE_KEY) } catch { /* 可选的界面偏好 */ }
@@ -76,10 +90,56 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const nextIdentity = `${userId}:${tokenFingerprint(token)}`
     if (identityStamp === nextIdentity) return
     identityStamp = nextIdentity
+    identityToken = token
+    membershipIdentity = null
+    membershipRequestIdentity = null
+    membershipRequest = null
+    membershipRevision += 1
+    hasEnterpriseMembership.value = null
     const saved = readSavedWorkspace(nextIdentity)
     activeSpace.value = saved?.mode ?? 'personal'
     activeEnterpriseId.value = saved?.mode === 'enterprise' ? saved.enterpriseId : null
     if (!saved) persist()
+  }
+
+  /** 服务端成员目录决定账号能否访问公开论坛；本地空间选择不参与授权。 */
+  async function refreshEnterpriseMembership(): Promise<boolean | null> {
+    const requestedIdentity = identityStamp
+    const requestedToken = identityToken
+    if (!requestedIdentity || !requestedToken) return false
+    if (membershipIdentity === requestedIdentity && hasEnterpriseMembership.value !== null) {
+      return hasEnterpriseMembership.value
+    }
+    if (membershipRequestIdentity === requestedIdentity && membershipRequest) return membershipRequest
+
+    membershipRequestIdentity = requestedIdentity
+    const requestedRevision = membershipRevision
+    const request = requestEnterpriseMembership(requestedToken)
+      .then((isMember) => {
+        if (identityStamp !== requestedIdentity || membershipRevision !== requestedRevision) return null
+        hasEnterpriseMembership.value = isMember
+        membershipIdentity = requestedIdentity
+        return isMember
+      })
+      .catch(() => null)
+      .finally(() => {
+        if (membershipRequestIdentity === requestedIdentity) {
+          membershipRequestIdentity = null
+          membershipRequest = null
+        }
+      })
+    membershipRequest = request
+    return request
+  }
+
+  /** 企业页获得新鲜成员目录后同步账号类型提示，并让较早请求失效。 */
+  function setEnterpriseMembership(hasMembership: boolean): void {
+    if (!identityStamp) return
+    membershipRevision += 1
+    membershipRequestIdentity = null
+    membershipRequest = null
+    hasEnterpriseMembership.value = hasMembership
+    membershipIdentity = identityStamp
   }
 
   function activatePersonal(): void {
@@ -98,5 +158,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     persist()
   }
 
-  return { activeSpace, activeEnterpriseId, syncIdentity, activatePersonal, activateEnterprise }
+  return {
+    activeSpace,
+    activeEnterpriseId,
+    hasEnterpriseMembership,
+    syncIdentity,
+    refreshEnterpriseMembership,
+    setEnterpriseMembership,
+    activatePersonal,
+    activateEnterprise,
+  }
 })

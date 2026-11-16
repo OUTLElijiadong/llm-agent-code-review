@@ -28,6 +28,7 @@ from app.services import enterprise_assistant_service as assistant_service
 _LEASE_SECONDS = 300
 _MAX_LEASE_SECONDS = 900
 _MAX_RESULT_BYTES = 200_000
+_MAX_DEPENDENCY_CONTEXT_BYTES = 32_000
 _MAX_CALL_INDEX = 100
 _ACTIVE_PARENT_STATUSES = {"running", "awaiting_approval"}
 _ACTIVE_RUNTIME_STATUSES = {"running", "approving"}
@@ -143,6 +144,7 @@ def _lock_live_context(
         int(enterprise_id),
         int(team_locator.initiator_user_id),
         lock=True,
+        shared_member_lock=not lock_company,
         require_billing_access=require_active_billing,
     )
     room = enterprise_chat_service.get_conversation(
@@ -167,6 +169,7 @@ def _lock_live_context(
             allow_admin=False,
             lock=True,
             shared_group_lock=True,
+            shared_member_lock=not lock_company,
             require_billing_access=require_active_billing,
         )
 
@@ -366,6 +369,7 @@ def _team_reservations(db: Session, team: EnterpriseAgentTeam):
             BillingReservation.enterprise_id == team.enterprise_id,
         )
         .order_by(BillingReservation.id)
+        .populate_existing()
         .with_for_update()
         .all()
     )
@@ -461,6 +465,7 @@ def _require_approved_plan(db: Session, context: Mapping[str, Any]) -> None:
             int(team.enterprise_id),
             int(approval.decided_by_user_id),
             lock=True,
+            shared_member_lock=not bool(context.get("lock_company", True)),
             require_billing_access=bool(context.get("require_active_billing", True)),
         )
     elif approval.required_permission_code == "group_manager" and team.group_id is not None:
@@ -471,6 +476,8 @@ def _require_approved_plan(db: Session, context: Mapping[str, Any]) -> None:
             int(approval.decided_by_user_id),
             allow_admin=True,
             lock=True,
+            shared_group_lock=not bool(context.get("lock_company", True)),
+            shared_member_lock=not bool(context.get("lock_company", True)),
             require_billing_access=bool(context.get("require_active_billing", True)),
         )
     else:
@@ -496,6 +503,46 @@ def _check_team_deadline(context: Mapping[str, Any], *, now: datetime) -> None:
     deadline_at = context["team"].deadline_at
     if deadline_at is not None and deadline_at <= now:
         raise ForbiddenError("企业 Agent 团队已超过截止时间，禁止发送新的模型请求")
+
+
+def _provider_transaction_read_committed(db: Session) -> None:
+    """Avoid holding unrelated teams' MySQL next-key locks during an upstream call.
+
+    The team and authorization rows are still explicitly locked through send and
+    settlement. Only this new transaction uses READ COMMITTED; locking reads of
+    reservations remain current reads, and same-team inserts require the team lock.
+    """
+    if db.get_bind().dialect.name in {"mysql", "mariadb"}:
+        db.connection(execution_options={"isolation_level": "READ COMMITTED"})
+
+
+def _require_team_billing_clear_for_send(
+    db: Session,
+    context: Mapping[str, Any],
+    *,
+    current_request_key: str | None = None,
+) -> None:
+    team = context["team"]
+    pending_reservation_query = (
+        db.query(BillingReservation.id)
+        .filter(
+            BillingReservation.request_key.like(f"ent-team:{int(team.id)}:%"),
+            BillingReservation.enterprise_id == int(team.enterprise_id),
+            BillingReservation.status.in_(("reserved", "unknown")),
+        )
+        # Team callers may already hold an older REPEATABLE READ snapshot.
+        # This must be a current read so a committed hold from the previous
+        # team request cannot be missed before the next provider send.
+        .populate_existing()
+        .with_for_update()
+    )
+    if current_request_key is not None:
+        pending_reservation_query = pending_reservation_query.filter(
+            BillingReservation.request_key != current_request_key,
+        )
+    pending_reservation = pending_reservation_query.order_by(BillingReservation.id.asc()).first()
+    if team.status == "awaiting_reconciliation" or pending_reservation is not None:
+        raise ConflictError("企业 Agent 团队有未结算或待核对账单，已暂停新的模型请求")
 
 
 def _require_approved_plan_from_context(context: Mapping[str, Any]) -> None:
@@ -539,6 +586,61 @@ def _fail_unstarted_tasks_after_deadline(
             detail={"reason": "team_deadline_expired"},
         )
     _update_team_status(db, context, now=now)
+
+
+def _reject_unclaimed_dependency_task(
+    db: Session,
+    context: dict[str, Any],
+    *,
+    now: datetime,
+    error_code: str,
+    summary: str,
+) -> dict[str, Any]:
+    """Close invalid dependency work before provider execution without breaking the queue."""
+    team, task = context["team"], context["task"]
+    old_status = str(task.status)
+    reservations = _attempt_reservations(db, team, task, int(task.attempt_count))
+    awaiting_reconciliation = any(row.status in {"reserved", "unknown"} for row in reservations)
+    task.status = "awaiting_reconciliation" if awaiting_reconciliation else "failed"
+    task.completed_at = now
+    task.lease_token = None
+    task.lease_expires_at = None
+    task.next_attempt_at = None
+    try:
+        prior_errors = json.loads(task.errors_json or "[]")
+    except (TypeError, ValueError):
+        prior_errors = []
+    if not isinstance(prior_errors, list):
+        prior_errors = []
+    prior_errors.append({"attempt": int(task.attempt_count), "code": error_code[:64]})
+    task.errors_json = _canonical_json(prior_errors[-20:])
+    task.result_json = _canonical_json(
+        {
+            "status": "blocked",
+            "summary": summary[:2_000],
+            "errors": [{"code": error_code[:64]}],
+        }
+    )
+    context["task"] = task
+    if awaiting_reconciliation:
+        team.status = "awaiting_reconciliation"
+    _append_event(
+        db,
+        context,
+        event_type="task.dependency_rejected",
+        from_status=old_status,
+        to_status=str(task.status),
+        correlation_id=f"dependency:{int(task.id)}",
+        detail={"error_code": error_code[:64], "reservation_count": len(reservations)},
+    )
+    db.flush()
+    _update_team_status(db, context, now=now)
+    return {
+        "status": str(task.status),
+        "team_id": int(team.id),
+        "task_id": int(task.id),
+        "dependency_rejected": True,
+    }
 
 
 def _claim_task_in_tx(
@@ -608,16 +710,41 @@ def _claim_task_in_tx(
         return None
     if team.deadline_at is not None and team.deadline_at <= now:
         return None
-    dependency_keys = json.loads(task.dependency_keys_json or "[]")
+    try:
+        dependency_keys = json.loads(task.dependency_keys_json or "[]")
+    except (TypeError, ValueError):
+        _verify_approval_for_live_context(db, context)
+        return _reject_unclaimed_dependency_task(
+            db,
+            context,
+            now=now,
+            error_code="invalid_dependency_snapshot",
+            summary="前序任务配置已损坏，当前任务未发送模型请求。",
+        )
     if (
         not isinstance(dependency_keys, list)
         or any(not isinstance(key, str) for key in dependency_keys)
         or len(set(dependency_keys)) != len(dependency_keys)
     ):
-        raise ConflictError("企业 Agent 团队任务依赖快照无效")
+        _verify_approval_for_live_context(db, context)
+        return _reject_unclaimed_dependency_task(
+            db,
+            context,
+            now=now,
+            error_code="invalid_dependency_snapshot",
+            summary="前序任务配置无效，当前任务未发送模型请求。",
+        )
+    dependency_results = []
     if dependency_keys:
         if task.task_key in dependency_keys:
-            raise ConflictError("任务不能依赖自身")
+            _verify_approval_for_live_context(db, context)
+            return _reject_unclaimed_dependency_task(
+                db,
+                context,
+                now=now,
+                error_code="invalid_dependency_snapshot",
+                summary="任务不能依赖自身，当前任务未发送模型请求。",
+            )
         dependencies = (
             db.query(EnterpriseAgentTeamTask)
             .filter(
@@ -627,9 +754,67 @@ def _claim_task_in_tx(
             .all()
         )
         if len(dependencies) != len(dependency_keys):
-            raise ConflictError("企业 Agent 团队任务引用了不存在的依赖")
+            _verify_approval_for_live_context(db, context)
+            return _reject_unclaimed_dependency_task(
+                db,
+                context,
+                now=now,
+                error_code="missing_dependency",
+                summary="前序任务不存在，当前任务未发送模型请求。",
+            )
+        if any(row.status in {"failed", "cancelled", "suppressed"} for row in dependencies):
+            _verify_approval_for_live_context(db, context)
+            return _reject_unclaimed_dependency_task(
+                db,
+                context,
+                now=now,
+                error_code="dependency_not_completed",
+                summary="前序任务未成功完成，当前任务未发送模型请求。",
+            )
         if any(row.status != "completed" for row in dependencies):
             return None
+        max_input_tokens = context["plan"].get("max_input_tokens_per_call")
+        if type(max_input_tokens) is not int or max_input_tokens <= 0:
+            _verify_approval_for_live_context(db, context)
+            return _reject_unclaimed_dependency_task(
+                db,
+                context,
+                now=now,
+                error_code="invalid_dependency_budget",
+                summary="前序结果缺少有效的输入预算，当前任务未发送模型请求。",
+            )
+        dependency_context_limit = min(_MAX_DEPENDENCY_CONTEXT_BYTES, max_input_tokens // 4)
+        dependency_by_key = {row.task_key: row for row in dependencies}
+        dependency_context_bytes = 0
+        for dependency_key in dependency_keys:
+            dependency = dependency_by_key[dependency_key]
+            try:
+                result = _json_object(dependency.result_json, label="依赖结果")
+                dependency_entry = {
+                    "task_key": str(dependency.task_key),
+                    "title": str(dependency.title),
+                    "result": result,
+                }
+                dependency_context_bytes += len(_canonical_json(dependency_entry).encode("utf-8"))
+                if dependency_context_bytes > dependency_context_limit:
+                    _verify_approval_for_live_context(db, context)
+                    return _reject_unclaimed_dependency_task(
+                        db,
+                        context,
+                        now=now,
+                        error_code="dependency_result_too_large",
+                        summary="前序结果超过安全传递上限，当前任务未发送模型请求。",
+                    )
+                dependency_results.append(dependency_entry)
+            except ConflictError:
+                _verify_approval_for_live_context(db, context)
+                return _reject_unclaimed_dependency_task(
+                    db,
+                    context,
+                    now=now,
+                    error_code="invalid_dependency_result",
+                    summary="前序结果格式无效，当前任务未发送模型请求。",
+                )
     _verify_approval_for_live_context(db, context)
     old_status = task.status
     task.status = "running"
@@ -660,6 +845,7 @@ def _claim_task_in_tx(
         "title": task.title,
         "instructions": task.instructions,
         "input": json.loads(task.input_json or "{}"),
+        "dependency_results": dependency_results,
         "attempt": int(task.attempt_count),
         "lease_token": task.lease_token,
         "lease_generation": int(task.lease_generation),
@@ -718,7 +904,9 @@ def claim_next_task(
         result = claim_task(
             session_factory, enterprise_id=int(enterprise_id), task_id=task_id, now=now, lease_seconds=lease_seconds
         )
-        if result is not None and result.get("status") == "running":
+        if result is not None and (
+            result.get("status") == "running" or result.get("dependency_rejected") is True
+        ):
             return result
     return None
 
@@ -747,7 +935,18 @@ def renew_task_lease(
 
 def _update_team_status(db: Session, context: dict[str, Any], *, now: datetime) -> None:
     team = context["team"]
-    statuses = [row.status for row in db.query(EnterpriseAgentTeamTask.status).filter_by(team_id=team.id).all()]
+    # SessionLocal disables autoflush in production. Persist pending task transitions
+    # before a locking current read so the team aggregate sees this transaction and
+    # concurrently committed task transitions under MySQL REPEATABLE READ.
+    db.flush()
+    status_rows = (
+        db.query(EnterpriseAgentTeamTask.status)
+        .filter_by(team_id=team.id)
+        .order_by(EnterpriseAgentTeamTask.id.asc())
+        .with_for_update()
+        .all()
+    )
+    statuses = [row.status for row in status_rows]
     if statuses and all(status == "completed" for status in statuses):
         team.status = "completed"
         team.completed_at = now
@@ -1017,11 +1216,54 @@ def retry_task(
         from app.services import enterprise_assistant_runtime_service as parent_runtime
 
         parent_runtime._require_run_retry_controller(db, run, int(actor_user_id), room)
-        if team.stop_requested or task.status != "retryable" or int(task.attempt_count) >= int(task.max_attempts):
+        if team.stop_requested or team.status in {"cancelled", "completed", "failed", "suppressed"}:
             raise ConflictError("企业 Agent 团队任务当前不能显式重试")
-        if _has_request_reservation(_attempt_reservations(db, team, task, int(task.attempt_count))):
+        if task.status not in {"retryable", "awaiting_reconciliation"}:
+            raise ConflictError("企业 Agent 团队任务当前不能显式重试")
+        reservations = _team_reservations(db, team)
+        if any(row.status in {"reserved", "unknown"} for row in reservations):
+            raise PaymentRequiredError("团队仍有未结算账单；人工对账完成前禁止处理任务")
+        prefix = _reservation_prefix(team, task, int(task.attempt_count))
+        attempt_rows = [row for row in reservations if row.request_key.startswith(prefix)]
+        task_prefix = f"ent-team:{int(team.id)}:{int(task.id)}:"
+        task_rows = [row for row in reservations if row.request_key.startswith(task_prefix)]
+        from app.services import enterprise_assistant_billing_group as billing_group
+
+        if any(row.user_id != team.initiator_user_id or row.group_id != billing_group.frozen(run)
+               for row in task_rows):
+            raise ConflictError("任务账单归属不匹配，禁止处理")
+        if task.status == "awaiting_reconciliation":
+            if not attempt_rows or any(row.status not in {"released", "settled"} for row in task_rows):
+                raise PaymentRequiredError("任务账单终态证据不完整，不能处理")
+            if any(row.status == "settled" for row in task_rows):
+                old = task.status
+                task.status = "failed"
+                task.completed_at = now
+                try:
+                    prior_errors = json.loads(task.errors_json or "[]")
+                except (TypeError, ValueError):
+                    prior_errors = []
+                if not isinstance(prior_errors, list):
+                    prior_errors = []
+                task.errors_json = _canonical_json([
+                    *prior_errors[-19:],
+                    {"attempt": int(task.attempt_count), "code": "settled_result_unavailable"},
+                ])
+                _append_event(db, context, event_type="task.reconciliation_closed", from_status=old,
+                              to_status="failed", actor_user_id=int(actor_user_id),
+                              detail={"reason": "settled_result_unavailable"})
+                _update_team_status(db, context, now=now)
+                return {"team_id": int(team.id), "task_id": int(task.id), "status": "failed",
+                        "resolution": "settled_result_unavailable"}
+            if any(row.usage_state != "not_sent" or row.actual_milli is not None
+                   or row.provider_attempt_started_at is not None for row in task_rows):
+                raise PaymentRequiredError("任务释放记录缺少未发送证据，禁止重试")
+        elif _has_request_reservation(attempt_rows):
             raise PaymentRequiredError("该任务已有模型费用记录；人工对账前禁止重试")
+        if int(task.attempt_count) >= int(task.max_attempts):
+            raise ConflictError("企业 Agent 团队任务已达到重试次数上限")
         _verify_approval_for_live_context(db, context)
+        _check_team_deadline(context, now=now)
         old = task.status
         task.status = "queued"
         task.next_attempt_at = now
@@ -1033,8 +1275,9 @@ def retry_task(
             to_status="queued",
             actor_user_id=int(actor_user_id),
         )
-        team.status = "running"
-        return {"team_id": int(team.id), "task_id": int(task.id), "status": task.status}
+        _update_team_status(db, context, now=now)
+        return {"team_id": int(team.id), "task_id": int(task.id), "status": task.status,
+                **({"resolution": "released_not_sent"} if old == "awaiting_reconciliation" else {})}
 
 
 def cancel_team(
@@ -1178,6 +1421,7 @@ def metered_team_call(
         )
         _verify_approval_for_live_context(db, context)
         _check_lease(context, lease_token=lease_token, lease_generation=lease_generation, now=now)
+        _require_team_billing_clear_for_send(db, context)
         _check_team_deadline(context, now=now)
         team, task = context["team"], context["task"]
         plan = context["plan"]
@@ -1262,6 +1506,7 @@ def metered_team_call(
         _verify_approval_for_live_context(db, live)
         checked_at = _now()
         _check_lease(live, lease_token=lease_token, lease_generation=lease_generation, now=checked_at)
+        _require_team_billing_clear_for_send(db, live)
         _check_team_deadline(live, now=checked_at)
         current_task = live["task"]
         if (
@@ -1271,13 +1516,22 @@ def metered_team_call(
             raise ConflictError("企业 Agent 团队请求键已变化")
         live["task"].lease_expires_at = _now() + timedelta(seconds=_LEASE_SECONDS)
 
-    def send_guard(send: Callable, observed_key: str):
+    def send_guard(send: Callable, observed_key: str, record_success: Callable):
         send_started = False
+        outcome_error: BaseException | None = None
+        tool_counts = None
+        response = None
         try:
+            # Commit a durable marker before entering the provider call while
+            # the final team authorization transaction remains independently
+            # cancellable. A crash after this marker freezes the team for review.
+            with session_factory.begin() as db:
+                ledger.mark_model_attempt_started(db, observed_key)
             # Keep the same authorization rows locked until this one provider
             # request returns. A cancel/revoke operation therefore either wins
             # before send (and releases the hold) or waits for the active call.
             with session_factory.begin() as db:
+                _provider_transaction_read_committed(db)
                 # The current role snapshot holds a shared company row, in
                 # addition to member/group/run/task rows, until the provider
                 # returns. Organization writers still wait, while independent
@@ -1291,6 +1545,9 @@ def metered_team_call(
                 _verify_approval_for_live_context(db, live)
                 checked_at = _now()
                 _check_lease(live, lease_token=lease_token, lease_generation=lease_generation, now=checked_at)
+                _require_team_billing_clear_for_send(
+                    db, live, current_request_key=observed_key,
+                )
                 _check_team_deadline(live, now=checked_at)
                 current_task = live["task"]
                 if (
@@ -1309,17 +1566,32 @@ def metered_team_call(
                     )
                     .first()
                 )
-                if reservation is None:
+                if reservation is None or reservation.provider_attempt_started_at is None:
                     raise ConflictError("企业 Agent 团队模型预占已失效，拒绝发送")
                 current_task.lease_expires_at = _now() + timedelta(seconds=_MAX_LEASE_SECONDS)
                 send_started = True
-                return send()
+                try:
+                    response = send()
+                    with db.begin_nested():
+                        record_success(db, observed_key, response[0], response[1])
+                except BaseException as exc:
+                    outcome_error = exc
+                    if isinstance(exc, billing_metered_call.MeteredUsageValidationError):
+                        tool_counts = exc.tool_counts
+                    ledger.mark_unknown(
+                        db,
+                        observed_key,
+                        server_tool_search_calls=tool_counts[0] if tool_counts is not None else None,
+                        server_tool_fetch_calls=tool_counts[1] if tool_counts is not None else None,
+                    )
+                    live["team"].status = "awaiting_reconciliation"
+                    billing_event("billing.unknown")(db, observed_key)
         except BaseException as exc:
             if send_started:
                 raise
             try:
                 with session_factory.begin() as db:
-                    ledger.release_not_sent(db, observed_key)
+                    ledger.release_model_attempt_not_sent(db, observed_key)
                     billing_event("billing.not_sent")(db, observed_key)
             except Exception as release_error:  # noqa: BLE001 - preserve the hold for reconciliation
                 raise ledger.BillingError(
@@ -1328,6 +1600,12 @@ def metered_team_call(
             raise billing_metered_call.MeteredRequestNotSent(
                 "企业 Agent 运行在模型请求发出前已被取消或撤权；预占已释放",
             ) from exc
+        if outcome_error is not None:
+            raise billing_metered_call.MeteredOutcomeRecorded(
+                outcome_error,
+                tool_counts=tool_counts,
+            ) from outcome_error
+        return response
 
     return billing_metered_call.metered_call(
         session_factory=session_factory,

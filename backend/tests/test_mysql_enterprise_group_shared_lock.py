@@ -398,12 +398,12 @@ def test_mysql_company_team_default_group_aba_releases_reservation_before_send(
     def change_group_before_send_guard(**kwargs):
         original_send_guard = kwargs["send_guard"]
 
-        def change_then_send(send, request_key):
+        def change_then_send(send, request_key, record_success):
             with factory.begin() as mutation_db:
                 org.set_default_group(mutation_db, company_id, owner_id, member_id, group_b_id)
             with factory.begin() as mutation_db:
                 org.set_default_group(mutation_db, company_id, owner_id, member_id, group_a_id)
-            return original_send_guard(send, request_key)
+            return original_send_guard(send, request_key, record_success)
 
         kwargs["send_guard"] = change_then_send
         return original_metered_call(**kwargs)

@@ -5,47 +5,83 @@ import {
   ArrowDown,
   Cpu,
   DataAnalysis,
-  Histogram,
+  CreditCard,
   Lock,
   ChatLineSquare,
+  Connection,
   Setting,
   SwitchButton,
+  Tools,
   User,
 } from '@element-plus/icons-vue'
 
 import { useUserStore } from '@/stores/user'
+import { useWorkspaceStore } from '@/stores/workspace'
 import ProactivePageGuide from '@/components/ai/ProactivePageGuide.vue'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { isNavigationPathAllowed } from '@/utils/agentNavigation'
 import UserAvatar from '@/components/common/UserAvatar.vue'
+import { ADMIN_NAVIGATION_GROUPS, type AdminNavigationGroupKey } from '@/utils/adminNavigation'
 
 interface AdminMenuItem {
   path: string
   title: string
-  icon: typeof Histogram
-  group?: 'management' | 'community'
+  icon: typeof Cpu
 }
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const workspaceStore = useWorkspaceStore()
 const contentRef = ref<HTMLElement | null>(null)
 
 const menuItems: AdminMenuItem[] = [
-  { path: '/admin/governance', title: 'Agent 治理', icon: Cpu, group: 'management' },
-  { path: '/admin/operations', title: '运行与审计', icon: DataAnalysis, group: 'management' },
-  { path: '/admin/security-center', title: '安全中心', icon: Lock, group: 'management' },
-  { path: '/admin/access', title: '用户与权限', icon: User, group: 'management' },
-  { path: '/admin/platform', title: '平台配置', icon: Setting, group: 'management' },
-  { path: '/forum', title: '开发者论坛', icon: ChatLineSquare, group: 'community' },
-  { path: '/support', title: '支持中心与反馈', icon: ChatLineSquare, group: 'community' },
+  { path: '/admin/governance', title: 'Agent 治理', icon: Cpu },
+  { path: '/admin/operations', title: '运行与审计', icon: DataAnalysis },
+  { path: '/admin/security-center', title: '安全中心', icon: Lock },
+  { path: '/admin/access', title: '用户与权限', icon: User },
+  { path: '/admin/platform', title: '平台配置', icon: Setting },
+  { path: '/admin/enterprise-asset-publications', title: '企业 Agent 全局审批', icon: Cpu },
+  { path: '/admin/billing-refunds', title: '计费与退款', icon: CreditCard },
+  { path: '/admin/billing-statements', title: '渠道账单对账', icon: CreditCard },
+  { path: '/admin/billing-reservations', title: '模型账本对账', icon: CreditCard },
+  { path: '/admin/billing-reviews', title: '账本待复核', icon: CreditCard },
+  { path: '/admin/billing-rate-reviews', title: '费率待复核', icon: CreditCard },
+  { path: '/admin/billing-refund-reviews', title: '退款待审核', icon: CreditCard },
+  { path: '/admin/billing-pricing', title: '模型费率目录', icon: CreditCard },
+  { path: '/usage', title: '我的 Token 用量', icon: DataAnalysis },
+  { path: '/billing', title: '充值与订阅', icon: CreditCard },
+  { path: '/enterprise', title: '企业空间', icon: ChatLineSquare },
+  { path: '/my-agents', title: '我的 Agent', icon: Cpu },
+  { path: '/agent-assets', title: '共享 Agent 与 Skill', icon: Cpu },
+  { path: '/remote-pentests', title: '远程网站评估', icon: Connection },
+  { path: '/forum', title: '开发者论坛', icon: ChatLineSquare },
+  { path: '/support', title: '支持中心', icon: Tools },
 ]
 
 const visibleMenuItems = computed(() => (
   menuItems.filter((item) => (
-    isNavigationPathAllowed(router, item.path, userStore)
+    (item.path !== '/forum' || workspaceStore.hasEnterpriseMembership === false)
+    && isNavigationPathAllowed(router, item.path, userStore)
   ))
 ))
+
+const navigationGroups = computed(() => ADMIN_NAVIGATION_GROUPS.map((group) => ({
+  ...group,
+  items: group.paths
+    .map((path) => visibleMenuItems.value.find((item) => item.path === path))
+    .filter((item): item is AdminMenuItem => Boolean(item)),
+})).filter((group) => group.items.length > 0))
+const expandedGroups = ref<Partial<Record<AdminNavigationGroupKey, boolean>>>({})
+
+watch(
+  () => [userStore.profile?.id ?? null, userStore.token] as const,
+  ([userId, token]) => {
+    workspaceStore.syncIdentity(userId, token)
+    if (userId && token) void workspaceStore.refreshEnterpriseMembership()
+  },
+  { immediate: true },
+)
 
 const activePath = computed(() => {
   const found = visibleMenuItems.value.find(
@@ -74,10 +110,24 @@ function restorePageGuide(): void {
 watch(
   () => route.fullPath,
   async () => {
+    const activeGroup = navigationGroups.value.find((group) => group.items.some((item) => (
+      route.path === item.path || route.path.startsWith(`${item.path}/`)
+    )))
+    if (activeGroup) expandedGroups.value = { ...expandedGroups.value, [activeGroup.key]: true }
     await nextTick()
     contentRef.value?.scrollTo({ top: 0, behavior: 'auto' })
   },
 )
+
+function isGroupExpanded(key: AdminNavigationGroupKey): boolean {
+  if (Object.prototype.hasOwnProperty.call(expandedGroups.value, key)) return expandedGroups.value[key] === true
+  const group = navigationGroups.value.find((item) => item.key === key)
+  return Boolean(group?.items.some((item) => route.path === item.path || route.path.startsWith(`${item.path}/`)))
+}
+
+function toggleGroup(key: AdminNavigationGroupKey): void {
+  expandedGroups.value = { ...expandedGroups.value, [key]: !isGroupExpanded(key) }
+}
 
 /**
  * 退出当前账号并回到登录页。
@@ -104,29 +154,37 @@ async function logout(): Promise<void> {
       <div class="admin-brand">
         <span class="prism-mark"></span>
         <div>
-          <div class="admin-logo font-display">Prism 管理后台</div>
-          <div class="admin-sub font-mono">智能体治理</div>
+          <div class="admin-logo font-display">Prism</div>
+          <div class="admin-sub font-mono">平台管理</div>
         </div>
       </div>
       <nav class="admin-nav" aria-label="管理与社区导航">
-        <template v-for="(item, index) in visibleMenuItems" :key="item.path">
-          <div
-            v-if="item.group === 'community' && visibleMenuItems[index - 1]?.group !== 'community'"
-            class="admin-nav-section"
-            aria-hidden="true"
-          >社区与支持</div>
+        <section v-for="group in navigationGroups" :key="group.key" class="admin-nav-group">
           <button
             type="button"
-            class="admin-nav-item"
-            :class="{ 'is-active': activePath === item.path }"
-            :data-route="item.path"
-            :aria-current="activePath === item.path ? 'page' : undefined"
-            @click="go(item.path)"
+            class="admin-nav-section"
+            :aria-expanded="isGroupExpanded(group.key)"
+            @click="toggleGroup(group.key)"
           >
-            <el-icon><component :is="item.icon" /></el-icon>
-            <span>{{ item.title }}</span>
+            <span>{{ group.title }}</span>
+            <el-icon :class="{ 'is-folded': !isGroupExpanded(group.key) }"><ArrowDown /></el-icon>
           </button>
-        </template>
+          <div v-show="isGroupExpanded(group.key)" class="admin-nav-items">
+            <button
+              v-for="item in group.items"
+              :key="item.path"
+              type="button"
+              class="admin-nav-item"
+              :class="{ 'is-active': activePath === item.path }"
+              :data-route="item.path"
+              :aria-current="activePath === item.path ? 'page' : undefined"
+              @click="go(item.path)"
+            >
+              <el-icon><component :is="item.icon" /></el-icon>
+              <span>{{ item.title }}</span>
+            </button>
+          </div>
+        </section>
       </nav>
     </aside>
 
@@ -258,11 +316,37 @@ async function logout(): Promise<void> {
 }
 
 .admin-nav-section {
-  margin: 18px 12px 4px;
+  width: 100%;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 8px 0 4px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
   color: rgba(255, 255, 255, 0.44);
+  background: transparent;
   font-size: 11px;
   line-height: 16px;
   white-space: nowrap;
+  text-align: left;
+  cursor: pointer;
+}
+
+.admin-nav-section:hover,
+.admin-nav-section[aria-expanded="true"] {
+  color: rgba(255, 255, 255, 0.74);
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.admin-nav-section :deep(.el-icon) {
+  transition: transform var(--transition-fast);
+}
+
+.admin-nav-section :deep(.el-icon.is-folded) {
+  transform: rotate(-90deg);
 }
 
 .admin-nav-item::before {
@@ -439,13 +523,21 @@ async function logout(): Promise<void> {
   }
 
   .admin-nav-section {
-    display: flex;
-    align-items: center;
     flex: 0 0 auto;
     min-height: 40px;
-    margin: 0 4px 0 10px;
-    padding-left: 10px;
-    border-left: 1px solid rgba(255, 255, 255, 0.2);
+    width: auto;
+    margin: 0 4px;
+    padding: 0 10px;
+  }
+
+  .admin-nav-group {
+    flex: 0 0 auto;
+  }
+
+  .admin-nav-items {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 6px;
   }
 
   .admin-content {

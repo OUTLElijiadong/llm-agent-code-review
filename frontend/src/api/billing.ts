@@ -124,6 +124,8 @@ export interface BillingReservationReconciliationEvent {
   input_tokens: number | null
   output_tokens: number | null
   tool_successful_calls: 0 | 1 | null
+  model_search_calls_evidence?: number | null
+  model_fetch_calls_evidence?: number | null
   actual_milli: number | null
   evidence_reference: string | null
   evidence_sha256: string | null
@@ -161,6 +163,7 @@ export interface BillingReservationReconciliation {
   has_tool_rate_snapshot: boolean
   has_provider_snapshot: boolean
   can_settle: boolean
+  requires_model_tool_evidence?: boolean
   can_release_not_sent: boolean
   can_recover_stale_attempt: boolean
   settlement_block_reasons: string[]
@@ -423,6 +426,8 @@ export function createBillingOrder(input: {
   client_request_id: string
   enterprise_id?: number
   enterprise_name?: string
+  expected_pricing_version?: string
+  expected_amount_fen?: number
 }) {
   return post<BillingOrder>('/billing/orders', input)
 }
@@ -561,6 +566,8 @@ export function proposeBillingReservationReconciliation(reservationId: number, i
   input_tokens?: number
   output_tokens?: number
   tool_successful_calls?: 0 | 1
+  model_search_calls_evidence?: number
+  model_fetch_calls_evidence?: number
   evidence_reference: string
   evidence_sha256: string
   note: string

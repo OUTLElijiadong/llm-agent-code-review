@@ -115,11 +115,14 @@ onBeforeUnmount(() => { ++generation })
           <dt v-if="selected.reservation.billable_kind === 'model'">Token</dt>
           <dd v-if="selected.reservation.billable_kind === 'model'">输入 {{ selected.proposal.input_tokens ?? '—' }} · 输出 {{ selected.proposal.output_tokens ?? '—' }}</dd>
           <dt v-else>成功次数</dt><dd v-if="selected.reservation.billable_kind !== 'model'">{{ selected.proposal.tool_successful_calls ?? '—' }}</dd>
+          <template v-if="selected.proposal.model_search_calls_evidence != null && selected.proposal.model_fetch_calls_evidence != null">
+            <dt>外部证据计数</dt><dd>管理员提交：Search {{ selected.proposal.model_search_calls_evidence }} · Fetch {{ selected.proposal.model_fetch_calls_evidence }}</dd>
+          </template>
           <dt>证据引用</dt><dd>{{ selected.proposal.evidence_reference || '—' }}</dd>
           <dt>证据摘要</dt><dd class="hash">{{ selected.proposal.evidence_sha256 || '—' }}</dd>
           <dt>提案说明</dt><dd>{{ selected.proposal.note }}</dd>
         </dl>
-        <p>请独立核验外部证据后决定。</p>
+        <p>请独立核验管理员提交的外部证据后决定；系统不会自动验证证据真实性。</p>
         <p v-if="selected.proposal.actor_id === userId" role="status">不能复核自己的提案。</p>
         <template v-else>
           <label for="c4-review-note">复核说明</label>

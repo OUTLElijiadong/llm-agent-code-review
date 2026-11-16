@@ -28,9 +28,23 @@ vi.mock('qrcode', () => ({ default: { toDataURL: mock.qr } }))
 import BillingCenter from './BillingCenter.vue'
 import { useUserStore } from '@/stores/user'
 
-const pricing = (salesEnabled: boolean) => ({
+function mountBillingCenter() {
+  return mount(BillingCenter, {
+    global: {
+      stubs: {
+        'el-dialog': {
+          props: ['modelValue'],
+          template: '<div v-if="modelValue" class="payment-dialog-stub"><slot /><slot name="footer" /></div>',
+        },
+      },
+    },
+  })
+}
+
+const pricing = (salesEnabled: boolean, version = 'catalog-v1', creditPackPriceFen = 400) => ({
   currency: 'CNY' as const,
-  credit_pack: { credits: 1000, price_fen: 400 },
+  pricing_version: version,
+  credit_pack: { credits: 1000, price_fen: creditPackPriceFen },
   reviewer_month: { credits: 5000, price_fen: 4900 },
   enterprise_seat_month: { credits: 5000, price_fen: 6900 },
   model_milli_per_token: {}, billable_models: [],
@@ -64,7 +78,7 @@ describe('计费中心', () => {
     mock.getOrder.mockImplementation(async (id: string) => id === 'order-a' ? a : b)
     let finishA!: (value: unknown) => void
     mock.getRefund.mockReturnValueOnce(new Promise(resolve => { finishA = resolve })).mockResolvedValueOnce(null)
-    const wrapper = mount(BillingCenter); await flushPromises()
+    const wrapper = mountBillingCenter(); await flushPromises()
     let buttons = wrapper.findAll('button').filter(item => item.text() === '查看')
     await buttons[0]!.trigger('click'); await flushPromises()
     buttons = wrapper.findAll('button').filter(item => item.text() === '查看')
@@ -84,7 +98,7 @@ describe('计费中心', () => {
     mock.getOrder.mockImplementation(async (id: string) => id === 'order-a' ? a : b)
     let finishA!: (value: string) => void
     mock.qr.mockReturnValueOnce(new Promise(resolve => { finishA = resolve })).mockResolvedValueOnce('qr-b')
-    const wrapper = mount(BillingCenter); await flushPromises()
+    const wrapper = mountBillingCenter(); await flushPromises()
     let buttons = wrapper.findAll('button').filter(item => item.text() === '查看')
     await buttons[0]!.trigger('click'); await flushPromises()
     buttons = wrapper.findAll('button').filter(item => item.text() === '查看')
@@ -104,7 +118,7 @@ describe('计费中心', () => {
     mock.wallet.mockResolvedValueOnce({ available_milli: 1_000_000 })
       .mockReturnValueOnce(new Promise(resolve => { finishWallet = resolve }))
       .mockResolvedValue({ available_milli: 9_000_000 })
-    const wrapper = mount(BillingCenter); await flushPromises()
+    const wrapper = mountBillingCenter(); await flushPromises()
     await wrapper.findAll('button').find(item => item.text() === '查看')!.trigger('click'); await flushPromises()
     await wrapper.findAll('button').find(item => item.text() === '查询支付状态')!.trigger('click'); await flushPromises()
     useUserStore().profile!.id = 2; await flushPromises()
@@ -127,7 +141,7 @@ describe('计费中心', () => {
       ? Promise.resolve({ available_milli: 9_000_000 })
       : mock.companyWallet.mock.calls.filter(call => call[0] === 10).length > 1
         ? new Promise(resolve => { finishWallet = resolve }) : Promise.resolve({ available_milli: 1_000_000 }))
-    const wrapper = mount(BillingCenter); await flushPromises()
+    const wrapper = mountBillingCenter(); await flushPromises()
     await wrapper.findAll('button').find(item => item.text() === '企业账户')!.trigger('click'); await flushPromises()
     await wrapper.findAll('button').find(item => item.text() === '查看')!.trigger('click'); await flushPromises()
     await wrapper.findAll('button').find(item => item.text() === '查询支付状态')!.trigger('click'); await flushPromises()
@@ -148,10 +162,11 @@ describe('计费中心', () => {
       if (this === sessionStorage) throw new Error('blocked')
       set.call(this, key, value)
     })
-    const wrapper = mount(BillingCenter); await flushPromises()
-    const button = wrapper.findAll('button').find(item => item.text() === '创建支付订单')!
-    await button.trigger('click'); await flushPromises()
-    await button.trigger('click'); await flushPromises()
+    const wrapper = mountBillingCenter(); await flushPromises()
+    const open = () => wrapper.findAll('button').find(item => item.text() === '选择支付方式')!
+    const confirm = () => wrapper.findAll('button').find(item => item.text() === '确认并创建订单')!
+    await open().trigger('click'); await confirm().trigger('click'); await flushPromises()
+    await open().trigger('click'); await confirm().trigger('click'); await flushPromises()
     expect(mock.createOrder).toHaveBeenCalledTimes(2)
     expect(mock.createOrder.mock.calls[0]![0].client_request_id).toBe(mock.createOrder.mock.calls[1]![0].client_request_id)
     expect(wrapper.text()).toContain('刷新页面后')
@@ -160,13 +175,55 @@ describe('计费中心', () => {
   })
 
   it('展示个人余额，并在销售门关闭时禁用支付下单', async () => {
-    const wrapper = mount(BillingCenter)
+    const wrapper = mountBillingCenter()
     await flushPromises()
     expect(wrapper.text()).toContain('1,234')
     expect(wrapper.text()).toContain('线上收款暂未开放')
-    const button = wrapper.findAll('button').find(item => item.text() === '创建支付订单')!
+    const button = wrapper.findAll('button').find(item => item.text() === '选择支付方式')!
     expect(button.attributes('disabled')).toBeDefined()
     expect(mock.createOrder).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('用户核价时关闭弹窗，迟到的报价不会创建订单或影响重新打开的确认', async () => {
+    let finishOld!: (value: ReturnType<typeof pricing>) => void
+    let finishNew!: (value: ReturnType<typeof pricing>) => void
+    mock.pricing.mockResolvedValueOnce(pricing(true))
+      .mockReturnValueOnce(new Promise(resolve => { finishOld = resolve }))
+      .mockReturnValueOnce(new Promise(resolve => { finishNew = resolve }))
+    mock.createOrder.mockRejectedValue(new Error('offline'))
+    const wrapper = mountBillingCenter(); await flushPromises()
+    const open = () => wrapper.findAll('button').find(item => item.text() === '选择支付方式')!
+    const confirm = () => wrapper.findAll('button').find(item => item.text() === '确认并创建订单')!
+    await open().trigger('click')
+    await confirm().trigger('click')
+    await wrapper.findAll('button').find(item => item.text() === '返回')!.trigger('click')
+    expect(wrapper.find('.payment-dialog-stub').exists()).toBe(false)
+    await open().trigger('click')
+    await confirm().trigger('click')
+    finishOld(pricing(true)); await flushPromises()
+    expect(mock.createOrder).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('正在核对价格')
+    finishNew(pricing(true)); await flushPromises()
+    expect(mock.createOrder).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('审查员月卡不受隐藏的积分包数量影响，弹窗只显示商品和金额', async () => {
+    mock.pricing.mockResolvedValue(pricing(true))
+    const wrapper = mountBillingCenter()
+    await flushPromises()
+    await wrapper.get('input[type="number"]').setValue('0')
+    await wrapper.get('select').setValue('reviewer_month')
+
+    const open = wrapper.findAll('button').find(item => item.text() === '选择支付方式')!
+    expect(open.attributes('disabled')).toBeUndefined()
+    await open.trigger('click')
+
+    const dialog = wrapper.get('.payment-dialog-stub')
+    expect(dialog.text()).toContain('个人审查员月度会员')
+    expect(dialog.text()).toContain('¥49.00')
+    expect(dialog.text()).not.toContain('数量')
     wrapper.unmount()
   })
 
@@ -181,12 +238,17 @@ describe('计费中心', () => {
       order_no: 'pr_personal_1', product: 'personal_credits', amount_fen: 400, quantity: 1,
       channel: 'alipay', status: 'paid', payment_status: 'paid', created_at: '2026-11-01T00:00:00',
     })
-    const wrapper = mount(BillingCenter)
+    const wrapper = mountBillingCenter()
     await flushPromises()
-    await wrapper.findAll('button').find(item => item.text() === '创建支付订单')!.trigger('click')
+    await wrapper.findAll('button').find(item => item.text() === '选择支付方式')!.trigger('click')
+    expect(wrapper.find('.payment-dialog-stub').exists()).toBe(true)
+    expect(wrapper.find('.payment-dialog-stub').text()).toContain('¥4.00')
+    expect(mock.createOrder).not.toHaveBeenCalled()
+    await wrapper.findAll('button').find(item => item.text() === '确认并创建订单')!.trigger('click')
     await flushPromises()
     expect(mock.createOrder).toHaveBeenCalledWith(expect.objectContaining({
       product: 'personal_credits', quantity: 1, channel: 'alipay', client_request_id: expect.any(String),
+      expected_pricing_version: 'catalog-v1', expected_amount_fen: 400,
     }))
     expect(wrapper.get('img[alt="支付二维码，请使用对应支付应用扫码"]').attributes('src')).toBe('data:image/png;base64,qr')
     expect(wrapper.text()).toContain('等待支付')
@@ -205,13 +267,14 @@ describe('计费中心', () => {
       channel: 'wechat', status: 'created', payment_status: 'ready', payment_code_url: 'weixin://pay/order-1',
       created_at: '2026-11-01T00:00:00',
     })
-    const wrapper = mount(BillingCenter)
+    const wrapper = mountBillingCenter()
     await flushPromises()
     await wrapper.findAll('button').find(item => item.text() === '企业账户')!.trigger('click')
     await wrapper.get('input[autocomplete="organization"]').setValue('棱镜研发公司')
     await wrapper.get('input[type="number"]').setValue('3')
-    await wrapper.findAll('button').find(item => item.text() === '微信支付')!.trigger('click')
-    await wrapper.findAll('button').find(item => item.text() === '创建企业支付订单')!.trigger('click')
+    await wrapper.findAll('button').find(item => item.text() === '选择支付方式')!.trigger('click')
+    await wrapper.get('input[type="radio"][value="wechat"]').setValue()
+    await wrapper.findAll('button').find(item => item.text() === '确认并创建订单')!.trigger('click')
     await flushPromises()
     expect(mock.createOrder).toHaveBeenCalledWith(expect.objectContaining({
       product: 'enterprise_create', quantity: 3, channel: 'wechat', enterprise_name: '棱镜研发公司',
@@ -220,12 +283,39 @@ describe('计费中心', () => {
     wrapper.unmount()
   })
 
+  it('既有企业的续费确认弹窗明确显示付款企业', async () => {
+    mock.pricing.mockResolvedValue(pricing(true))
+    mock.listEnterprises.mockResolvedValue([{ id: 31, name: '棱镜研发', role: 'admin', status: 'active' }])
+    const wrapper = mountBillingCenter()
+    await flushPromises()
+    await wrapper.findAll('button').find(item => item.text() === '企业账户')!.trigger('click')
+    await wrapper.findAll('button').find(item => item.text() === '选择支付方式')!.trigger('click')
+
+    expect(wrapper.get('.payment-dialog-stub').text()).toContain('棱镜研发')
+    wrapper.unmount()
+  })
+
+  it('确认下单前刷新报价，发现金额变化时要求重新确认且不提前下单', async () => {
+    mock.pricing.mockResolvedValueOnce(pricing(true, 'catalog-v1', 400))
+      .mockResolvedValue(pricing(true, 'catalog-v2', 550))
+    const wrapper = mountBillingCenter()
+    await flushPromises()
+    await wrapper.findAll('button').find(item => item.text() === '选择支付方式')!.trigger('click')
+    await wrapper.findAll('button').find(item => item.text() === '确认并创建订单')!.trigger('click')
+    await flushPromises()
+
+    expect(mock.createOrder).not.toHaveBeenCalled()
+    expect(wrapper.get('.payment-dialog-stub').text()).toContain('¥5.50')
+    expect(wrapper.text()).toContain('价格已更新')
+    wrapper.unmount()
+  })
+
   it('仅显示企业所有者或管理员的企业钱包入口', async () => {
     mock.listEnterprises.mockResolvedValue([
       { id: 10, name: '甲公司', role: 'owner', status: 'active' },
       { id: 20, name: '乙公司', role: 'member', status: 'active' },
     ])
-    const wrapper = mount(BillingCenter)
+    const wrapper = mountBillingCenter()
     await flushPromises()
     await wrapper.findAll('button').find(item => item.text() === '企业账户')!.trigger('click')
     expect(wrapper.text()).toContain('甲公司 企业积分')
@@ -243,7 +333,7 @@ describe('计费中心', () => {
     mock.enterpriseOrders.mockResolvedValue([row])
     mock.getOrder.mockResolvedValue(row)
 
-    const wrapper = mount(BillingCenter)
+    const wrapper = mountBillingCenter()
     await flushPromises()
     await wrapper.findAll('button').find(item => item.text() === '企业账户')!.trigger('click')
     await flushPromises()
@@ -262,13 +352,14 @@ describe('计费中心', () => {
     mock.pricing.mockResolvedValue(pricing(true))
     let resolveOld!: (value: unknown) => void
     mock.createOrder.mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve }))
-    const wrapper = mount(BillingCenter)
+    const wrapper = mountBillingCenter()
     await flushPromises()
-    await wrapper.findAll('button').find(item => item.text() === '创建支付订单')!.trigger('click')
+    await wrapper.findAll('button').find(item => item.text() === '选择支付方式')!.trigger('click')
+    await wrapper.findAll('button').find(item => item.text() === '确认并创建订单')!.trigger('click')
     await vi.waitFor(() => expect(mock.createOrder).toHaveBeenCalledTimes(1))
 
     useUserStore().profile!.id = 2
-    await vi.waitFor(() => expect(mock.pricing).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(mock.pricing).toHaveBeenCalledTimes(3))
     resolveOld({
       order_no: 'pr_old_account', product: 'personal_credits', amount_fen: 400, quantity: 1,
       channel: 'alipay', status: 'created', payment_status: 'ready', payment_code_url: 'alipay://old-account',

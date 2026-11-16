@@ -16,6 +16,26 @@ class MeteredRequestNotSent(ledger.BillingError):
     """The authorization fence rejected the call before invoking its provider."""
 
 
+class MeteredOutcomeRecorded(Exception):
+    """A guarded caller committed an unknown outcome before releasing its lock."""
+
+    def __init__(self, original: BaseException, *, tool_counts=None) -> None:
+        super().__init__(str(original))
+        self.original = original
+        self.original_traceback = original.__traceback__
+        self.tool_counts = tool_counts
+
+
+class MeteredUsageValidationError(ledger.BillingError):
+    """Provider replied, but its usage cannot be safely settled."""
+
+    def __init__(self, original: BaseException, *, tool_counts=None) -> None:
+        super().__init__(str(original))
+        self.original = original
+        self.original_traceback = original.__traceback__
+        self.tool_counts = tool_counts
+
+
 def provider_tool_usage_counts(usage):
     """读取可审计的供应商服务端工具成功计数；不推断缺失计数为零。"""
     if not isinstance(usage, Mapping) or "server_tool_use" not in usage:
@@ -44,9 +64,11 @@ def metered_call(*, session_factory, request_key: str, model_name: str, user_id:
                  send_guard=None, on_reserved=None, on_unknown=None, on_settled=None):
     """Commit a trusted upper-bound hold before `send`, then settle trusted usage.
 
-    `send` must return `(result, usage_mapping)`. Optional `send_guard(send, request_key)`
-    may serialize the final authorization fence with the provider request. On transport failure or missing
-    usage the hold remains unknown for reconciliation; the request is not retried.
+    `send` must return `(result, usage_mapping)`. Optional
+    `send_guard(send, request_key, record_success)` may serialize the final
+    authorization fence, provider request, and successful settlement in one
+    caller-owned transaction. On transport failure or missing usage the hold
+    remains unknown for reconciliation; the request is not retried.
     Caller must authenticate and authorize context, supply a provable token bound,
     and provide the validated identity of the exact managed upstream endpoint.
     """
@@ -72,11 +94,53 @@ def metered_call(*, session_factory, request_key: str, model_name: str, user_id:
         if on_reserved is not None:
             on_reserved(db, request_key)
     tool_counts = None
+
+    def send_with_validated_usage():
+        result, usage = send()
+        try:
+            counts = provider_tool_usage_counts(usage)
+            verify_priced_provider_usage(usage)
+            input_tokens = usage_tokens(usage, "prompt_tokens", "input_tokens")
+            output_tokens = usage_tokens(usage, "completion_tokens", "output_tokens")
+            if input_tokens is None or output_tokens is None:
+                raise ledger.BillingError("模型返回用量缺失，待人工对账")
+            if input_tokens > max_input_tokens or output_tokens > max_output_tokens:
+                raise ledger.BillingError("模型实际用量超过预占上限，待人工对账")
+        except BaseException as exc:
+            raise MeteredUsageValidationError(exc, tool_counts=counts if "counts" in locals() else None) from exc
+        return result, usage
+
+    def record_success(db, observed_key: str, _result, usage) -> None:
+        """Settle a guarded response before its caller releases execution locks."""
+        counts = provider_tool_usage_counts(usage)
+        verify_priced_provider_usage(usage)
+        input_tokens = usage_tokens(usage, "prompt_tokens", "input_tokens")
+        output_tokens = usage_tokens(usage, "completion_tokens", "output_tokens")
+        if input_tokens is None or output_tokens is None:
+            raise ledger.BillingError("模型返回用量缺失，待人工对账")
+        if input_tokens > max_input_tokens or output_tokens > max_output_tokens:
+            raise ledger.BillingError("模型实际用量超过预占上限，待人工对账")
+        actual = ledger.quote_reservation_milli(
+            db, request_key=observed_key, input_tokens=input_tokens, output_tokens=output_tokens,
+        )
+        ledger.settle(
+            db,
+            request_key=observed_key,
+            actual_milli=actual,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            server_tool_search_calls=counts[0] if counts is not None else None,
+            server_tool_fetch_calls=counts[1] if counts is not None else None,
+        )
+        if on_settled is not None:
+            on_settled(db, observed_key)
+
     try:
         if send_guard is not None:
             if not callable(send_guard):
                 raise ledger.BillingError("模型请求最终授权闸无效")
-            result, usage = send_guard(send, request_key)
+            result, _usage = send_guard(send_with_validated_usage, request_key, record_success)
+            return result
         else:
             result, usage = send()
         tool_counts = provider_tool_usage_counts(usage)
@@ -89,6 +153,14 @@ def metered_call(*, session_factory, request_key: str, model_name: str, user_id:
             raise ledger.BillingError("模型实际用量超过预占上限，待人工对账")
     except MeteredRequestNotSent:
         raise
+    except MeteredOutcomeRecorded as recorded:
+        original = recorded.original
+        if isinstance(original, MeteredUsageValidationError):
+            original = original.original
+            raise original.with_traceback(recorded.original_traceback) from None
+        if isinstance(original, (httpx.TimeoutException, httpx.TransportError)):
+            raise ledger.BillingError("模型调用结果未知，预占待对账，禁止自动重试") from original
+        raise original.with_traceback(recorded.original_traceback) from None
     except (httpx.TimeoutException, httpx.TransportError) as exc:
         with session_factory.begin() as db:
             ledger.mark_unknown(db, request_key)

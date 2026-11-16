@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -17,6 +18,7 @@ from app.models.billing_ledger import (
     BillingOrder,
     BillingPaymentEvent,
     BillingRefund,
+    BillingReservation,
     BillingSubscription,
     BillingSubscriptionPeriod,
     BillingWallet,
@@ -73,6 +75,7 @@ def teamdb():
             BillingOrder.__table__,
             BillingPaymentEvent.__table__,
             BillingRefund.__table__,
+            BillingReservation.__table__,
             BillingSubscription.__table__,
             BillingSubscriptionPeriod.__table__,
             BillingWallet.__table__,
@@ -567,7 +570,6 @@ def test_second_group_agent_team_http_visibility_retry_and_admin_cancel(teamdb, 
     monkeypatch.setattr(
         "app.services.enterprise_assistant_service._require_active_limit", lambda *_args, **_kwargs: None,
     )
-    monkeypatch.setattr(team_runtime, "_attempt_reservations", lambda *_args: [])
     monkeypatch.setattr(
         enterprise_agent_team_dispatcher, "_publish_terminal_receipt", lambda *_args, **_kwargs: None,
     )
@@ -812,6 +814,25 @@ def test_enterprise_team_security_sentinel_is_project_scoped_and_accepts_only_sc
         teams._validate_agent_input("security_sentinel", {"scan_mode": "external"})
     with pytest.raises(ValidationError, match="scan_mode"):
         teams._validate_agent_input("security_sentinel", {"scan_mode": []})
+
+    from app.schemas.enterprise_agent_team import EnterpriseAgentTeamCreatePlan
+
+    with pytest.raises(PydanticValidationError, match="安全哨兵必须直接扫描绑定项目"):
+        EnterpriseAgentTeamCreatePlan.model_validate({
+            "title": "项目安全复核",
+            "objective": "只读审计已授权项目",
+            "project_id": 9001,
+            "members": [
+                {"member_key": "reviewer", "agent_code": "code_reviewer", "display_name": "代码审查"},
+                {"member_key": "security", "agent_code": "security_sentinel", "display_name": "安全审计"},
+            ],
+            "tasks": [
+                {"task_key": "review", "member_key": "reviewer", "title": "文本预审",
+                 "instructions": "审查代码片段", "input": {"code": "print('ok')"}},
+                {"task_key": "scan", "member_key": "security", "title": "项目安全扫描",
+                 "instructions": "扫描顶层项目", "depends_on": ["review"], "input": {}},
+            ],
+        })
 
 
 def test_read_only_api_returns_only_role_scoped_team_summaries(teamdb):

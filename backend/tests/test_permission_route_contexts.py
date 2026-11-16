@@ -182,6 +182,15 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
     assert not recovery[0]["unknown_dependencies"]
     assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 522
     assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 322
+    public_forum = [row for row in plan["routes"] if row["endpoint"] == "app/api/v1/forum.py"]
+    assert len(public_forum) == 10
+    assert all(
+        "app.api.v1.forum._require_personal_account_forum_access" in row["dependency_order"]
+        and not row["unknown_dependencies"]
+        and row["anonymous"] == "ready"
+        and row["no_permission"] == "blocked"
+        for row in public_forum
+    )
     vulnerability_endpoints = {
         "/api/security/vulnerability-sources": security.get_vulnerability_sources,
         "/api/security/vulnerability-records": security.get_vulnerability_records,

@@ -39,6 +39,7 @@ cd /path/to/project/deploy
 - [ ] 若发布变更了 `deploy/prism_sandbox_executor.py` 协议，须把该 SHA 的跟踪文件和 root-only 环境配置放入独立 release snapshot，运行该 snapshot 的 `deploy/sandbox/install.sh --apply`；确认 systemd `ExecStart` 指向目标 SHA，UDS `/health` 与 `browser_blackbox` 均 ready，再启动依赖该协议的 Backend。Compose 发布不会自动更新 host systemd executor。
 - [ ] 目标 head 早于 119 时也须通过 revision/schema 预检；数据库领先旧目标、revision/schema 查询失败、revision 不唯一、部分结构或旧 revision 下已出现 119 结构时不得切换旧镜像。该旧目标预检遇查询失败时拒绝本次发布并保留现运行版本；多 revision、可查询出的部分结构及 revision/schema 不一致会先尝试停止 Compose Backend。
 - [ ] 数据库迁移只执行 `alembic upgrade head`；发布脚本重新生成并验证本次备份。
+- [ ] 迁移 121 前确认隔离 MySQL 的全新迁移链及现库升级验证通过。发布和回滚会核对计费证据两列、CHECK、Alembic 版本及目标镜像；结构不完整时保持 Backend 停止并前向修复，不通过删列、删标记或改版本号绕过。
 - [ ] Backend `/healthz`、`/readyz`、version、release 标识和日志通过后，脚本才切换前端。
 - [ ] 脚本自动调用 `sync-frontend-assets.sh` 同步 assets 卷；首页引用的新哈希资源均可读取。
 - [ ] HTTP 仅保留 ACME challenge，其余返回 308；HTTPS 首页和同源 `/healthz` 通过。

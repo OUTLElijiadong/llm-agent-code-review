@@ -58,9 +58,16 @@ READ_DEPENDENCIES = {
     "app.core.rbac_dependency.require_permission.<locals>._dependency",
     "app.api.v1.reports._require_report_export_permission",
     "app.api.v1.agent_studio.require_studio_role",
+    # 公共论坛只允许个人账号；该 router-level 依赖仅读取当前用户及企业成员关系。
+    "app.api.v1.forum._require_personal_account_forum_access",
 }
 AUTH = "app.core.dependencies.get_current_user"
-GUARDS = READ_DEPENDENCIES - {AUTH, "app.core.database.get_db"}
+GUARDS = READ_DEPENDENCIES - {
+    AUTH,
+    "app.core.database.get_db",
+    # 该门只隔离企业成员与公共论坛，不代表端点要求某项 RBAC 权限。
+    "app.api.v1.forum._require_personal_account_forum_access",
+}
 
 
 def sha(data):

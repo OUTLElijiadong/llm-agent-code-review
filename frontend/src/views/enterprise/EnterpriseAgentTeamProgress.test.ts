@@ -31,7 +31,10 @@ const detail = {
   tasks: [
     { task_id: 31, task_key: 'review', title: '质量审查', agent_code: 'code_reviewer',
       agent_name: '代码审查', status: 'completed', attempt_count: 1,
-      result: { status: 'completed', summary: '发现一项可空值访问风险。' }, errors: [], started_at: null, completed_at: null },
+      result: { status: 'completed', summary: '发现一项可空值访问风险。', evidence: [{
+        source: 'request_scoped_agent', data: { issues: [{ title: '未校验的空值访问', severity: '中',
+          file_name: 'src/user.py', line: 18, description: '读取用户属性前未判断空值。' }] },
+      }] }, errors: [], started_at: null, completed_at: null },
     { task_id: 32, task_key: 'language', title: '语言识别', agent_code: 'language_detector',
       agent_name: '语言识别', status: 'retryable', attempt_count: 1,
       result: {}, errors: [{ code: 'temporary_error' }], started_at: null, completed_at: null },
@@ -72,6 +75,17 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers() })
 
 describe('企业 Agent 团队进度', () => {
+  it('在授权团队详情内展示代码审查结构化发现', async () => {
+    const wrapper = makeWrapper()
+    await flushPromises()
+    const findings = wrapper.get('.task-findings')
+    expect(findings.text()).toContain('查看 1 项审查发现')
+    expect(findings.text()).toContain('未校验的空值访问')
+    expect(findings.text()).toContain('src/user.py:18')
+    expect(findings.text()).toContain('读取用户属性前未判断空值。')
+    wrapper.unmount()
+  })
+
   it('其他标签页清空存储时立即清除旧团队结果', async () => {
     const wrapper = makeWrapper()
     await flushPromises()
@@ -352,6 +366,44 @@ describe('企业 Agent 团队进度', () => {
     await flushPromises()
     expect(api.retry).toHaveBeenCalledWith(10, 12, 32, 'enterprise-session-token')
     initiator.unmount()
+  })
+
+  it.each([
+    ['released_not_sent', '未发送的预占已释放，任务已排队重试。'],
+    ['settled_result_unavailable', '账单已结算但结果缺失，任务已结束，未自动重发'],
+  ])('账单处理后按服务端结果显示 %s', async (resolution, expected) => {
+    const waiting = { ...detail, status: 'awaiting_reconciliation', tasks: [
+      { ...detail.tasks[1], status: 'awaiting_reconciliation' },
+    ] }
+    api.list.mockResolvedValue({ items: [{ ...summary, status: 'awaiting_reconciliation' }], has_more: false, next_before_id: null })
+    api.detail.mockResolvedValue(waiting)
+    api.retry.mockResolvedValue({ team_id: 12, task_id: 32, status: 'queued', resolution })
+    const wrapper = makeWrapper(); await flushPromises()
+    expect(wrapper.text()).toContain('已结算但结果缺失时会结束任务，不会自动重发')
+    await wrapper.get('.retry-task').trigger('click'); await flushPromises()
+    expect(api.retry).toHaveBeenCalledWith(10, 12, 32, 'enterprise-session-token')
+    expect(wrapper.text()).toContain(expected)
+    wrapper.unmount()
+  })
+
+  it('账单尚未处理时提示核对，已停止团队与无控制权限的成员不能继续', async () => {
+    const waiting = { ...detail, status: 'awaiting_reconciliation', tasks: [
+      { ...detail.tasks[1], status: 'awaiting_reconciliation' },
+    ] }
+    api.list.mockResolvedValue({ items: [{ ...summary, status: 'awaiting_reconciliation' }], has_more: false, next_before_id: null })
+    api.detail.mockResolvedValue(waiting)
+    api.retry.mockRejectedValueOnce(new Error('账单尚未处理'))
+    const wrapper = makeWrapper(); await flushPromises()
+    await wrapper.get('.retry-task').trigger('click'); await flushPromises()
+    expect(wrapper.text()).toContain('请确认账单已处理且任务未停止')
+    wrapper.unmount()
+    const member = makeWrapper({ canManageCompany: false }); await flushPromises()
+    expect(member.find('.retry-task').exists()).toBe(false)
+    member.unmount()
+    api.detail.mockResolvedValue({ ...waiting, status: 'cancelled' })
+    const stopped = makeWrapper(); await flushPromises()
+    expect(stopped.find('.retry-task').exists()).toBe(false)
+    stopped.unmount()
   })
 
   it('小组长仅在小组群中可以控制本组任务，组员只能查看', async () => {

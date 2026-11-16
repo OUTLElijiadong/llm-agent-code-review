@@ -1,5 +1,11 @@
 import { createPinia, setActivePinia } from 'pinia'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const enterpriseApi = vi.hoisted(() => ({
+  hasEnterpriseMembership: vi.fn<(token: string) => Promise<boolean | null>>(async () => false),
+}))
+
+vi.mock('@/services/enterpriseMembership', () => enterpriseApi)
 
 import { useWorkspaceStore } from './workspace'
 
@@ -7,6 +13,7 @@ describe('全站工作空间上下文', () => {
   beforeEach(() => {
     sessionStorage.clear()
     setActivePinia(createPinia())
+    enterpriseApi.hasEnterpriseMembership.mockReset().mockResolvedValue(false)
   })
 
   it('同一登录会话刷新后恢复空间偏好，但企业 ID 仅是待服务端复核的选择', () => {
@@ -45,5 +52,32 @@ describe('全站工作空间上下文', () => {
 
     expect(workspace.activeSpace).toBe('personal')
     expect(workspace.activeEnterpriseId).toBeNull()
+  })
+
+  it('公开论坛账号类型从服务端成员目录读取，切换页面空间不会改变授权状态', async () => {
+    enterpriseApi.hasEnterpriseMembership.mockResolvedValue(true)
+    const workspace = useWorkspaceStore()
+    workspace.syncIdentity(17, 'account-token-a')
+
+    expect(await workspace.refreshEnterpriseMembership()).toBe(true)
+    workspace.activatePersonal()
+
+    expect(workspace.hasEnterpriseMembership).toBe(true)
+  })
+
+  it('旧账号迟到的企业目录不能覆盖当前登录账号', async () => {
+    let resolveOld!: (isMember: boolean | null) => void
+    enterpriseApi.hasEnterpriseMembership.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve }))
+    const workspace = useWorkspaceStore()
+    workspace.syncIdentity(17, 'account-token-a')
+    const oldRequest = workspace.refreshEnterpriseMembership()
+
+    workspace.syncIdentity(18, 'account-token-b')
+    enterpriseApi.hasEnterpriseMembership.mockResolvedValueOnce(false)
+    expect(await workspace.refreshEnterpriseMembership()).toBe(false)
+    resolveOld(true)
+
+    expect(await oldRequest).toBeNull()
+    expect(workspace.hasEnterpriseMembership).toBe(false)
   })
 })

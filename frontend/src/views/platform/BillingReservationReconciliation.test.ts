@@ -123,10 +123,13 @@ describe('平台模型账本人工对账工作台', () => {
     wrapper.unmount()
   })
 
-  it('陈旧 Search/Fetch 只转入 unknown，不在恢复动作中释放额度', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
+  it.each([
+    ['Search/Fetch', searchReservation],
+    ['企业团队模型', { ...reservedReservation, enterprise_id: 10 }],
+  ])('陈旧%s预占只转入待对账，不在恢复动作中扣费或释放额度', async (label, reservation) => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
     api.list.mockResolvedValue({
-      items: [{ ...searchReservation, id: 9, status: 'reserved', can_settle: false,
+      items: [{ ...reservation, id: 9, status: 'reserved', can_settle: false,
         can_release_not_sent: false, can_recover_stale_attempt: true,
         settlement_block_reasons: ['reserved 状态可能仍在上游处理中'],
         release_block_reasons: ['reserved 状态可能仍在上游处理中'] }],
@@ -135,15 +138,33 @@ describe('平台模型账本人工对账工作台', () => {
     const wrapper = mount(BillingReservationReconciliation)
     await flushPromises()
     await openReservation(wrapper, 9)
-    expect(wrapper.text()).toContain('外呼标记已超过 30 分钟')
+    expect(wrapper.text()).toContain('该记录已超过 30 分钟')
     await wrapper.get('button.primary').trigger('click')
     await flushPromises()
     expect(api.recover).toHaveBeenCalledWith(
       9,
-      expect.stringContaining('仅转入双人对账，不自动释放额度'),
+      expect.stringContaining('此操作不扣费、不释放额度'),
       'session-a',
     )
-    expect(wrapper.text()).toContain('额度仍冻结')
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining(label))
+    expect(wrapper.text()).toContain('未扣费或释放额度')
+    wrapper.unmount()
+    vi.restoreAllMocks()
+  })
+
+  it('已待对账的企业团队模型隔离原任务，保持冻结并继续对账', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    api.list.mockResolvedValue({ items: [{ ...unknownReservation, enterprise_id: 10,
+      can_recover_stale_attempt: true }], total: 1, limit: 100, offset: 0 })
+    const wrapper = mount(BillingReservationReconciliation); await flushPromises()
+    await openReservation(wrapper, 5)
+    expect(wrapper.get('.recovery-action').text()).toContain('已发送的供应商请求不能撤回')
+    expect(wrapper.get('.recovery-action button').text()).toBe('隔离原任务并继续对账')
+    await wrapper.get('.recovery-action button').trigger('click'); await flushPromises()
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('隔离原任务并继续对账'))
+    expect(api.recover).toHaveBeenCalledWith(5,
+      expect.stringContaining('此操作不扣费、不释放额度'), 'session-a')
+    expect(wrapper.text()).toContain('原任务已隔离，账单继续待对账，未扣费或释放额度')
     wrapper.unmount()
     vi.restoreAllMocks()
   })
@@ -168,6 +189,45 @@ describe('平台模型账本人工对账工作台', () => {
     }, 'session-a')
     expect(wrapper.text()).toContain('提案已提交')
     expect(wrapper.text().toLowerCase()).not.toContain('prompt body')
+    wrapper.unmount()
+  })
+
+  it('原始工具计数缺失时须分别确认两个外部证据为零才能提交', async () => {
+    const row = { ...unknownReservation, server_tool_search_calls: null, server_tool_fetch_calls: null,
+      requires_model_tool_evidence: true }
+    api.list.mockResolvedValue({ items: [row], total: 1, limit: 100, offset: 0 })
+    const wrapper = mount(BillingReservationReconciliation); await flushPromises()
+    await openReservation(wrapper, 5)
+    await wrapper.get('input[placeholder="来自供应商响应或账单的请求 ID"]').setValue('req-5')
+    const tokens = wrapper.findAll('input[type="number"]')
+    await tokens[0].setValue('100'); await tokens[1].setValue('50')
+    await wrapper.get('input[placeholder="供应商工单号、账单行号或内部证据编号"]').setValue('case-5')
+    await wrapper.get('input[placeholder="64 位十六进制摘要"]').setValue('a'.repeat(64))
+    await wrapper.get('textarea[placeholder^="说明外部证据来源"]').setValue('根据供应商证据核对')
+    const submit = wrapper.get('.proposal-form button.primary')
+    const checks = wrapper.findAll('.external-counts input[type="checkbox"]')
+    expect(submit.attributes('disabled')).toBeDefined()
+    await checks[0].setValue(true)
+    expect(submit.attributes('disabled')).toBeDefined()
+    await checks[1].setValue(true)
+    expect(submit.attributes('disabled')).toBeUndefined()
+    expect(wrapper.text()).toContain('系统不会自动验证其真实性')
+    expect(wrapper.text()).toContain('如有非零或无法确认，预占继续冻结')
+    await submit.trigger('click'); await flushPromises()
+    expect(api.propose).toHaveBeenCalledWith(5, expect.objectContaining({
+      model_search_calls_evidence: 0, model_fetch_calls_evidence: 0,
+    }), 'session-a')
+    wrapper.unmount()
+  })
+
+  it('复核与审计展示管理员提交的模型工具计数', async () => {
+    const proposal = { ...pendingProposal, model_search_calls_evidence: 0, model_fetch_calls_evidence: 0 }
+    api.list.mockResolvedValue({ items: [{ ...unknownReservation, pending_proposal: proposal }], total: 1, limit: 100, offset: 0 })
+    api.events.mockResolvedValue({ items: [proposal] })
+    const wrapper = mount(BillingReservationReconciliation); await flushPromises()
+    await openReservation(wrapper, 5)
+    expect(wrapper.get('.proposal-review').text()).toContain('管理员提交的外部证据计数：Search 0 · Fetch 0')
+    expect(wrapper.get('.history').text()).toContain('管理员提交的外部证据计数：Search 0 · Fetch 0')
     wrapper.unmount()
   })
 

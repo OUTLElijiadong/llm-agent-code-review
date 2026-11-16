@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import pytest
+
 from app.main import app
 from app.services.admin_capability_registry import ADMIN_PAGE_ROUTES
 from app.services.agent_responses_service import _instructions
 from app.services.page_guide_service import (
+    ADMIN_GUIDE_ROUTES,
+    ADMIN_NAVIGATION_ONLY_ROUTES,
     ADMIN_PAGE_LABELS,
+    USER_GUIDE_ROUTES,
+    USER_NAVIGATION_ONLY_LABELS,
     USER_PAGE_LABELS,
     admin_guide_block,
+    current_page_context_block,
     user_guide_block,
 )
 from app.services.user_capability_registry import USER_PAGE_ROUTES
@@ -23,6 +29,12 @@ def test_guide_blocks_cover_all_registered_pages() -> None:
         assert label and purpose, route
     for route in ADMIN_PAGE_ROUTES:
         assert route in ADMIN_PAGE_LABELS, route
+        label, purpose = ADMIN_PAGE_LABELS[route]
+        assert label and purpose, route
+    for route in USER_NAVIGATION_ONLY_LABELS:
+        assert route in USER_GUIDE_ROUTES, route
+    for route in ADMIN_NAVIGATION_ONLY_ROUTES:
+        assert route in ADMIN_GUIDE_ROUTES, route
         label, purpose = ADMIN_PAGE_LABELS[route]
         assert label and purpose, route
 
@@ -63,10 +75,13 @@ def test_guide_routes_exist_in_frontend_route_table() -> None:
         "/agents", "/sandboxes", "/agent-studio", "/forum", "/forum/new",
         "/knowledge", "/support", "/profile", "/audit",
         "/profile/personalization", "/profile/password", "/profile/api-config",
+        "/usage", "/billing", "/enterprise", "/my-agents", "/remote-pentests", "/agent-assets",
     }
     frontend_static_admin_routes = {
         "/admin/governance", "/admin/operations", "/admin/access", "/admin/platform",
         "/admin/security-center", "/report/templates",
+        *ADMIN_NAVIGATION_ONLY_ROUTES,
+        *USER_NAVIGATION_ONLY_LABELS,
     }
     user_block = user_guide_block()
     for route in frontend_static_user_routes:
@@ -74,6 +89,7 @@ def test_guide_routes_exist_in_frontend_route_table() -> None:
     assert "/report/templates" not in user_block
     assert "/support/maintenance" not in user_block
     assert "/support/feedback" not in user_block
+    assert "/agent-assets 共享 Agent 与 Skill:" in user_block
     admin_block = admin_guide_block()
     for route in frontend_static_admin_routes:
         assert route in admin_block, f"管理引导缺少前端已有路由: {route}"
@@ -125,3 +141,58 @@ def test_support_guide_uses_current_ticket_term() -> None:
     """支持中心的工单名称与当前页面一致，不再暗示设备维修流程。"""
     assert "支持工单" in USER_PAGE_LABELS["/support"][1]
     assert "维修工单" not in user_guide_block()
+
+
+def test_current_page_context_uses_registered_server_labels_and_never_grants_access() -> None:
+    block = current_page_context_block("admin", path="/admin/platform", section="beta-codes")
+
+    assert "平台配置中心 / 内测码" in block
+    assert "用途：模型、嵌入、内测码、MCP 与运行节点配置" in block
+    assert "不代表资源授权" in block
+    assert "服务端权限检查和风险审批始终优先" in block
+    assert "可管理内测码" not in current_page_context_block(
+        "admin", path="/admin/platform", section="attacker-supplied-label"
+    )
+    assert current_page_context_block("admin", path="/admin/not-registered") == ""
+    assert current_page_context_block("user", path="/admin/platform") == ""
+
+
+@pytest.mark.parametrize("surface", ["user", "admin"])
+def test_workspace_context_identifies_specific_page_and_enterprise_section(surface: str) -> None:
+    assert "项目管理" in current_page_context_block(surface, path="/projects/123")
+    assert "发起审查" in current_page_context_block(surface, path="/reviews/start")
+    for section, name in (("chat", "聊天"), ("knowledge", "企业知识库"),
+                          ("management", "组织管理"), ("usage", "企业用量")):
+        assert f"企业空间 / {name}" in current_page_context_block(
+            surface, path="/enterprise", section=section,
+        )
+    assert "attacker" not in current_page_context_block(
+        surface, path="/enterprise", section="attacker",
+    )
+    assert "支持中心 / 支持工单" in current_page_context_block(
+        surface, path="/support", section="maintenance",
+    )
+    assert "支持中心 / 意见反馈" in current_page_context_block(
+        surface, path="/support", section="feedback",
+    )
+
+
+@pytest.mark.parametrize(
+    ("surface", "path"),
+    [
+        *(('admin', route) for route in ADMIN_GUIDE_ROUTES),
+        *(('user', route) for route in USER_GUIDE_ROUTES),
+    ],
+)
+def test_every_guided_page_has_server_mapped_context_without_capability_grants(surface, path) -> None:
+    labels = (
+        {**USER_PAGE_LABELS, **USER_NAVIGATION_ONLY_LABELS, **ADMIN_PAGE_LABELS}
+        if surface == "admin"
+        else {**USER_PAGE_LABELS, **USER_NAVIGATION_ONLY_LABELS}
+    )
+    title = labels[path][0]
+    block = current_page_context_block(surface, path=path)
+    assert f"页面：{title}" in block
+    assert "用途：" in block
+    assert "不代表资源授权" in block
+    assert "没有匹配的已登记工具时，不要代替用户执行操作" in block

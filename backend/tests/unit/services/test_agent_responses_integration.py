@@ -208,7 +208,7 @@ async def test_xiaoling_runtime_always_uses_coordinator_tool_scope(db, monkeypat
     assert captured["completion_guard"] == service._validate_xiaoling_completion
     assert {item["name"] for item in await executor.tool_schemas()} == {
         "list_agents", "create_agent_team", "get_agent_team", "cancel_agent_team", "cancel_agent_team_task",
-        "retry_agent_team", "user_describe_capabilities", "admin_describe_capabilities", "operate_current_page",
+        "retry_agent_team", "user_describe_capabilities", "admin_describe_capabilities",
     }
 
 
@@ -234,6 +234,37 @@ def test_agent_response_request_accepts_only_one_start_input_source() -> None:
         mesh_message_id="team-40-task-7-attempt-1-result",
     )
     assert team_result.mesh_message_id == "team-40-task-7-attempt-1-result"
+
+
+def test_agent_response_page_context_is_a_validated_start_only_hint() -> None:
+    request = api_module.AgentResponsesRequest(
+        surface="admin",
+        session_id="admin-page-context",
+        messages=[{"role": "user", "content": "帮我查看当前页面"}],
+        page_context={"path": "/admin/platform", "section": "beta-codes"},
+    )
+    assert request.page_context is not None
+    assert request.page_context.path == "/admin/platform"
+
+    for path in (
+        "https://example.com/admin/platform", "//example.com", "/admin/../users", "/admin/platform?section=beta-codes",
+    ):
+        with pytest.raises(PydanticValidationError):
+            api_module.AgentResponsesRequest(
+                surface="admin",
+                session_id="admin-page-context",
+                messages=[{"role": "user", "content": "帮我查看当前页面"}],
+                page_context={"path": path},
+            )
+
+    with pytest.raises(PydanticValidationError):
+        api_module.AgentResponsesRequest(
+            action="retry",
+            surface="admin",
+            session_id="admin-page-context",
+            run_id="run-page-context",
+            page_context={"path": "/admin/platform"},
+        )
 
 
 @pytest.fixture()

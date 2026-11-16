@@ -1,6 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h } from 'vue'
+import { currentPageContext } from '@/utils/pageContext'
 
 const mock = vi.hoisted(() => ({
   listMyEnterprises: vi.fn(), acceptEnterpriseInvitation: vi.fn(), listEnterpriseGroups: vi.fn(),
@@ -25,6 +26,7 @@ const workspaceState = vi.hoisted(() => ({
   activeSpace: 'enterprise',
   activeEnterpriseId: null as number | null,
   activateEnterprise: vi.fn((id?: number | null) => { workspaceState.activeEnterpriseId = id ?? null }),
+  setEnterpriseMembership: vi.fn(),
 }))
 const initialViewport = { width: window.innerWidth, height: window.innerHeight }
 vi.mock('@/api/enterprise', () => mock)
@@ -43,6 +45,7 @@ beforeEach(() => {
   workspaceState.activeSpace = 'enterprise'
   workspaceState.activeEnterpriseId = null
   workspaceState.activateEnterprise.mockClear()
+  workspaceState.setEnterpriseMembership.mockClear()
   localStorage.removeItem('review_token')
   useUserStore().profile!.id = 1
   Object.values(mock).forEach(fn => fn.mockReset())
@@ -68,6 +71,38 @@ afterEach(() => {
 })
 
 describe('企业沟通', () => {
+  it('小菱读取企业页面时使用实际切换后的分区', async () => {
+    const wrapper = mount(EnterpriseCommunication, { attachTo: document.body })
+    try {
+      await flushPromises()
+      expect(currentPageContext('/enterprise', '')?.section).toBe('chat')
+      await wrapper.findAll('button').find(item => item.text() === '企业论坛')!.trigger('click')
+      expect(currentPageContext('/enterprise', 'chat')?.section).toBe('forum')
+    } finally { wrapper.unmount() }
+  })
+
+  it('账号切换立即清除旧企业分区，卸载后不复用分区', async () => {
+    mock.listMyEnterprises.mockResolvedValueOnce([{ id: 10, name: '甲公司', role: 'owner', status: 'active' }])
+      .mockReturnValueOnce(new Promise(() => {}))
+    const wrapper = mount(EnterpriseCommunication, { attachTo: document.body })
+    try {
+      await flushPromises()
+      await wrapper.findAll('button').find(item => item.text() === '企业论坛')!.trigger('click')
+      expect(currentPageContext('/enterprise', '')?.section).toBe('forum')
+      useUserStore().profile!.id = 2
+      expect(currentPageContext('/enterprise', 'forum')?.section).toBe('')
+    } finally { wrapper.unmount() }
+    expect(currentPageContext('/enterprise', 'forum')?.section).toBe('')
+  })
+
+  it('根据服务端企业列表刷新公开论坛账号边界', async () => {
+    const wrapper = mount(EnterpriseCommunication)
+    try {
+      await flushPromises()
+      expect(workspaceState.setEnterpriseMembership).toHaveBeenCalledWith(true)
+    } finally { wrapper.unmount() }
+  })
+
   it.each([
     [40360, '小菱计费尚未就绪'],
     [40361, '请联系管理员设置默认小组'],

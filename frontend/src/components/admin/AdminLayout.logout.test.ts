@@ -1,4 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia } from 'pinia'
 import { expect, it, vi } from 'vitest'
 
 const auth = vi.hoisted(() => ({
@@ -24,6 +25,7 @@ vi.mock('@/stores/user', () => ({
   }),
 }))
 vi.mock('@/utils/agentNavigation', () => ({ isNavigationPathAllowed: () => true }))
+vi.mock('@/services/enterpriseMembership', () => ({ hasEnterpriseMembership: vi.fn().mockResolvedValue(false) }))
 vi.mock('@/components/ai/ProactivePageGuide.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('element-plus/es/components/message-box/index', () => ({
   ElMessageBox: { confirm: auth.confirm },
@@ -37,6 +39,7 @@ it('管理员确认退出按钮文案为“确定”并完成退出流程', asyn
 
   const wrapper = mount(AdminLayout, {
     global: {
+      plugins: [createPinia()],
       stubs: {
         'el-dropdown': { template: '<div><slot /><slot name="dropdown" /></div>' },
         'el-dropdown-menu': { template: '<div><slot /></div>' },

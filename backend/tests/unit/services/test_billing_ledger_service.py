@@ -124,6 +124,37 @@ def test_reservation_and_settlement_idempotent(db):
         reserve(db, **{**kwargs, "max_milli": 2})
 
 
+def test_model_provider_attempt_marker_requires_proven_not_sent_release(db):
+    wallet = _wallet(db, "user", 42, 100000, "model-attempt-marker")
+    reserve(
+        db,
+        request_key="model-attempt-marker",
+        model_name="deepseek-flash",
+        user_id=42,
+        max_milli=80000,
+        personal_wallet_id=wallet.id,
+        now=NOW,
+    )
+
+    marked = billing_ledger_service.mark_model_attempt_started(
+        db, "model-attempt-marker", now=NOW,
+    )
+    assert marked.status == "reserved" and marked.provider_attempt_started_at == NOW
+    db.commit()
+
+    with pytest.raises(BillingError, match="provider attempt 已持久化"):
+        billing_ledger_service.release_not_sent(db, "model-attempt-marker", now=NOW)
+    db.rollback()
+
+    released = billing_ledger_service.release_model_attempt_not_sent(
+        db, "model-attempt-marker", now=NOW,
+    )
+    db.commit()
+    assert (released.status, released.usage_state, released.provider_attempt_started_at) == (
+        "released", "not_sent", None,
+    )
+
+
 def test_reservation_settles_with_rate_snapshot_after_catalog_changes(db, monkeypatch):
     wallet = _wallet(db, "user", 42, 100000, "rate-snapshot")
     max_milli = quote_milli("deepseek-flash", 10000, 2000)

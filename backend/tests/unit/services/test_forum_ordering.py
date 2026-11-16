@@ -65,7 +65,11 @@ def test_forum_authoritative_routes_exclude_hidden_posts_and_get_stays_readonly(
     second = forum_service.list_posts(db, keyword="精准命中", category="tech", page=2, page_size=2, sort=sort)
     rows = [*listed["items"], *second["items"]]
     assert listed["total"] == second["total"] == 4
-    expected = [visible[0].id, *[post.id for post in reversed(visible[1:])]] if sort == "default" else [post.id for post in reversed(visible)]
+    expected = (
+        [visible[0].id, *[post.id for post in reversed(visible[1:])]]
+        if sort == "default"
+        else [post.id for post in reversed(visible)]
+    )
     assert [row["id"] for row in rows] == expected
     for row in rows:
         assert row["detail_route"] == f'/forum/{row["id"]}'
@@ -88,7 +92,8 @@ def test_forum_response_schemas_preserve_server_detail_route():
         "create_time": datetime(2026, 10, 14), "update_time": datetime(2026, 10, 14),
         "detail_route": "/forum/44", "content": "正文", "replies": [],
     }
-    page = Resp[PageOut[PostListItemOut]](data=PageOut[PostListItemOut](items=[post], total=1, page=1, page_size=10, pages=1))
+    page_data = PageOut[PostListItemOut](items=[post], total=1, page=1, page_size=10, pages=1)
+    page = Resp[PageOut[PostListItemOut]](data=page_data)
     detail = Resp[PostDetailOut](data=PostDetailOut(**post))
     assert page.model_dump()["data"]["items"][0]["detail_route"] == "/forum/44"
     assert detail.model_dump()["data"]["detail_route"] == "/forum/44"
@@ -108,7 +113,13 @@ def test_forum_http_responses_keep_routes_and_reject_hidden_posts(db, round_inde
     db.add(actor)
     db.flush()
     public = ForumPost(user_id=actor.id, title="HTTP公开帖子", content="正文", category="tech", status="normal")
-    hidden = ForumPost(user_id=actor.id, title="HTTP不可见帖子", content="不可见正文", category="tech", status="deleted")
+    hidden = ForumPost(
+        user_id=actor.id,
+        title="HTTP不可见帖子",
+        content="不可见正文",
+        category="tech",
+        status="deleted",
+    )
     db.add_all([public, hidden])
     db.commit()
     # 固定已有会话连接，让同步 TestClient 线程复用这一份内存 SQLite。
@@ -132,3 +143,40 @@ def test_forum_http_responses_keep_routes_and_reject_hidden_posts(db, round_inde
         assert denied.status_code == 404
         assert "detail_route" not in denied.text
         assert client.get("/api/forum/posts", params={"sort": "unsupported"}).status_code == 400
+
+
+def test_enterprise_member_cannot_access_public_forum_apis(db):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api.v1.forum import router
+    from app.core.database import get_db
+    from app.core.dependencies import get_current_user
+    from app.core.error_handlers import register_handlers
+    from app.models.enterprise_org import Enterprise, EnterpriseMember
+
+    member = User(username="enterprise-forum-member", password="unused", role="user", status=1)
+    db.add(member)
+    db.flush()
+    company = Enterprise(
+        name="无公开论坛企业",
+        owner_id=member.id,
+        seat_limit=3,
+        status="active",
+        paid_order_id="enterprise-forum-member-order",
+    )
+    db.add(company)
+    db.flush()
+    db.add(EnterpriseMember(enterprise_id=company.id, user_id=member.id, role="owner", status="active"))
+    db.commit()
+    db.connection()
+
+    app = FastAPI()
+    app.include_router(router, prefix="/api/forum")
+    register_handlers(app)
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_current_user] = lambda: member
+
+    with TestClient(app) as client:
+        assert client.get("/api/forum/posts").status_code == 403
+        assert client.post("/api/forum/assist", json={"title": "问题", "draft": "正文"}).status_code == 403

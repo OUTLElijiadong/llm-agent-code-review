@@ -5,6 +5,7 @@ import { useUserStore } from '@/stores/user'
 import { useAgentActivityStore } from '@/stores/agentActivity'
 import { isNavigationPathAllowed } from '@/utils/agentNavigation'
 import { createSiteBrowserBridge } from '@/utils/siteBrowserBridge'
+import { expectedSiteRoute } from '@/utils/siteBrowserRoute'
 import type { ResponseStreamEvent } from '@/types/responses'
 
 /** SSE 与重连恢复共用一次执行器；同一个账号的其他标签页由服务端 claim 排他保护。 */
@@ -30,6 +31,7 @@ export function useSiteBrowserBridge(options: {
     canNavigate: path => !['/login', '/register', '/403', '/404'].includes(path.split(/[?#]/)[0]!)
       && isNavigationPathAllowed(options.router, path, user),
     navigate: route => options.router.push(route),
+    expectedRoute: route => expectedSiteRoute(options.router, route),
     isActive: () => !options.isStopped?.() && ['running', 'approving', 'answering', 'rejecting', 'queued', 'waiting_browser'].includes(options.status()),
     settle: async () => { await nextTick(); await new Promise(resolve => setTimeout(resolve, 80)); await nextTick() },
     onStatus: status => {

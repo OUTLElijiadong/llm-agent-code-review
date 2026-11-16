@@ -19,6 +19,7 @@ from app.services.admin_capability_registry import (
     operation_contract,
 )
 from app.services.admin_capability_service import AdminCapabilityError, prepare_request
+from app.services.page_guide_service import ADMIN_SHELL_SHORTCUT_ROUTES
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -184,10 +185,14 @@ def _admin_view_api_imports() -> set[str]:
     return imported
 
 
-def test_every_admin_route_and_menu_entry_has_agent_capabilities() -> None:
+def test_agent_capability_pages_and_navigation_only_shortcuts_are_explicit() -> None:
     expected = set(ADMIN_PAGE_ROUTES)
     assert _frontend_admin_routes() == expected - {"/forum", "/support"}
-    assert _admin_menu_routes() == (expected - {"/report/templates"}) | {"/forum", "/support"}
+    assert _admin_menu_routes() == (
+        (expected - {"/report/templates"}) | {"/forum", "/support"}
+        | set(ADMIN_SHELL_SHORTCUT_ROUTES)
+    )
+    assert not any(spec.page in ADMIN_SHELL_SHORTCUT_ROUTES for spec in ADMIN_CAPABILITIES)
 
     mapped_pages = {spec.page for spec in ADMIN_CAPABILITIES}
     assert mapped_pages == expected

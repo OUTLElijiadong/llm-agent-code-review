@@ -131,11 +131,7 @@ _RELEASE_HEALTH_TOOL = "admin_release_health"
 _XIAOLING_COORDINATOR_TOOL_NAMES = frozenset({
     "list_agents", "create_agent_team", "get_agent_team", "cancel_agent_team", "cancel_agent_team_task",
     "retry_agent_team", "user_describe_capabilities", "admin_describe_capabilities",
-    "operate_current_page",
 })
-# 小菱本人只做无业务副作用的页面引导：跳转、滚动、观察当前页面（虚拟鼠标照常演示）。
-# 点击、填写、勾选等改变页面状态的动作仍必须派给 site_operator 团队成员执行并核验。
-_XIAOLING_COORDINATOR_PAGE_ACTIONS = frozenset({"navigate", "scroll", "inspect"})
 _PENDING_SITE_SUBMISSION_REASON = "页面任务仅已提交团队，尚无执行与核验终态；请报告等待状态，不能声称业务完成"
 
 
@@ -1300,18 +1296,6 @@ class PrismToolExecutor:
             tools.append(user_discovery_tool_schema())
             if self._surface == "admin" and self._is_admin:
                 tools.append(discovery_tool_schema())
-            tools.append({
-                "type": "function", "name": "operate_current_page",
-                "description": (
-                    "小菱直接引导当前账号打开的本站页面（虚拟鼠标可见）：navigate={route} 跳转到已核实的站内路由，"
-                    "scroll={direction:up/down} 滚动，inspect={} 观察当前页面控件。用户要求“打开/跳到/带我去某页面”时"
-                    "直接调用 navigate，不必组队。点击、填写、勾选等改变页面状态的操作必须交给 site_operator 团队成员。"
-                ),
-                "parameters": {"type": "object", "properties": {
-                    "action": {"type": "string", "enum": sorted(_XIAOLING_COORDINATOR_PAGE_ACTIONS)},
-                    "args": {"type": "object"},
-                }, "required": ["action", "args"], "additionalProperties": False},
-            })
             return tools
         if self._tool_scope == "release_health":
             return [{
@@ -1553,14 +1537,6 @@ class PrismToolExecutor:
             allowed = call.name in _XIAOLING_COORDINATOR_TOOL_NAMES
             if call.name == "admin_describe_capabilities":
                 allowed = allowed and self._surface == "admin" and self._is_admin
-            if call.name == "operate_current_page" and (
-                call.arguments.get("action") not in _XIAOLING_COORDINATOR_PAGE_ACTIONS
-            ):
-                return await self._failed_attempt(
-                    call,
-                    "小菱本人只能跳转、滚动或观察当前页面；"
-                    "点击、填写、勾选请创建含 agent:site_operator 成员的团队执行。",
-                )
             if not allowed:
                 return await self._failed_attempt(
                     call,
@@ -1880,7 +1856,7 @@ class PrismToolExecutor:
                         "先查当前账号能力清单，再绑定 input={operation:'execute_capability',"
                         "scope:'user或admin',capability:'已登记能力',params:{业务参数}}；"
                         "核验任务用 operation:'verify_results' 并依赖实际执行任务。"
-                        "纯页面跳转使用已核实路由的 PRISM_NAVIGATE，不能伪造站点业务能力。",
+                        "页面跳转使用 site_operator 的 operate_current_page 和已核实路由，不能伪造站点业务能力。",
                     )
             if any(a is not b for a, b in zip(healed_tasks, call.arguments.get("tasks", []))):
                 # 只有真的剥除过杜撰字段才重建调用；后续审批指纹、监督复核与执行都用清理后的参数。
@@ -3878,7 +3854,8 @@ class PrismToolExecutor:
 class AgentResponsesService:
     """构建并驱动一次用户隔离的 Agent Responses 运行。"""
 
-    def __init__(self, db: Session, user: User, *, surface: str, session_key: str) -> None:
+    def __init__(self, db: Session, user: User, *, surface: str, session_key: str,
+                 page_context: str = "") -> None:
         if surface not in {"user", "admin"}:
             raise ValueError("surface 必须是 user 或 admin")
         if surface == "admin" and not _is_admin_actor(db, user):
@@ -3888,6 +3865,7 @@ class AgentResponsesService:
         self._surface = surface
         self._is_super_admin = surface == "admin" and _is_super_admin_actor(db, user)
         self._session_key = session_key
+        self._page_context = page_context[:1200] if isinstance(page_context, str) else ""
         self._store = DatabaseCheckpointStore(
             db,
             user_id=user.id,
@@ -3966,6 +3944,8 @@ class AgentResponsesService:
         )
         tools = await executor.tool_schemas()
         instructions = _instructions(self._surface, self._user, self._is_super_admin)
+        if self._page_context:
+            instructions += f"\n\n{self._page_context}\n"
         if getattr(executor, "_tool_scope", "") == "release_health":
             instructions += (
                 "本轮只查询当前后端版本与就绪状态。仅调用一次 admin_release_health，"
@@ -4458,14 +4438,6 @@ class AgentResponsesService:
             ((call, output) for call, output in successful if call.get("name") == "create_agent_team"),
             None,
         )
-        if create_call is None and any(
-            call.get("name") == "operate_current_page"
-            and call_arguments(call).get("action") in _XIAOLING_COORDINATOR_PAGE_ACTIONS
-            for call, _result in successful
-        ) and not any(call.get("name") == "operate_current_page" and call_arguments(call).get("action")
-                      not in _XIAOLING_COORDINATOR_PAGE_ACTIONS for call in calls.values()):
-            # 纯页面引导（跳转/滚动/观察）由小菱直接完成，回执即客户端观察，无需组队。
-            return None
         if create_call is None:
             tracking_request = re.search(
                 r"(?:团队|任务|执行).{0,12}(?:进度|状态|运行到|执行到|怎么样|如何)|"
@@ -5191,7 +5163,7 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
         "链接目标必须逐字等于该帖服务器返回的 detail_route，多帖结果每帖一条链接。"
         "不得把 `/forum/{id}` 等裸路径写成普通文本，也不得根据 ID、标题、历史或记忆拼接/猜测单帖路由；"
         "没有服务器 detail_route 的帖子只展示标题，不生成单帖入口。"
-        "回复中的其他站内 markdown 链接必须使用真实路由；需要跳转时必须在回复末尾追加一行"
+        "回复中的其他站内 markdown 链接必须使用真实路由；需要向用户提供自行前往的按钮时，可在回复末尾追加一行"
         ' <!--PRISM_NAVIGATE {"action":"navigate","route":"/真实路由","label":"页面名称"}-->，'
         "路由必须来自 recall_knowledge 检索到的页面指南，或当前账号已成功业务工具返回的服务器 detail_route；"
         "不得凭对象 ID 拼接未提供的路径，也不得编造路由。"
@@ -5209,9 +5181,8 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
         "涉及具体页面操作步骤时，先调用 recall_knowledge 检索对应页面指南。"
         "小菱全任务团队硬规则（优先级高于本提示中的其他任何旧规则）：小菱只负责理解、规划、查询成员/能力合同、组队、派发、跟踪、停止、核验和汇总；"
         "普通问答、解释、翻译、总结、报告查询和页面任务都必须由当前账号当前会话的 Agent 团队成员实际执行。"
-        "唯一例外是纯页面引导：用户说“打开/跳到/带我去/切到某页面”时，小菱直接调用 operate_current_page "
-        "action=navigate（args.route 为站内真实路由，如 /projects、/reviews、/reports、/pentests、/sandbox、"
-        "/agent-workbench），虚拟鼠标会带用户过去；滚动和观察当前页同理可直接做。点击、填写、提交仍派给 site_operator。"
+        "页面跳转、滚动、观察、点击和填写均交给 agent:site_operator 团队执行并等待真实回执；"
+        "用户自行点击站内导航卡片时由前端权限守卫裁决。"
         "不要自己尝试调用业务工具：小菱只拥有组队工具，直接调用业务、管理或服务器工具一定会被权限驳回；"
         "看到任何需要读数据、审查、测试、运维的请求，第一步就是 list_agents 然后 create_agent_team。"
         "每条新用户请求先调用 list_agents 读取真实可用成员；匹配到明确 executable 合同就按其 input 合同分派。"

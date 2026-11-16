@@ -1,7 +1,7 @@
 import { siteBrowserApi, type SiteBrowserRequiredEvent } from '@/api/siteBrowser'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick, type Plugin } from 'vue'
-import { createMemoryHistory, createRouter, createWebHistory } from 'vue-router'
+import { createMemoryHistory, createRouter } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentTeamDetail, AgentTeamStatus } from '@/api/agentTeams'
 
@@ -45,95 +45,35 @@ vi.mock('@/api/agentTeams', () => ({
 }))
 vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: messages }))
 
-import { createPinia, getActivePinia, setActivePinia } from 'pinia'
+import { createPinia, setActivePinia } from 'pinia'
 
 import AdminCopilot from './AdminCopilot.vue'
 import AdminLayout from './AdminLayout.vue'
-import AgentChatDrawer from '@/components/ai/AgentChatDrawer.vue'
-import VirtualCursor from '@/components/ai/VirtualCursor.vue'
 import { useAgentActivityStore } from '@/stores/agentActivity'
 import { useUserStore } from '@/stores/user'
-import { agentChatStorageKey, loadAgentChatSnapshot, saveActiveAgentChatSession, saveAgentChatSessions, saveAgentChatSnapshot } from '@/utils/agentChatSessions'
+import { loadAgentChatSnapshot, saveAgentChatSnapshot } from '@/utils/agentChatSessions'
 
-it.each([true, false])('本地导航持久化：管理端路由成功=%s，恢复保留结果且不重放', async allowed => {
-  const router = createRouter({ history: createMemoryHistory(), routes: [
-    { path: '/', component: {} }, { path: '/admin/audit', component: {}, meta: { title: '管理端审计' } },
-  ] })
-  await router.push('/')
-  if (!allowed) router.beforeEach(to => to.path === '/admin/audit' ? false : true)
-  sessionApi.get.mockImplementation(async (_surface, session_id) => ({ surface: 'admin', session_id, run: null, messages: [], pending: null }))
-  const wrapper = mountCopilot([router])
-  const user = useUserStore()
-  user.profile = { id: 88, username: 'audit-admin', role: 'admin', status: 1 }
-  user.token = 'audit-admin-token'
-  await openCopilot(wrapper)
-  await flushSessionRestore()
-  const vm = wrapper.vm as any
-  vm.inputText = '打开管理端审计'
-  await vm.sendMessage()
-  await flushSessionRestore()
-  const sessionId = vm.sessionId as string, key = agentChatStorageKey('admin', 88)
-  const saved = loadAgentChatSnapshot(sessionId, key)
-  expect(saved?.messages.filter(message => message.localAction)).toHaveLength(2)
-  expect(saved?.messages.at(-1)?.localAction?.status).toBe(allowed ? 'completed' : 'failed')
-  expect(router.currentRoute.value.path).toBe(allowed ? '/admin/audit' : '/')
-  expect(streams.start).not.toHaveBeenCalled()
-  saveAgentChatSessions(key, [{ id: sessionId, title: '审计', createdAt: Date.now() }])
-  saveActiveAgentChatSession(key, sessionId)
-  const push = vi.spyOn(router, 'push')
-  try {
-    // 同组件重复恢复与真实会话读取路径一致；不会把导航转为Responses重试。
-    await vm.restoreSession()
-    await flushSessionRestore()
-    expect(wrapper.text()).toContain(allowed ? '已打开「管理端审计」' : '未能确认目标页面')
-    expect(push).not.toHaveBeenCalled()
-    expect(streams.start).not.toHaveBeenCalled()
-  } finally { wrapper.unmount(); push.mockRestore() }
-})
-
-it.each(['打开用户与权限', '打开管理员的用户与权限'])('实际管理菜单“%s”直接导航，冷启动保留结果且不发模型', async prompt => {
+it.each(['打开用户与权限', '打开管理员的用户与权限'])('管理端页面请求“%s”发送给团队，不直接跳转', async prompt => {
   const router = createRouter({ history: createMemoryHistory(), routes: [
     { path: '/admin/operations', component: {}, meta: { title: '运行与审计中心', role: 'admin' } },
-    { path: '/admin/access', component: {}, meta: { title: '用户与权限中心', role: 'admin', roles: ['admin'] } },
+    { path: '/admin/access', component: {}, meta: { title: '用户与权限中心', role: 'admin' } },
   ] })
-  await router.push('/admin/operations?section=overview')
+  await router.push('/admin/operations')
   sessionApi.get.mockImplementation(async (surface, session_id) => ({ surface, session_id, run: null, messages: [], pending: null }))
-  const profile = { id: 88, username: 'menu-admin', role: 'admin', status: 1 }
-  const original = mountCopilot([router])
+  const wrapper = mountCopilot([router])
   const user = useUserStore()
   user.token = 'menu-admin-token'
-  user.profile = profile
-  await openCopilot(original)
-  await flushSessionRestore()
+  user.profile = { id: 88, username: 'menu-admin', role: 'admin', status: 1 }
   try {
-    await original.get('textarea').setValue(prompt)
-    await original.get('.send-button').trigger('click')
+    await openCopilot(wrapper)
     await flushSessionRestore()
-    expect(streams.start).not.toHaveBeenCalled()
-    expect(router.currentRoute.value.fullPath).toBe('/admin/access')
-    expect(original.text()).toContain('已打开「用户与权限中心」。')
-  } catch (error) { original.unmount(); throw error }
-  const sessionId = (original.vm as any).sessionId as string
-  const key = agentChatStorageKey('admin', profile.id)
-  expect(loadAgentChatSnapshot(sessionId, key)?.messages.filter(message => message.localAction)).toHaveLength(2)
-  original.unmount()
-
-  // mountCopilot 创建全新 Pinia，profile 由异步登录恢复后写入。
-  const refreshed = mountCopilot([router])
-  const restoredUser = useUserStore()
-  restoredUser.token = 'menu-admin-token'
-  await Promise.resolve()
-  restoredUser.profile = profile
-  const push = vi.spyOn(router, 'push')
-  try {
-    await openCopilot(refreshed)
-    await flushSessionRestore()
-    expect((refreshed.vm as any).sessionId).toBe(sessionId)
-    expect(refreshed.text()).toContain('已打开「用户与权限中心」。')
-    expect(loadAgentChatSnapshot(sessionId, key)?.messages.filter(message => message.localAction)).toHaveLength(2)
-    expect(push).not.toHaveBeenCalled()
-    expect(streams.start).not.toHaveBeenCalled()
-  } finally { refreshed.unmount(); push.mockRestore() }
+    await wrapper.get('textarea').setValue(prompt)
+    await wrapper.get('.send-button').trigger('click')
+    await flushPromises()
+    expect(streams.records).toHaveLength(1)
+    expect(streams.records[0].body.messages).toEqual([{ role: 'user', content: prompt }])
+    expect(router.currentRoute.value.path).toBe('/admin/operations')
+  } finally { wrapper.unmount() }
 })
 
 it.each(['completed', 'pending'] as const)('本地导航恢复断网：管理端%s记录在切回、卸载后仍保留且不重放', async status => {
@@ -392,102 +332,21 @@ it('P1回归：权威空快照清理旧步骤和进度，同时保留其他 surf
   } finally { wrapper.unmount() }
 }, 15000)
 
-it.each(['管理端当前会话', '收起管理面板后的用户端'] as const)(
-  'P1回归：管理空会话后台轮询不取消%s的本地导航和持久化回执', async surface => {
-    const originalPath = `${window.location.pathname}${window.location.search}${window.location.hash}`
-    const router = createRouter({ history: createWebHistory(), routes: [
-      { path: '/', component: {} },
-      { path: '/admin/access', component: {}, meta: { title: '用户与权限中心', role: 'admin', roles: ['admin'] } },
-      { path: '/projects', component: {}, meta: { title: '项目' } },
-    ] })
-    await router.push('/')
-    sessionApi.get.mockImplementation(async (surface, session_id) => ({
-      surface, session_id, run: null, messages: [], events: [], pending: null,
-    }))
-    const wrapper = mountCopilot([router])
-    let drawer: VueWrapper | undefined
-    let cursor: VueWrapper | undefined
-    let target: HTMLButtonElement | undefined
-    try {
-      const user = useUserStore()
-      user.profile = { id: 88, username: 'navigation-admin', role: 'admin', status: 1 }
-      user.token = 'navigation-admin-token'
-      await openCopilot(wrapper)
-      await flushSessionRestore()
-      const adminVm = wrapper.vm as any
-      let sender = adminVm
-      const crossSurface = surface === '收起管理面板后的用户端'
-      const route = crossSurface ? '/projects' : '/admin/access'
-      const label = crossSurface ? '项目' : '用户与权限'
-      const pinia = getActivePinia()!
-      if (crossSurface) {
-        adminVm.closePanel()
-        await nextTick()
-        expect(wrapper.find('.copilot-panel').exists()).toBe(false)
-        drawer = mount(AgentChatDrawer, {
-          props: { visible: true, showLauncher: false },
-          global: { plugins: [pinia, router], stubs: { 'el-icon': true } },
-        })
-        await flushSessionRestore()
-        sender = drawer.vm as any
-      }
-      cursor = mount(VirtualCursor, { global: { plugins: [pinia], stubs: { Transition: false } } })
-      target = document.createElement('button')
-      target.dataset.route = route
-      target.textContent = label
-      target.getBoundingClientRect = () => ({ left: 20, top: 30, right: 140, bottom: 70, width: 120, height: 40 } as DOMRect)
-      target.addEventListener('click', () => { void router.push(route) })
-      document.body.appendChild(target)
-      vi.useFakeTimers()
-      // 保留双帧异步顺序，并将窗口 RAF 纳入同一个可控时钟。
-      vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => window.setTimeout(() => callback(performance.now()), 16))
-      vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(handle => window.clearTimeout(handle))
-      const pendingPoll = deferred<unknown>()
-      sessionApi.get.mockReturnValueOnce(pendingPoll.promise)
-      adminVm.scheduleSessionPoll(true)
-      await vi.advanceTimersByTimeAsync(0)
-      expect(sessionApi.get).toHaveBeenLastCalledWith('admin', adminVm.sessionId, true)
-      const push = vi.spyOn(router, 'push')
-      const activity = useAgentActivityStore()
-      const clear = vi.spyOn(activity, 'clear')
-      sender.inputText = crossSurface ? '打开项目' : '打开用户与权限'
-      const navigation = sender.sendMessage()
-      await flushPromises()
-      const navigationKey = activity.current?.key
-      expect(navigationKey).toMatch(/^xiaoling-nav-/)
-      expect(activity.isActing).toBe(true)
-      expect(push).not.toHaveBeenCalled()
-      expect(loadAgentChatSnapshot(sender.sessionId, sender.chatStorageKey)?.messages.at(-1)?.localAction?.status).toBe('pending')
-
-      // 真实后台轮询回包落在虚拟鼠标接管后、实际菜单点击前。
-      pendingPoll.resolve({ surface: 'admin', session_id: adminVm.sessionId,
-        run: null, messages: [], events: [], pending: null })
-      await flushPromises()
-
-      expect(clear).not.toHaveBeenCalled()
-      expect(activity.active.has(navigationKey!)).toBe(true)
-      expect(push).not.toHaveBeenCalled()
-      expect(loadAgentChatSnapshot(sender.sessionId, sender.chatStorageKey)?.messages.at(-1)?.localAction?.status).toBe('pending')
-      // 双 RAF + 抵达 700ms + 点击 650ms + 路由确认 50ms。
-      await vi.advanceTimersByTimeAsync(1600)
-      await navigation
-      await flushPromises()
-      expect(router.currentRoute.value.path).toBe(route)
-      expect(push).toHaveBeenCalledExactlyOnceWith(route)
-      const saved = loadAgentChatSnapshot(sender.sessionId, sender.chatStorageKey)
-      expect(saved?.messages.filter(message => message.localAction)).toHaveLength(2)
-      expect(saved?.messages.filter(message => message.localAction).every(message => message.localAction?.status === 'completed')).toBe(true)
-      expect(streams.start).not.toHaveBeenCalled()
-    } finally {
-      cursor?.unmount()
-      drawer?.unmount()
-      wrapper.unmount()
-      target?.remove()
-      router.options.history.destroy()
-      window.history.replaceState({}, '', originalPath)
-    }
-  }, 15000,
-)
+it('管理会话轮询不会清除进行中的用户端团队活动', async () => {
+  const wrapper = mountCopilot()
+  try {
+    await openCopilot(wrapper)
+    await flushSessionRestore()
+    const vm = wrapper.vm as any
+    const activity = useAgentActivityStore()
+    const key = activity.begin('用户端团队正在执行', 'user-surface-team', '/projects')
+    const clear = vi.spyOn(activity, 'clear')
+    await vm.restoreSession()
+    await flushSessionRestore()
+    expect(clear).not.toHaveBeenCalled()
+    expect(activity.active.has(key)).toBe(true)
+  } finally { wrapper.unmount() }
+})
 
 function flushSessionRestore(): Promise<void> {
   return new Promise((resolve) => {
@@ -597,6 +456,37 @@ afterEach(async () => {
   await flushPromises()
   expect(document.querySelector('.copilot-trigger')).toBeNull()
   vi.useRealTimers()
+})
+
+it('管理员小菱启动新任务时自动附带当前管理页与栏目', async () => {
+  const page = document.createElement('div')
+  page.dataset.xiaolingPage = '/admin/operations'
+  page.dataset.xiaolingSection = 'logs'
+  document.body.appendChild(page)
+  const router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/admin/operations', component: {}, meta: { title: '运行与审计中心', role: 'admin' } },
+  ] })
+  await router.push('/admin/operations?section=logs')
+  const wrapper = mountCopilot([router])
+  const user = useUserStore()
+  user.token = 'page-context-admin-token'
+  user.profile = { id: 88, username: 'page-context-admin', role: 'admin', status: 1 }
+  try {
+    const vm = wrapper.vm as any
+    const running = vm.runResponse({
+      action: 'start', surface: 'admin', session_id: 'admin-page-context',
+      messages: [{ role: 'user', content: '请检查当前页面' }],
+    })
+    await flushPromises()
+
+    expect(streams.records).toHaveLength(1)
+    expect(streams.records[0].body.page_context).toEqual({ path: '/admin/operations', section: 'logs' })
+    streams.records[0].resolve()
+    await running
+  } finally {
+    wrapper.unmount()
+    page.remove()
+  }
 })
 
 describe('团队轮询复核', () => {

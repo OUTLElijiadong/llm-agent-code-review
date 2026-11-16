@@ -22,6 +22,7 @@ const workspace = vi.hoisted(() => ({
     workspace.activeSpace = 'enterprise'
     if (id !== undefined) workspace.activeEnterpriseId = id
   }),
+  refreshEnterpriseMembership: vi.fn(async (): Promise<boolean | null> => false),
 }))
 
 vi.mock('@/stores/user', () => ({
@@ -77,6 +78,7 @@ beforeEach(() => {
   workspace.syncIdentity.mockReset()
   workspace.activatePersonal.mockClear()
   workspace.activateEnterprise.mockClear()
+  workspace.refreshEnterpriseMembership.mockReset().mockResolvedValue(false)
 })
 
 describe('router guards', () => {
@@ -219,6 +221,28 @@ describe('router guards', () => {
       .toEqual({ path: '/enterprise', replace: true })
     expect(await before(route('/enterprise', { workspace: 'enterprise' }), route('/dashboard'))).toBe(true)
     expect(workspace.activateEnterprise).toHaveBeenCalledOnce()
+  })
+
+  it('企业成员即使切回个人空间也不能进入公开论坛', async () => {
+    const { before } = installHarness()
+    auth.user.token = 'token'
+    auth.user.profile = { id: 8, role: 'user' }
+    workspace.activeSpace = 'personal'
+    workspace.refreshEnterpriseMembership.mockResolvedValue(true)
+
+    expect(await before(route('/forum', { workspace: 'personal', personalAccountOnly: true }), route('/dashboard')))
+      .toEqual({ path: '/enterprise', replace: true })
+    expect(workspace.refreshEnterpriseMembership).toHaveBeenCalledOnce()
+  })
+
+  it('无法确认账号类型时阻止打开公开论坛', async () => {
+    const { before } = installHarness()
+    auth.user.token = 'token'
+    auth.user.profile = { id: 9, role: 'user' }
+    workspace.refreshEnterpriseMembership.mockResolvedValue(null)
+
+    expect(await before(route('/forum', { workspace: 'personal', personalAccountOnly: true }), route('/dashboard')))
+      .toEqual({ path: '/enterprise', replace: true })
   })
 
   it('updates the document title after navigation', () => {

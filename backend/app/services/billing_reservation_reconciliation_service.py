@@ -17,6 +17,7 @@ from app.models.billing_ledger import (
     BillingReservationReconciliationEvent,
     BillingToolExecutionResult,
 )
+from app.models.enterprise_agent_team import EnterpriseAgentTeam, EnterpriseAgentTeamTask
 from app.models.enterprise_assistant_runtime import EnterpriseAssistantRuntimeState
 from app.models.enterprise_chat import EnterpriseAssistantRun
 from app.services import billing_ledger_service as ledger
@@ -25,6 +26,8 @@ _HEX_SHA256 = re.compile(r"^[0-9a-fA-F]{64}$")
 _MAX_DB_INTEGER = 2**63 - 1
 _RESOLUTIONS = {"settle", "release_not_sent"}
 STALE_TOOL_ATTEMPT_AGE = timedelta(minutes=30)
+_TEAM_MODEL_KEY = re.compile(r"ent-team:([1-9][0-9]*):([1-9][0-9]*):([1-9][0-9]*):([1-9][0-9]*)")
+_TEAM_RECOVERY_NOTE = "企业团队模型请求已隔离，保留额度待核对。"
 
 
 class ReconciliationError(ValueError):
@@ -141,6 +144,129 @@ def list_reconciliation_events(db: Session, *, reservation_id: int):
     if db.get(BillingReservation, reservation_id) is None:
         raise ReconciliationError("计费预占记录不存在")
     return _events(db, reservation_id)
+
+
+def _team_model_locator(db: Session, reservation: BillingReservation):
+    match = _TEAM_MODEL_KEY.fullmatch(reservation.request_key or "")
+    if reservation.billable_kind != "model" or match is None:
+        return None
+    team_id, task_id, attempt, call_index = map(int, match.groups())
+    if call_index > 100:
+        return None
+    team = db.query(EnterpriseAgentTeam).filter_by(
+        id=team_id, enterprise_id=reservation.enterprise_id,
+        initiator_user_id=reservation.user_id,
+    ).first()
+    task = db.query(EnterpriseAgentTeamTask).filter_by(id=task_id, team_id=team_id).first()
+    if (team is None or task is None or int(task.attempt_count) != attempt
+            or reservation.enterprise_wallet_id is None):
+        return None
+    return team, task
+
+
+def _team_billing_group_matches(run, reservation: BillingReservation) -> bool:
+    from app.core.exceptions import ForbiddenError
+    from app.services import enterprise_assistant_billing_group
+
+    try:
+        return enterprise_assistant_billing_group.frozen(run) == reservation.group_id
+    except ForbiddenError:
+        return False
+
+
+def can_recover_stale_team_model_attempt(db: Session, reservation: BillingReservation,
+                                         *, now: datetime | None = None) -> bool:
+    at = now.astimezone(timezone.utc).replace(tzinfo=None) if now and now.tzinfo else (now or _now())
+    attempt_at = reservation.provider_attempt_started_at or reservation.created_at
+    if (reservation.status not in {"reserved", "unknown"} or attempt_at is None
+            or attempt_at > at - STALE_TOOL_ATTEMPT_AGE):
+        return False
+    if _fenced_team_model_attempt(db, reservation):
+        return False
+    located = _team_model_locator(db, reservation)
+    if located is None:
+        return False
+    team, task = located
+    run = db.query(EnterpriseAssistantRun).filter_by(
+        id=team.assistant_run_id, enterprise_id=team.enterprise_id,
+        conversation_id=team.conversation_id, initiator_user_id=team.initiator_user_id,
+        source_message_id=team.source_message_id,
+    ).first()
+    state = (db.query(EnterpriseAssistantRuntimeState).filter_by(assistant_run_id=run.id).first()
+             if run is not None else None)
+    return (state is not None and _team_billing_group_matches(run, reservation)
+            and task.status in {"running", "awaiting_reconciliation", "cancelled"}
+            and (task.lease_expires_at is None or task.lease_expires_at <= at))
+
+
+def recover_stale_team_model_attempt(db: Session, *, reservation_id: int, actor_id: int,
+                                     note: str, now: datetime | None = None):
+    """Fence an abandoned team worker and expose its hold to human reconciliation."""
+    if type(actor_id) is not int or actor_id <= 0:
+        raise ReconciliationError("审核账号无效")
+    normalized_note = _required_text(note, "恢复说明", 500)
+    at = now.astimezone(timezone.utc).replace(tzinfo=None) if now and now.tzinfo else (now or _now())
+    candidate = db.query(BillingReservation).filter_by(id=reservation_id).first()
+    located = _team_model_locator(db, candidate) if candidate else None
+    if located is None:
+        raise ReconciliationError("预占不属于可定位的企业团队模型请求")
+    team_ref, task_ref = located
+    identity = (candidate.request_key, candidate.billable_kind, candidate.enterprise_id,
+                candidate.user_id, candidate.group_id, candidate.enterprise_wallet_id)
+    # The live send path holds these same parent and team rows until its provider
+    # transaction completes. A recovery cannot pass an active send.
+    run = db.query(EnterpriseAssistantRun).filter_by(
+        id=team_ref.assistant_run_id, enterprise_id=team_ref.enterprise_id,
+        conversation_id=team_ref.conversation_id, initiator_user_id=team_ref.initiator_user_id,
+        source_message_id=team_ref.source_message_id,
+    ).populate_existing().with_for_update().one_or_none()
+    state = (db.query(EnterpriseAssistantRuntimeState).filter_by(assistant_run_id=run.id)
+             .populate_existing().with_for_update().one_or_none() if run is not None else None)
+    team = db.query(EnterpriseAgentTeam).filter_by(id=team_ref.id).populate_existing().with_for_update().one()
+    task = (db.query(EnterpriseAgentTeamTask).filter_by(id=task_ref.id, team_id=team.id)
+            .populate_existing().with_for_update().one())
+    reservation, parts = _reservation_for_update(db, reservation_id, wallet_first=True)
+    if ((reservation.request_key, reservation.billable_kind, reservation.enterprise_id,
+         reservation.user_id, reservation.group_id, reservation.enterprise_wallet_id) != identity
+            or _team_model_locator(db, reservation) is None):
+        _block_action(db, reservation_id=reservation_id, actor_id=actor_id, resolution=None,
+                      reason="企业团队账单身份已变化")
+    attempt_at = reservation.provider_attempt_started_at or reservation.created_at
+    if (state is None or not _team_billing_group_matches(run, reservation)
+            or reservation.status not in {"reserved", "unknown"} or attempt_at is None
+            or attempt_at > at - STALE_TOOL_ATTEMPT_AGE
+            or task.status not in {"running", "awaiting_reconciliation", "cancelled"}
+            or (task.lease_expires_at is not None and task.lease_expires_at > at)
+            or _fenced_team_model_attempt(db, reservation)):
+        _block_action(db, reservation_id=reservation_id, actor_id=actor_id, resolution=None,
+                      reason="外呼标记未过期、任务仍在执行或状态已变化，不能恢复")
+    try:
+        _require_complete_hold(reservation, parts)
+    except ReconciliationError as exc:
+        _block_action(db, reservation_id=reservation_id, actor_id=actor_id, resolution=None, reason=str(exc))
+    task.lease_generation = int(task.lease_generation) + 1
+    task.lease_token = None
+    task.lease_expires_at = None
+    if task.status != "cancelled":
+        task.status = "awaiting_reconciliation"
+    if team.status not in {"cancelled", "completed", "failed", "suppressed"}:
+        team.status = "awaiting_reconciliation"
+    ledger.mark_unknown(db, reservation.request_key)
+    db.add(BillingReservationReconciliationEvent(
+        reservation_id=reservation.id, related_event_id=None, actor_id=actor_id,
+        decision="recovered", resolution=None, provider_request_id=None, input_tokens=None,
+        output_tokens=None, actual_milli=None, tool_successful_calls=None,
+        evidence_reference=None, evidence_sha256=None,
+        note=(_TEAM_RECOVERY_NOTE + normalized_note)[:500], created_at=at,
+    ))
+    db.flush()
+    return reservation
+
+
+def _fenced_team_model_attempt(db: Session, reservation: BillingReservation) -> bool:
+    return (reservation.billable_kind == "model" and _TEAM_MODEL_KEY.fullmatch(reservation.request_key or "")
+            is not None and any(event.decision == "recovered" and (event.note or "").startswith(_TEAM_RECOVERY_NOTE)
+                                for event in _events(db, reservation.id)))
 
 
 def can_recover_stale_tool_attempt(
@@ -308,7 +434,9 @@ def propose_reconciliation(db: Session, *, reservation_id: int, actor_id: int,
                            evidence_sha256: str, note: str,
                            provider_request_id: str | None,
                            input_tokens: int | None, output_tokens: int | None,
-                           tool_successful_calls: int | None = None):
+                           tool_successful_calls: int | None = None,
+                           model_search_calls_evidence: int | None = None,
+                           model_fetch_calls_evidence: int | None = None):
     if type(actor_id) is not int or actor_id <= 0:
         raise ReconciliationError("审核账号无效")
     if resolution not in _RESOLUTIONS:
@@ -337,6 +465,13 @@ def propose_reconciliation(db: Session, *, reservation_id: int, actor_id: int,
                       resolution=resolution, reason="该预占已有待复核提案", proposal=pending)
 
     is_tool = reservation.billable_kind in {"search", "fetch"}
+    evidence_counts = (model_search_calls_evidence, model_fetch_calls_evidence)
+    if evidence_counts != (None, None) and not (
+        type(model_search_calls_evidence) is int and type(model_fetch_calls_evidence) is int
+        and evidence_counts == (0, 0) and resolution == "settle" and not is_tool
+    ):
+        _block_action(db, reservation_id=reservation_id, actor_id=actor_id,
+                      resolution=resolution, reason="外部模型工具用量证据必须成对明确为零，非零或不完整继续冻结")
     normalized_request_id = None
     input_value = output_value = actual_milli = None
     successful_tool_calls = None
@@ -373,10 +508,17 @@ def propose_reconciliation(db: Session, *, reservation_id: int, actor_id: int,
                     or not 0 <= input_tokens <= _MAX_DB_INTEGER or not 0 <= output_tokens <= _MAX_DB_INTEGER:
                 _block_action(db, reservation_id=reservation_id, actor_id=actor_id,
                               resolution=resolution, reason="供应商输入和输出 Token 必须为非负整数")
-            if reservation.server_tool_search_calls is None or reservation.server_tool_fetch_calls is None:
+            original_counts = (reservation.server_tool_search_calls, reservation.server_tool_fetch_calls)
+            if original_counts == (None, None) and evidence_counts != (0, 0):
                 _block_action(db, reservation_id=reservation_id, actor_id=actor_id,
                               resolution=resolution,
                               reason="缺少供应商 Search/Fetch 用量计数，不能推断为零；预占继续冻结")
+            if original_counts != (None, None) and evidence_counts != (None, None):
+                _block_action(db, reservation_id=reservation_id, actor_id=actor_id,
+                              resolution=resolution, reason="供应商已有工具用量，不接受替代证据")
+            if (original_counts[0] is None) != (original_counts[1] is None):
+                _block_action(db, reservation_id=reservation_id, actor_id=actor_id,
+                              resolution=resolution, reason="供应商工具用量记录不完整，不能结算")
             if ((reservation.server_tool_search_calls or 0) > 0
                     or (reservation.server_tool_fetch_calls or 0) > 0):
                 _block_action(db, reservation_id=reservation_id, actor_id=actor_id,
@@ -398,7 +540,8 @@ def propose_reconciliation(db: Session, *, reservation_id: int, actor_id: int,
           or tool_successful_calls is not None):
         _block_action(db, reservation_id=reservation_id, actor_id=actor_id,
                       resolution=resolution, reason="未发送释放提案不得附带供应商请求 ID 或 Token 用量")
-    if resolution == "release_not_sent" and reservation.provider_attempt_started_at is not None:
+    if (resolution == "release_not_sent" and reservation.provider_attempt_started_at is not None
+            and not _fenced_team_model_attempt(db, reservation)):
         _block_action(db, reservation_id=reservation_id, actor_id=actor_id,
                       resolution=resolution, reason="工具 provider attempt 已持久化，不能提案为从未发送")
     if resolution == "release_not_sent" and any((
@@ -421,6 +564,8 @@ def propose_reconciliation(db: Session, *, reservation_id: int, actor_id: int,
         output_tokens=output_value,
         actual_milli=actual_milli,
         tool_successful_calls=successful_tool_calls,
+        model_search_calls_evidence=model_search_calls_evidence,
+        model_fetch_calls_evidence=model_fetch_calls_evidence,
         evidence_reference=evidence_reference,
         evidence_sha256=evidence_sha256,
         note=note,
@@ -478,10 +623,15 @@ def decide_reconciliation(db: Session, *, reservation_id: int, actor_id: int,
                         db, request_key=reservation.request_key, tool_successful_calls=count,
                     )
                 else:
-                    if reservation.server_tool_search_calls is None or reservation.server_tool_fetch_calls is None:
+                    original_counts = (reservation.server_tool_search_calls, reservation.server_tool_fetch_calls)
+                    evidence_counts = (proposal.model_search_calls_evidence, proposal.model_fetch_calls_evidence)
+                    if ((original_counts, evidence_counts) not in {
+                        ((None, None), (0, 0)),
+                        ((0, 0), (None, None)),
+                    }):
                         _block_action(db, reservation_id=reservation_id, actor_id=actor_id,
                                       resolution=proposal.resolution,
-                                      reason="提案提交后仍缺少供应商 Search/Fetch 用量计数，不能批准结算",
+                                      reason="供应商 Search/Fetch 用量缺失或与外部证据冲突，不能批准结算",
                                       proposal=proposal)
                     actual_milli = ledger.quote_reservation_milli(
                         db, request_key=reservation.request_key,
@@ -503,7 +653,8 @@ def decide_reconciliation(db: Session, *, reservation_id: int, actor_id: int,
                     reservation.output_tokens is not None,
                     reservation.server_tool_search_calls is not None,
                     reservation.server_tool_fetch_calls is not None,
-                    reservation.provider_attempt_started_at is not None,
+                    reservation.provider_attempt_started_at is not None
+                    and not _fenced_team_model_attempt(db, reservation),
                 )):
                     _block_action(db, reservation_id=reservation_id, actor_id=actor_id,
                                   resolution=proposal.resolution,
@@ -511,6 +662,7 @@ def decide_reconciliation(db: Session, *, reservation_id: int, actor_id: int,
                                   proposal=proposal)
                 reservation = ledger.release_verified_not_sent(
                     db, reservation.request_key,
+                    fenced_model_attempt=_fenced_team_model_attempt(db, reservation),
                 )
         except ledger.BillingError as exc:
             _block_after_ledger_rollback(
@@ -529,6 +681,8 @@ def decide_reconciliation(db: Session, *, reservation_id: int, actor_id: int,
         input_tokens=proposal.input_tokens,
         output_tokens=proposal.output_tokens,
         tool_successful_calls=proposal.tool_successful_calls,
+        model_search_calls_evidence=proposal.model_search_calls_evidence,
+        model_fetch_calls_evidence=proposal.model_fetch_calls_evidence,
         actual_milli=reservation.actual_milli if decision == "approve" and proposal.resolution == "settle"
         else proposal.actual_milli,
         evidence_reference=proposal.evidence_reference,

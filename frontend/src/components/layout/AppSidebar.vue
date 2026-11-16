@@ -32,6 +32,7 @@ import { useWorkspaceStore } from '@/stores/workspace'
 import { APP_BUILD_TIME_DISPLAY, APP_DISPLAY_VERSION, APP_RELEASE_SHA } from '@/constants/buildInfo'
 import type { UserRole } from '@/utils/roleHome'
 import { isNavigationPathAllowed } from '@/utils/agentNavigation'
+import { ADMIN_NAVIGATION_GROUPS } from '@/utils/adminNavigation'
 
 interface MenuItem {
   path: string
@@ -107,10 +108,11 @@ const adminItems: MenuItem[] = [
   { path: '/billing', title: '充值与订阅', icon: CreditCard, admin: true },
   { path: '/enterprise', title: '企业空间', icon: ChatLineSquare, admin: true },
   { path: '/my-agents', title: '我的 Agent', icon: Cpu, admin: true },
+  { path: '/agent-assets', title: '共享 Agent 与 Skill', icon: Cpu, admin: true },
   // 远程目标授权的审批入口：管理员也要能申请并批准（申请人与批准人仍须是不同账号）。
   { path: REMOTE_PENTEST_PATH, title: '远程网站评估', icon: Connection, admin: true },
   { path: '/forum', title: '开发者论坛', icon: ChatLineSquare, admin: true },
-  { path: '/support', title: '支持中心与反馈', icon: Tools, admin: true },
+  { path: '/support', title: '支持中心', icon: Tools, admin: true },
 ]
 
 const isAdmin = computed(() => userStore.isAdmin())
@@ -121,6 +123,7 @@ watch(
   () => [userStore.profile?.id ?? null, userStore.token] as const,
   ([userId, token]) => {
     workspaceStore.syncIdentity(userId, token)
+    if (userId && token) void workspaceStore.refreshEnterpriseMembership()
     if (route.meta?.workspace === 'enterprise' && workspaceStore.activeSpace !== 'enterprise') {
       void router.replace('/dashboard')
     }
@@ -129,6 +132,7 @@ watch(
 )
 
 function isVisibleInWorkspace(path: string): boolean {
+  if (path === '/forum' && workspaceStore.hasEnterpriseMembership !== false) return false
   const target = router.resolve({ path })
   return target.meta.workspace !== 'personal' || workspaceStore.activeSpace === 'personal'
 }
@@ -194,24 +198,18 @@ const userGroupDefinitions = [
   },
   { key: 'agents', title: 'Agent 与安全', paths: ['/agents', '/my-agents', '/agent-assets', '/sandboxes', '/security'] },
   { key: 'community', title: '社区与支持', paths: ['/forum', '/enterprise', '/support'] },
-  { key: 'personal', title: '个人空间', paths: ['/knowledge', '/usage', '/profile/personalization', '/profile'] },
+  { key: 'personal', title: '个人空间', paths: ['/knowledge', '/usage', '/billing', '/profile/personalization', '/profile'] },
 ]
 
 const navigationGroups = computed<MenuGroup[]>(() => {
   if (isAdmin.value) {
-    const communityPaths = new Set(['/forum', '/support'])
-    return [
-      {
-        key: 'admin',
-        title: '系统管理',
-        items: visibleAdminItems.value.filter((item) => !communityPaths.has(item.path)),
-      },
-      {
-        key: 'community',
-        title: '社区与支持',
-        items: visibleAdminItems.value.filter((item) => communityPaths.has(item.path)),
-      },
-    ].filter((group) => group.items.length > 0)
+    return ADMIN_NAVIGATION_GROUPS.map((group) => ({
+      key: group.key,
+      title: group.title,
+      items: group.paths
+        .map((path) => visibleAdminItems.value.find((item) => item.path === path))
+        .filter((item): item is MenuItem => Boolean(item)),
+    })).filter((group) => group.items.length > 0)
   }
   return userGroupDefinitions
     .map((group) => ({
@@ -233,12 +231,25 @@ watch(expandedGroups, (value) => {
 }, { deep: true })
 
 function isGroupExpanded(key: string): boolean {
-  return expandedGroups.value[key] !== false
+  if (Object.prototype.hasOwnProperty.call(expandedGroups.value, key)) return expandedGroups.value[key] === true
+  const group = navigationGroups.value.find((item) => item.key === key)
+  return Boolean(group?.items.some((item) => isActive(item.path)))
 }
 
 function toggleGroup(key: string): void {
-  expandedGroups.value[key] = !isGroupExpanded(key)
+  expandedGroups.value = { ...expandedGroups.value, [key]: !isGroupExpanded(key) }
 }
+
+watch(
+  () => route.path,
+  () => {
+    const activeGroup = navigationGroups.value.find((group) => group.items.some((item) => isActive(item.path)))
+    if (activeGroup && !isGroupExpanded(activeGroup.key)) {
+      expandedGroups.value = { ...expandedGroups.value, [activeGroup.key]: true }
+    }
+  },
+  { immediate: true },
+)
 
 function toggleCollapsed(): void {
   isCollapsed.value = !isCollapsed.value

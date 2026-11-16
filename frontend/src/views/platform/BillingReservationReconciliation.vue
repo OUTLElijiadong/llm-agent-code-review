@@ -11,7 +11,7 @@
 
     <section class="boundary-note" aria-label="模型与工具账本对账边界">
       <strong>双人复核，按原快照计算</strong>
-      <span>只有 <code>unknown</code> 可提交结算或释放提案。陈旧 Search/Fetch 的外呼标记超过 30 分钟时，可经核验转为 <code>unknown</code>；此操作只改变对账状态，不释放额度。其他 <code>reserved</code> 继续只读。</span>
+      <span>只有 <code>unknown</code> 可提交结算或释放提案。符合条件的陈旧预占可转入待对账；已待对账的企业团队模型任务可隔离原任务。两种操作均不扣费、不释放额度。</span>
       <span>每项提案须由另一位获授权的管理员复核。页面只保存外部证据引用和 SHA-256；平台不会验证外部证据的真实性。</span>
     </section>
 
@@ -24,9 +24,9 @@
       <label class="field">
         <span>预占状态</span>
         <select v-model="status" :disabled="loading || busy" @change="load">
-          <option value="">全部（含只读 reserved）</option>
+          <option value="">全部状态</option>
           <option value="unknown">结果未知（可提案）</option>
-          <option value="reserved">仍预占（只读）</option>
+          <option value="reserved">仍预占</option>
           <option value="reviewed">已有审计历史</option>
         </select>
       </label>
@@ -92,10 +92,11 @@
         <div><dt>创建时间</dt><dd>{{ dateTime(selected.created_at) }}</dd></div>
       </dl>
 
-      <p v-if="selected.status === 'reserved'" class="hint warning">该调用仍可能在供应商处理中。平台只会把超过安全等待窗口且运行租约已失效的 Search/Fetch 转为 unknown；不会自动释放额度。</p>
+      <p v-if="selected.status === 'reserved'" class="hint warning">该调用仍可能在供应商处理中。符合安全等待时间和任务或运行租约条件的企业团队模型及 Search/Fetch 预占可转入待对账。</p>
       <div v-if="selected.can_recover_stale_attempt" class="recovery-action">
-        <p class="hint warning">外呼标记已超过 30 分钟。确认运行租约已失效后，可将该预占转入双人对账；不会扣除或释放额度。</p>
-        <button type="button" class="primary" :disabled="busy" @click="recoverStaleAttempt">转入人工对账</button>
+        <p v-if="selected.status === 'unknown'" class="hint warning">可隔离原任务并继续对账。已发送的供应商请求不能撤回；此操作不会扣费或释放额度。</p>
+        <p v-else class="hint warning">该记录已超过 30 分钟且符合恢复条件。转入待对账不会扣费或释放额度，后续处理须经双人复核。</p>
+        <button type="button" class="primary" :disabled="busy" @click="recoverStaleAttempt">{{ selected.status === 'unknown' ? '隔离原任务并继续对账' : '转入人工对账' }}</button>
       </div>
       <p v-if="selected.status === 'unknown' && !selected.can_settle" class="hint warning" role="status">
         当前不能结算：{{ selected.settlement_block_reasons.join('；') }}。缺少用量字段时按未知处理，不推断为零。
@@ -108,6 +109,7 @@
             <div class="event-head"><strong>{{ eventLabel(event) }}</strong><time>{{ dateTime(event.created_at) }}</time></div>
             <p>操作人 #{{ event.actor_id }} · {{ resolutionLabel(event.resolution) }}<span v-if="event.actual_milli !== null"> · 重新计算 {{ credits(event.actual_milli) }}</span><span v-if="selected.billable_kind !== 'model' && event.tool_successful_calls !== null"> · 工具成功次数 {{ event.tool_successful_calls }}</span></p>
             <p v-if="event.provider_request_id">供应商请求 ID：<code>{{ event.provider_request_id }}</code></p>
+            <p v-if="event.model_search_calls_evidence != null && event.model_fetch_calls_evidence != null">管理员提交的外部证据计数：Search {{ event.model_search_calls_evidence }} · Fetch {{ event.model_fetch_calls_evidence }}</p>
             <p v-if="event.evidence_reference">证据引用：{{ event.evidence_reference }} · SHA-256 <code>{{ event.evidence_sha256 }}</code></p>
             <p v-else-if="event.decision === 'blocked'">此业务阻断事件不含用户提交的证据字段。</p>
             <p>{{ event.note }}</p>
@@ -123,6 +125,7 @@
         <p v-if="pendingProposal.provider_request_id">供应商请求 ID：<code>{{ pendingProposal.provider_request_id }}</code></p>
         <p v-if="selected.billable_kind === 'model'">Token：输入 {{ tokenCount(pendingProposal.input_tokens) }} · 输出 {{ tokenCount(pendingProposal.output_tokens) }}</p>
         <p v-else>工具成功次数：{{ pendingProposal.tool_successful_calls ?? '未记录' }}</p>
+        <p v-if="pendingProposal.model_search_calls_evidence != null && pendingProposal.model_fetch_calls_evidence != null">管理员提交的外部证据计数：Search {{ pendingProposal.model_search_calls_evidence }} · Fetch {{ pendingProposal.model_fetch_calls_evidence }}</p>
         <p class="evidence-note">请在供应商控制台/外部证据源独立核验后再决定。证据 SHA-256 只能标识提交内容，不能证明其真实性。</p>
         <template v-if="pendingProposal.actor_id === currentUserId">
           <p class="hint warning" role="status">你是提案人，不能审批本人提案；需另一位获授权管理员复核。</p>
@@ -164,7 +167,14 @@
             </select>
           </label>
           <p class="hint" v-if="selected.billable_kind === 'model'">批准金额由原始费率快照计算。若存在 Search/Fetch 成功调用，系统不会结算。</p>
-          <p class="hint" v-else>金额按本次 reservation 保存的单次费率重算。0 次是有证据支持的零收费对账，不等同于“请求从未发送”。</p>
+          <fieldset v-if="selected.billable_kind === 'model' && selected.requires_model_tool_evidence" class="external-counts">
+            <legend>外部证据计数</legend>
+            <p class="hint">供应商原始计数缺失。请依据外部证据分别确认两项均为零，另一位管理员需独立复核；如有非零或无法确认，预占继续冻结。</p>
+            <label><input v-model="searchZeroConfirmed" type="checkbox" :disabled="busy" /> 外部证据显示 Search 为 0 次</label>
+            <label><input v-model="fetchZeroConfirmed" type="checkbox" :disabled="busy" /> 外部证据显示 Fetch 为 0 次</label>
+            <p class="hint">证据由管理员提交，系统不会自动验证其真实性。</p>
+          </fieldset>
+          <p v-if="selected.billable_kind !== 'model'" class="hint">金额按本次 reservation 保存的单次费率重算。0 次是有证据支持的零收费对账，不等同于“请求从未发送”。</p>
         </template>
         <template v-else>
           <p class="hint warning">释放会归还仍冻结的积分与企业额度。只有外部证据明确证明供应商从未收到请求时才可提案；已记录任何供应商用量的预占不能释放。</p>
@@ -210,6 +220,8 @@ const providerRequestId = ref('')
 const inputTokens = ref<number | null>(null)
 const outputTokens = ref<number | null>(null)
 const toolSuccessfulCalls = ref<0 | 1 | null>(null)
+const searchZeroConfirmed = ref(false)
+const fetchZeroConfirmed = ref(false)
 const evidenceReference = ref('')
 const evidenceSha256 = ref('')
 const proposalNote = ref('')
@@ -226,6 +238,7 @@ const canPropose = computed(() => {
   if (resolution.value === 'release_not_sent') return row.can_release_not_sent
   if (!row.can_settle || !providerRequestId.value.trim()) return false
   if (row.billable_kind !== 'model') return toolSuccessfulCalls.value === 0 || toolSuccessfulCalls.value === 1
+  if (row.requires_model_tool_evidence && !(searchZeroConfirmed.value && fetchZeroConfirmed.value)) return false
   return Number.isSafeInteger(inputTokens.value) && Number(inputTokens.value) >= 0
     && Number.isSafeInteger(outputTokens.value) && Number(outputTokens.value) >= 0
 })
@@ -255,11 +268,12 @@ function eventLabel(event: BillingReservationReconciliationEvent) {
   if (event.decision === 'proposed') return '提交提案'
   if (event.decision === 'approved') return '另一位管理员批准'
   if (event.decision === 'blocked') return '操作被阻断，账本未变更'
-  if (event.decision === 'recovered') return '陈旧预占转入 unknown'
+  if (event.decision === 'recovered') return '陈旧预占已处理，继续对账'
   return '另一位管理员拒绝'
 }
 function clearForm() {
   providerRequestId.value = ''; inputTokens.value = null; outputTokens.value = null; toolSuccessfulCalls.value = null
+  searchZeroConfirmed.value = false; fetchZeroConfirmed.value = false
   evidenceReference.value = ''; evidenceSha256.value = ''; proposalNote.value = ''; decisionNote.value = ''
 }
 function resetSelection() { selected.value = null; history.value = []; clearForm() }
@@ -333,7 +347,8 @@ function propose() {
     ...(resolution.value === 'settle' ? {
       provider_request_id: providerRequestId.value.trim(),
       ...(row.billable_kind === 'model'
-        ? { input_tokens: Number(inputTokens.value), output_tokens: Number(outputTokens.value) }
+        ? { input_tokens: Number(inputTokens.value), output_tokens: Number(outputTokens.value),
+          ...(row.requires_model_tool_evidence ? { model_search_calls_evidence: 0, model_fetch_calls_evidence: 0 } : {}) }
         : { tool_successful_calls: toolSuccessfulCalls.value as 0 | 1 }),
     } : {}),
     evidence_reference: evidenceReference.value.trim(), evidence_sha256: evidenceSha256.value.trim(),
@@ -356,17 +371,24 @@ function decide(decision: 'approve' | 'reject') {
 function recoverStaleAttempt() {
   const row = selected.value
   if (!row?.can_recover_stale_attempt || busy.value) return
+  const isolating = row.status === 'unknown'
   const confirmed = window.confirm(
-    '确认该企业小菱运行租约已失效，并将陈旧 Search/Fetch 预占转为 unknown？额度不会释放，后续仍须双人对账。',
+    isolating
+      ? '确认隔离原任务并继续对账？已发送的供应商请求不能撤回；此操作不会扣费或释放额度，后续处理须经双人复核。'
+      : `确认将陈旧${row.billable_kind === 'model' ? '企业团队模型' : ' Search/Fetch'}预占转入待对账？此操作不会扣费或释放额度，后续处理须经双人复核。`,
   )
   if (!confirmed) return
   return runAction(
     () => recoverStaleBillingReservationAttempt(
       row.id,
-      '平台管理员确认外呼标记超过 30 分钟且运行租约已失效；仅转入双人对账，不自动释放额度。',
+      isolating
+        ? '平台管理员隔离原任务并继续对账；此操作不扣费、不释放额度，后续处理须经双人复核。'
+        : '平台管理员将符合条件的陈旧预占转入待对账；此操作不扣费、不释放额度，后续处理须经双人复核。',
       tokenSnapshot(),
     ),
-    '预占已转为 unknown，额度仍冻结；请按外部证据提交双人复核提案。',
+    isolating
+      ? '原任务已隔离，账单继续待对账，未扣费或释放额度；请按外部证据提交双人复核提案。'
+      : '预占已转入待对账，未扣费或释放额度；请按外部证据提交双人复核提案。',
   )
 }
 function changePage(direction: -1 | 1) {
@@ -403,6 +425,7 @@ td small { display: block; margin-top: 4px; color: #7b8292; }.selected { backgro
 .history, .proposal-review, .proposal-form { margin-top: 18px; padding-top: 16px; border-top: 1px solid #eceef3; }.history h3, .proposal-review h3, .proposal-form h3 { margin-bottom: 10px; font-size: 15px; }
 .history ol { display: grid; gap: 12px; margin: 0; padding-left: 22px; }.history li { padding-left: 4px; }.event-head { justify-content: flex-start; }.event-head time { color: #7b8292; font-size: 11px; }.history li p, .proposal-review p { margin: 5px 0; color: #596174; font-size: 12px; overflow-wrap: anywhere; }
 .proposal-form { display: grid; gap: 12px; max-width: 760px; }.token-inputs { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }.decision-note { max-width: 760px; }.warning { padding: 10px 12px; border-radius: 8px; color: #754b14; background: #fff6e3; }.evidence-note { padding: 9px 11px; border-radius: 8px; background: #f5f6fa; }.actions { justify-content: flex-start; margin-top: 12px; }.pagination { padding: 12px 15px; color: #69718a; font-size: 12px; }.pagination div { display: flex; gap: 8px; }
+.external-counts { display: grid; gap: 8px; margin: 0; padding: 12px; border: 1px solid #dce1ea; border-radius: 8px; }.external-counts label { display: flex; align-items: center; gap: 8px; }.external-counts input { width: auto; }
 .message { padding: 12px 14px; border-radius: 9px; }.error { color: #aa2732; background: #fff1f1; }.notice { color: #256344; background: #edf8f1; }
 @media (max-width: 720px) { .reconciliation-admin { padding: 15px; }.page-head, .detail-head, .filters { align-items: flex-start; flex-direction: column; }.facts, .token-inputs { grid-template-columns: 1fr; }.facts div { grid-template-columns: 95px minmax(0,1fr); }.actions { flex-wrap: wrap; } }
 </style>

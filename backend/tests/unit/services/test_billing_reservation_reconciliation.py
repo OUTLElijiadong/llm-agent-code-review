@@ -9,6 +9,7 @@ from app.models.billing_ledger import (
     BillingReservationPart,
     BillingReservationReconciliationEvent,
 )
+from app.models.enterprise_agent_team import EnterpriseAgentTeam, EnterpriseAgentTeamMember, EnterpriseAgentTeamTask
 from app.models.enterprise_assistant_runtime import EnterpriseAssistantRuntimeState
 from app.models.enterprise_chat import EnterpriseAssistantRun
 from app.services import billing_ledger_service
@@ -194,6 +195,79 @@ def test_missing_search_fetch_counts_are_not_assumed_to_be_zero(db):
     assert db.query(BillingReservation).filter_by(id=reservation.id).one().status == "unknown"
 
 
+def test_missing_counts_can_use_two_person_zero_evidence_without_changing_provider_fields(db):
+    wallet, reservation = _reservation(db)
+    proposal = reconciliation.propose_reconciliation(
+        db, reservation_id=reservation.id, actor_id=45, resolution="settle",
+        provider_request_id="resp-external-zero", input_tokens=10_000, output_tokens=5_000,
+        model_search_calls_evidence=0, model_fetch_calls_evidence=0, **EVIDENCE,
+    )
+    db.commit()
+    assert (proposal.model_search_calls_evidence, proposal.model_fetch_calls_evidence) == (0, 0)
+    with pytest.raises(reconciliation.ReconciliationBlocked, match="不能审批本人"):
+        reconciliation.decide_reconciliation(
+            db, reservation_id=reservation.id, actor_id=45, decision="approve", note="不得自批",
+        )
+    db.commit()
+    settled, approval = reconciliation.decide_reconciliation(
+        db, reservation_id=reservation.id, actor_id=46, decision="approve", note="独立核验原始证据",
+    )
+    db.commit()
+    assert settled.status == "settled" and settled.actual_milli == 30_000
+    assert (settled.server_tool_search_calls, settled.server_tool_fetch_calls) == (None, None)
+    assert (approval.model_search_calls_evidence, approval.model_fetch_calls_evidence) == (0, 0)
+    assert db.query(BillingCreditBatch).filter_by(wallet_id=wallet.id).one().remaining_milli == 70_000
+
+
+@pytest.mark.parametrize("search,fetch", [(0, None), (None, 0), (1, 0), (0, 1), (False, 0)])
+def test_external_evidence_requires_explicit_integer_zero_pair(db, search, fetch):
+    _, reservation = _reservation(db)
+    with pytest.raises(reconciliation.ReconciliationBlocked, match="成对明确为零"):
+        reconciliation.propose_reconciliation(
+            db, reservation_id=reservation.id, actor_id=45, resolution="settle",
+            provider_request_id="resp-invalid", input_tokens=10_000, output_tokens=5_000,
+            model_search_calls_evidence=search, model_fetch_calls_evidence=fetch, **EVIDENCE,
+        )
+    assert reservation.status == "unknown"
+
+
+def test_external_evidence_cannot_override_later_positive_provider_usage(db):
+    _, reservation = _reservation(db)
+    reconciliation.propose_reconciliation(
+        db, reservation_id=reservation.id, actor_id=45, resolution="settle",
+        provider_request_id="resp-race", input_tokens=10_000, output_tokens=5_000,
+        model_search_calls_evidence=0, model_fetch_calls_evidence=0, **EVIDENCE,
+    )
+    db.commit()
+    mark_unknown(db, reservation.request_key, server_tool_search_calls=1, server_tool_fetch_calls=0)
+    db.commit()
+    with pytest.raises(reconciliation.ReconciliationBlocked, match="冲突"):
+        reconciliation.decide_reconciliation(
+            db, reservation_id=reservation.id, actor_id=46, decision="approve", note="账单变更应阻断",
+        )
+    db.commit()
+    assert reservation.status == "unknown" and reservation.server_tool_search_calls == 1
+
+
+def test_external_evidence_and_later_matching_provider_zero_requires_new_review(db):
+    _, reservation = _reservation(db)
+    reconciliation.propose_reconciliation(
+        db, reservation_id=reservation.id, actor_id=45, resolution="settle",
+        provider_request_id="resp-late-zero", input_tokens=10_000, output_tokens=5_000,
+        model_search_calls_evidence=0, model_fetch_calls_evidence=0, **EVIDENCE,
+    )
+    db.commit()
+    mark_unknown(db, reservation.request_key, server_tool_search_calls=0, server_tool_fetch_calls=0)
+    db.commit()
+    with pytest.raises(reconciliation.ReconciliationBlocked, match="冲突"):
+        reconciliation.decide_reconciliation(
+            db, reservation_id=reservation.id, actor_id=46, decision="approve", note="原始证据已变化",
+        )
+    db.commit()
+    assert reservation.status == "unknown"
+    assert (reservation.server_tool_search_calls, reservation.server_tool_fetch_calls) == (0, 0)
+
+
 def test_stale_proposal_cannot_overwrite_automatic_settlement(db):
     _, reservation = _reservation(db, tool_counts=(0, 0))
     reconciliation.propose_reconciliation(
@@ -251,6 +325,108 @@ def test_reserved_call_is_visible_but_never_manually_reconcilable(db):
         )
     events = reconciliation.list_reconciliation_events(db, reservation_id=reservation.id)
     assert events[0].decision == "blocked" and events[0].evidence_reference is None
+
+
+@pytest.mark.parametrize("prior_state,cancelled", [("reserved", False), ("unknown", False), ("unknown", True)])
+def test_team_model_crash_recovery_fences_worker_and_requires_two_reviewers(db, prior_state, cancelled):
+    reservation = _stale_search_reservation(
+        db, attempt_started_at=NOW - timedelta(minutes=31), lease_expires_at=NOW - timedelta(minutes=20),
+    )
+    run = db.query(EnterpriseAssistantRun).filter_by(public_id=reservation.request_key.split(":")[1]).one()
+    team = EnterpriseAgentTeam(
+        assistant_run_id=run.id, enterprise_id=7, conversation_id=20, group_id=9,
+        initiator_user_id=42, source_message_id=run.source_message_id, source_tool_call_id="team-test",
+        title="任务", objective="测试", status="running", payer_owner_type="enterprise", payer_owner_id=7,
+        trace_id=uuid.uuid4().hex, request_key_prefix=uuid.uuid4().hex,
+        plan_sha256="a" * 64, permission_snapshot_sha256="b" * 64,
+    )
+    db.add(team)
+    db.flush()
+    member = EnterpriseAgentTeamMember(team_id=team.id, member_key="worker", display_name="worker",
+        address="agent:worker", kind="registered", role="worker", snapshot_sha256="a" * 64)
+    db.add(member)
+    db.flush()
+    task = EnterpriseAgentTeamTask(team_id=team.id, member_id=member.id, task_key="work", title="任务",
+        instructions="执行", status="running", attempt_count=1, lease_generation=5, lease_token="old",
+        lease_expires_at=NOW - timedelta(minutes=10))
+    db.add(task)
+    db.flush()
+    reservation.request_key = f"ent-team:{team.id}:{task.id}:1:1"
+    reservation.billable_kind = "model"
+    reservation.tool_name = None
+    reservation.tool_cost_cny_micros_per_success = None
+    reservation.tool_price_milli_per_success = None
+    reservation.input_rate_numerator = reservation.input_rate_denominator = 1
+    reservation.output_rate_numerator = reservation.output_rate_denominator = 1
+    db.commit()
+    if prior_state == "unknown":
+        mark_unknown(db, reservation.request_key)
+        db.commit()
+    assert reconciliation.can_recover_stale_team_model_attempt(db, reservation, now=NOW)
+    reservation.group_id = 999
+    db.commit()
+    assert not reconciliation.can_recover_stale_team_model_attempt(db, reservation, now=NOW)
+    with pytest.raises(reconciliation.ReconciliationBlocked, match="状态已变化"):
+        reconciliation.recover_stale_team_model_attempt(
+            db, reservation_id=reservation.id, actor_id=20, note="计费组不一致", now=NOW,
+        )
+    db.commit()
+    reservation.group_id = 9
+    db.commit()
+    task.lease_expires_at = NOW + timedelta(minutes=1)
+    db.commit()
+    assert not reconciliation.can_recover_stale_team_model_attempt(db, reservation, now=NOW)
+    with pytest.raises(reconciliation.ReconciliationBlocked, match="任务仍在执行"):
+        reconciliation.recover_stale_team_model_attempt(
+            db, reservation_id=reservation.id, actor_id=20, note="租约尚未结束", now=NOW,
+        )
+    db.commit()
+    task.lease_expires_at = NOW - timedelta(minutes=10)
+    if cancelled:
+        team.status, team.stop_requested, task.status = "cancelled", True, "cancelled"
+        task.lease_token = None
+    db.commit()
+    with pytest.raises(reconciliation.ReconciliationBlocked, match="reserved|provider attempt"):
+        reconciliation.propose_reconciliation(
+            db, reservation_id=reservation.id, actor_id=21, resolution="release_not_sent",
+            provider_request_id=None, input_tokens=None, output_tokens=None, **EVIDENCE,
+        )
+    db.commit()
+    recovered = reconciliation.recover_stale_team_model_attempt(
+        db, reservation_id=reservation.id, actor_id=20, note="租约已结束", now=NOW,
+    )
+    db.commit()
+    assert recovered.status == "unknown"
+    expected_status = "cancelled" if cancelled else "awaiting_reconciliation"
+    assert (task.status, task.lease_generation, task.lease_token) == (expected_status, 6, None)
+    assert team.status == expected_status
+    assert not reconciliation.can_recover_stale_team_model_attempt(db, reservation, now=NOW)
+    reconciliation.propose_reconciliation(
+        db, reservation_id=reservation.id, actor_id=21, resolution="release_not_sent",
+        provider_request_id=None, input_tokens=None, output_tokens=None, **EVIDENCE,
+    )
+    db.commit()
+    with pytest.raises(reconciliation.ReconciliationBlocked, match="不能审批本人"):
+        reconciliation.decide_reconciliation(
+            db, reservation_id=reservation.id, actor_id=21, decision="approve", note="自批",
+        )
+    db.commit()
+    released, _ = reconciliation.decide_reconciliation(
+        db, reservation_id=reservation.id, actor_id=22, decision="approve", note="复核未发送证据",
+    )
+    db.commit()
+    assert released.status == "released" and released.provider_attempt_started_at is None
+
+
+def test_unfenced_model_marker_cannot_be_released_even_with_proposal_evidence(db):
+    _, reservation = _reservation(db)
+    reservation.provider_attempt_started_at = NOW - timedelta(hours=1)
+    db.commit()
+    with pytest.raises(reconciliation.ReconciliationBlocked, match="provider attempt"):
+        reconciliation.propose_reconciliation(
+            db, reservation_id=reservation.id, actor_id=21, resolution="release_not_sent",
+            provider_request_id=None, input_tokens=None, output_tokens=None, **EVIDENCE,
+        )
 
 
 def _stale_search_reservation(db, *, attempt_started_at, lease_expires_at):

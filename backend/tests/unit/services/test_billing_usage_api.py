@@ -38,7 +38,10 @@ def test_pricing_catalog_matches_current_deepseek_model_routing(db):
 
 def test_pricing_contract_exposes_each_channel_while_preserving_aggregate(db, monkeypatch):
     states = {"alipay": False, "wechat": True}
-    monkeypatch.setattr(billing, "_sales_ready", lambda channel: states[channel])
+    monkeypatch.setattr(
+        billing, "_sales_ready",
+        lambda channel, _db, *, model_pricing_ready=None: states[channel],
+    )
     user = User(id=1, username="pricing-channels", password="x", role="user", status=1)
 
     catalogue = pricing(db=db, user=user).data
@@ -47,6 +50,27 @@ def test_pricing_contract_exposes_each_channel_while_preserving_aggregate(db, mo
     assert catalogue["sales_enabled"] is True
     states.update(alipay=False, wechat=False)
     catalogue = pricing(db=db, user=user).data
+    assert catalogue["channels"] == {"alipay": False, "wechat": False}
+    assert catalogue["sales_enabled"] is False
+
+
+def test_pricing_channels_stay_closed_when_model_pricing_is_not_ready(db, monkeypatch):
+    monkeypatch.setattr(billing, "BILLING_SALES_CODE_GATE_OPEN", True)
+    monkeypatch.setattr(billing.settings, "billing_sales_enabled", True)
+    monkeypatch.setattr(billing.settings, "billing_commercial_metering_ready", True)
+    monkeypatch.setattr(billing.settings, "billing_entitlement_enforcement_ready", True)
+    monkeypatch.setattr(billing, "_gateway_configured", lambda _channel: True)
+    active_pricing_metadata = billing.billing_ledger_service.active_pricing_metadata
+    monkeypatch.setattr(
+        billing.billing_ledger_service,
+        "active_pricing_metadata",
+        lambda session: {**active_pricing_metadata(session), "model_pricing_ready": False},
+    )
+    user = User(id=1, username="pricing-not-ready", password="x", role="user", status=1)
+
+    catalogue = pricing(db=db, user=user).data
+
+    assert catalogue["model_pricing_ready"] is False
     assert catalogue["channels"] == {"alipay": False, "wechat": False}
     assert catalogue["sales_enabled"] is False
 

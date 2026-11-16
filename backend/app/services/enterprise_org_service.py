@@ -127,7 +127,8 @@ def _billing_authorization_session(db: Session, billing_db: Session | None = Non
 
 def require_enterprise_member(db: Session, enterprise_id: int, user_id: int, *,
                               lock: bool = False, billing_db: Session | None = None,
-                              require_billing_access: bool = True, nowait: bool = False) -> EnterpriseMember:
+                              require_billing_access: bool = True, nowait: bool = False,
+                              shared_member_lock: bool = False) -> EnterpriseMember:
     company = _company(db, enterprise_id)
     query = db.query(EnterpriseMember).join(User, User.id == EnterpriseMember.user_id).filter(
         EnterpriseMember.enterprise_id == enterprise_id, EnterpriseMember.user_id == user_id,
@@ -135,7 +136,7 @@ def require_enterprise_member(db: Session, enterprise_id: int, user_id: int, *,
     )
     if lock:
         query = query.populate_existing()
-        query = query.with_for_update(nowait=True) if nowait else query.with_for_update()
+        query = query.with_for_update(read=shared_member_lock, nowait=nowait)
     member = query.first()
     if not member:
         raise ForbiddenError("没有该企业的访问权限")
@@ -193,9 +194,11 @@ def require_enterprise_execution(db: Session, enterprise_id: int) -> None:
 
 def require_enterprise_admin(db: Session, enterprise_id: int, user_id: int, *,
                              owner_only: bool = False, lock: bool = False,
-                             require_billing_access: bool = True) -> EnterpriseMember:
+                             require_billing_access: bool = True,
+                             shared_member_lock: bool = False) -> EnterpriseMember:
     member = require_enterprise_member(
         db, enterprise_id, user_id, lock=lock, require_billing_access=require_billing_access,
+        shared_member_lock=shared_member_lock,
     )
     roles = {"owner"} if owner_only else {"owner", "admin"}
     if member.role not in roles:
@@ -212,10 +215,12 @@ def require_group_member(
     allow_admin: bool = True,
     lock: bool = False,
     shared_group_lock: bool = False,
+    shared_member_lock: bool = False,
     require_billing_access: bool = True,
 ):
     member = require_enterprise_member(
         db, enterprise_id, user_id, lock=lock, require_billing_access=require_billing_access,
+        shared_member_lock=shared_member_lock,
     )
     session_context = nullcontext(db) if lock else _billing_authorization_session(db)
     with session_context as authorization_db:
@@ -225,7 +230,7 @@ def require_group_member(
         query = authorization_db.query(EnterpriseGroupMember).filter_by(
             enterprise_id=enterprise_id, group_id=group_id, user_id=user_id, status="active",
         )
-        group_member = (query.populate_existing().with_for_update() if lock else query).first()
+        group_member = (query.populate_existing().with_for_update(read=shared_member_lock) if lock else query).first()
         if not group_member:
             raise ForbiddenError("没有该小组的访问权限")
         return group_member
@@ -240,6 +245,7 @@ def require_group_manager(
     allow_admin: bool = True,
     lock: bool = False,
     shared_group_lock: bool = False,
+    shared_member_lock: bool = False,
     require_billing_access: bool = True,
 ):
     member = require_group_member(
@@ -250,6 +256,7 @@ def require_group_manager(
         allow_admin=allow_admin,
         lock=lock,
         shared_group_lock=shared_group_lock,
+        shared_member_lock=shared_member_lock,
         require_billing_access=require_billing_access,
     )
     if member.role not in {"owner", "admin", "leader"}:

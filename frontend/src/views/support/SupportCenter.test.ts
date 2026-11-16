@@ -12,6 +12,7 @@ vi.mock('./FeedbackCenter.vue', () => ({ default: defineComponent({
   template: '<section><label>反馈草稿<input v-model="draft"></label><span>{{ active ? "反馈激活" : "反馈暂停" }}</span></section>',
 }) }))
 import SupportCenter from './SupportCenter.vue'
+import { currentPageContext } from '@/utils/pageContext'
 
 const wrappers: ReturnType<typeof mount>[] = []
 afterEach(() => { wrappers.splice(0).forEach(wrapper => wrapper.unmount()); mountedFeedback.mockClear() })
@@ -27,6 +28,10 @@ async function render(query = '') {
 
 it('真实tab切换控制反馈激活，草稿和组件实例保留，查询参数保持同步', async () => {
   const { wrapper, router } = await render('?ticket=42')
+  expect(wrapper.get('h1').text()).toBe('支持中心')
+  expect(wrapper.text()).not.toContain('PRISM / 支持中心')
+  expect(wrapper.text()).not.toContain('统一提交平台问题和产品反馈')
+  expect(wrapper.text()).not.toContain('当前：支持工单')
   expect(wrapper.text()).toContain('反馈暂停')
   expect(mountedFeedback).toHaveBeenCalledTimes(1)
   await wrapper.get('#tab-feedback').trigger('click'); await flushPromises()
@@ -43,10 +48,12 @@ it('真实tab切换控制反馈激活，草稿和组件实例保留，查询参�
 
 it('浏览器查询参数切换会同步激活状态，未知section按既有规则回工单', async () => {
   const { wrapper, router } = await render('?section=feedback')
+  expect(currentPageContext('/support', 'feedback')?.section).toBe('feedback')
   expect(wrapper.get('#tab-feedback').attributes('aria-selected')).toBe('true')
   expect(wrapper.text()).toContain('反馈激活')
   await router.replace({ query: { section: 'invalid' } }); await flushPromises()
   expect(wrapper.get('#tab-maintenance').attributes('aria-selected')).toBe('true')
+  expect(currentPageContext('/support', 'invalid')?.section).toBe('maintenance')
   expect(wrapper.text()).toContain('反馈暂停')
   await router.replace({ query: { section: 'feedback' } }); await flushPromises()
   expect(wrapper.text()).toContain('反馈激活')

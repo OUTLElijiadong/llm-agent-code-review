@@ -1,11 +1,17 @@
 import { createPinia, setActivePinia } from 'pinia'
 import type { RouteLocationNormalized, Router } from 'vue-router'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useUserStore } from '@/stores/user'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { setupGuards } from './guards'
 import router from './index'
+
+const membershipService = vi.hoisted(() => ({
+  hasEnterpriseMembership: vi.fn<(token: string) => Promise<boolean | null>>(async () => false),
+}))
+
+vi.mock('@/services/enterpriseMembership', () => membershipService)
 
 const records = router.getRoutes().filter((record) => record.name && !record.meta.public)
 const allMemberPermissions = records.flatMap((record) => record.meta.permissions || [])
@@ -25,6 +31,7 @@ beforeEach(() => {
   localStorage.clear()
   sessionStorage.clear()
   setActivePinia(createPinia())
+  membershipService.hasEnterpriseMembership.mockReset().mockResolvedValue(false)
 })
 
 describe('全部已注册私有页面的真实路由守卫与用户 store 矩阵', () => {
@@ -122,5 +129,19 @@ describe('个人与企业工作空间路由边界', () => {
 
     workspace.activatePersonal()
     expect(await installedGuard()(resolve('/forum'), resolve('/dashboard'))).toBe(true)
+  })
+
+  it('企业成员账号在个人页面模式下仍不能进入公开论坛', async () => {
+    membershipService.hasEnterpriseMembership.mockResolvedValue(true)
+    const user = useUserStore()
+    user.token = 'enterprise-session'
+    user.profile = { id: 132, username: 'enterprise_member', role: 'user', status: 1 }
+    const workspace = useWorkspaceStore()
+    workspace.syncIdentity(132, user.token)
+    workspace.activatePersonal()
+
+    expect(await installedGuard()(resolve('/forum'), resolve('/dashboard')))
+      .toEqual({ path: '/enterprise', replace: true })
+    expect(workspace.hasEnterpriseMembership).toBe(true)
   })
 })

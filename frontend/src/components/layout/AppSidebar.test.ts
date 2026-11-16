@@ -1,4 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
+import { nextTick, reactive } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const harness = vi.hoisted(() => ({
@@ -10,14 +11,17 @@ const harness = vi.hoisted(() => ({
   authorizePermission: false,
   pending: vi.fn(),
   activeSpace: 'personal',
+  enterpriseMember: false,
   activatePersonal: vi.fn(() => { harness.activeSpace = 'personal' }),
   activateEnterprise: vi.fn(() => { harness.activeSpace = 'enterprise' }),
+  refreshEnterpriseMembership: vi.fn(async () => harness.enterpriseMember),
+  route: { path: '/dashboard' },
 }))
 
 vi.mock('@/api/remotePentest', () => ({ getPendingRemoteApprovalSnapshot: harness.pending }))
 
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ path: '/dashboard' }),
+  useRoute: () => harness.route,
   useRouter: () => ({
     push: harness.push,
     resolve: ({ path }: { path: string }) => ({
@@ -56,7 +60,9 @@ vi.mock('@/stores/workspace', () => ({
   useWorkspaceStore: () => ({
     get activeSpace() { return harness.activeSpace },
     get activeEnterpriseId() { return null },
+    get hasEnterpriseMembership() { return harness.enterpriseMember },
     syncIdentity: vi.fn(),
+    refreshEnterpriseMembership: harness.refreshEnterpriseMembership,
     activatePersonal: harness.activatePersonal,
     activateEnterprise: harness.activateEnterprise,
   }),
@@ -75,8 +81,11 @@ describe('AppSidebar ordinary member navigation', () => {
     harness.superAdmin = false
     harness.authorizePermission = false
     harness.activeSpace = 'personal'
+    harness.enterpriseMember = false
+    harness.route = reactive({ path: '/dashboard' })
     harness.activatePersonal.mockClear()
     harness.activateEnterprise.mockClear()
+    harness.refreshEnterpriseMembership.mockClear()
     harness.pending.mockReset()
     harness.pending.mockResolvedValue({ total: 0, items: [] })
   })
@@ -130,6 +139,25 @@ describe('AppSidebar ordinary member navigation', () => {
     harness.activeSpace = 'enterprise'
     const wrapper = mountSidebar()
     expect(wrapper.find('[data-route="/my-agents"]').exists()).toBe(false)
+  })
+
+  it('从旧折叠偏好进入新页面时自动展开当前分组，并把充值放进个人空间', async () => {
+    window.localStorage.setItem('prism.sidebar.groups', JSON.stringify({ workspace: false, personal: false }))
+    harness.route = reactive({ path: '/dashboard' })
+    const wrapper = mountSidebar()
+    await nextTick()
+
+    const workspaceToggle = wrapper.findAll('.nav-group-toggle').find(item => item.text().includes('工作区'))!
+    expect(workspaceToggle.attributes('aria-expanded')).toBe('true')
+    await workspaceToggle.trigger('click')
+    expect(workspaceToggle.attributes('aria-expanded')).toBe('false')
+
+    harness.route.path = '/billing'
+    await nextTick()
+    const personalToggle = wrapper.findAll('.nav-group-toggle').find(item => item.text().includes('个人空间'))!
+    expect(personalToggle.attributes('aria-expanded')).toBe('true')
+    expect(wrapper.find('[data-route="/billing"]').exists()).toBe(true)
+    wrapper.unmount()
   })
 
   it('hides Agent Studio when the reviewer lacks its route permission', () => {
@@ -193,6 +221,14 @@ describe('AppSidebar ordinary member navigation', () => {
     expect(wrapper.find('[data-route="/usage"]').exists()).toBe(false)
     expect(wrapper.find('[data-route="/enterprise"]').exists()).toBe(true)
     expect(wrapper.get('.workspace-switcher').attributes('aria-label')).toContain('切换到个人空间')
+  })
+
+  it('企业成员即使切回个人空间也不显示公开论坛入口', () => {
+    harness.enterpriseMember = true
+    harness.activeSpace = 'personal'
+    const wrapper = mountSidebar()
+
+    expect(wrapper.find('[data-route="/forum"]').exists()).toBe(false)
   })
 
   it('从个人空间切换到企业空间时先更新上下文，再打开企业沟通页', async () => {
@@ -267,6 +303,7 @@ describe('AppSidebar ordinary member navigation', () => {
     expect(wrapper.find('[data-route="/forum"]').exists()).toBe(true)
     expect(wrapper.find('[data-route="/support"]').exists()).toBe(true)
     expect(wrapper.find('[data-route="/admin/governance"]').exists()).toBe(true)
+    expect(wrapper.find('[data-route="/agent-assets"]').exists()).toBe(true)
     expect(wrapper.findAll('.nav-group-toggle').some((button) => button.text().includes('社区与支持'))).toBe(true)
     expect(wrapper.find('[data-route="/admin/security-center"]').exists()).toBe(false)
     expect(wrapper.find('[data-route="/admin/billing-statements"]').exists()).toBe(false)

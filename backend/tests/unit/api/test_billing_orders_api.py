@@ -16,6 +16,11 @@ from app.services import billing_checkout_service, billing_ledger_service
 
 def _enable_fake_sales(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(billing, "BILLING_SALES_CODE_GATE_OPEN", True)
+    monkeypatch.setattr(
+        billing.billing_ledger_service,
+        "active_pricing_metadata",
+        lambda _db: {"model_pricing_ready": True},
+    )
     for name, value in {
         "billing_sales_enabled": True,
         "billing_commercial_metering_ready": True,
@@ -59,6 +64,57 @@ def test_sales_stays_closed_by_default_even_with_a_logged_in_user(db, monkeypatc
     assert db.query(BillingOrder).count() == 0
 
 
+def test_checkout_stays_closed_when_current_model_pricing_is_not_ready(db, monkeypatch, tmp_path):
+    _enable_fake_sales(monkeypatch, tmp_path)
+    user = User(username="checkout-no-pricing", password="x", role="user", status=1)
+    db.add(user)
+    db.commit()
+    monkeypatch.setattr(
+        billing.billing_ledger_service,
+        "active_pricing_metadata",
+        lambda _db: {"model_pricing_ready": False},
+    )
+    monkeypatch.setattr(
+        billing, "_provider_order",
+        lambda order: {"payment_code_url": "https://qr.alipay.com/test", "provider_order_id": order.order_no},
+    )
+
+    with pytest.raises(HTTPException) as error:
+        billing.create_payment_order(
+            billing.OrderRequest(product="personal_credits", quantity=1, channel="alipay",
+                                 client_request_id="checkout-no-pricing-request"),
+            db=db,
+            user=user,
+        )
+
+    assert error.value.status_code == 503
+    assert db.query(BillingOrder).count() == 0
+
+
+def test_checkout_stays_closed_when_current_pricing_catalog_is_unavailable(db, monkeypatch, tmp_path):
+    _enable_fake_sales(monkeypatch, tmp_path)
+    user = User(username="checkout-no-catalog", password="x", role="user", status=1)
+    db.add(user)
+    db.commit()
+
+    def fail_catalog(_db):
+        raise billing_ledger_service.BillingError("当前没有可用的费率目录")
+
+    monkeypatch.setattr(billing.billing_ledger_service, "active_pricing_metadata", fail_catalog)
+    monkeypatch.setattr(billing, "_provider_order", lambda _order: pytest.fail("不得调用支付渠道"))
+
+    with pytest.raises(HTTPException) as error:
+        billing.create_payment_order(
+            billing.OrderRequest(product="personal_credits", quantity=1, channel="alipay",
+                                 client_request_id="checkout-no-catalog-request"),
+            db=db,
+            user=user,
+        )
+
+    assert error.value.status_code == 503
+    assert db.query(BillingOrder).count() == 0
+
+
 def test_checkout_uses_server_price_reuses_order_and_returns_own_code_only(db, monkeypatch, tmp_path):
     _enable_fake_sales(monkeypatch, tmp_path)
     user = User(username="checkout-open", password="x", role="user", status=1)
@@ -86,6 +142,27 @@ def test_checkout_uses_server_price_reuses_order_and_returns_own_code_only(db, m
     with pytest.raises(HTTPException) as error:
         billing.order_detail(first["order_no"], db=db, user=outsider)
     assert error.value.status_code == 404
+
+
+def test_checkout_rejects_stale_confirmed_price_before_creating_order(db, monkeypatch, tmp_path):
+    _enable_fake_sales(monkeypatch, tmp_path)
+    user = User(username="checkout-stale-quote", password="x", role="user", status=1)
+    db.add(user)
+    db.commit()
+    monkeypatch.setattr(billing, "_provider_order", lambda _order: pytest.fail("报价失效时不得创建渠道订单"))
+    catalog = billing_checkout_service._active_credit_pack_catalog(db)
+    payload = billing.OrderRequest(
+        product="personal_credits", quantity=1, channel="alipay",
+        client_request_id="checkout-stale-quote-request",
+        expected_pricing_version=catalog.version_key, expected_amount_fen=401,
+    )
+
+    with pytest.raises(HTTPException) as error:
+        billing.create_payment_order(payload, db=db, user=user)
+
+    assert error.value.status_code == 409
+    assert error.value.detail["code"] == "PRICING_CHANGED"
+    assert db.query(BillingOrder).count() == 0
 
 
 def test_alipay_sandbox_mode_is_forwarded_to_preorder_and_never_uses_arbitrary_url(monkeypatch, tmp_path):

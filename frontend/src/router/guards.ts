@@ -27,6 +27,8 @@ declare module 'vue-router' {
     superAdmin?: boolean
     /** 仅控制全站个人/企业页面模式，不替代后端资源授权 */
     workspace?: 'personal' | 'enterprise'
+    /** 企业成员账号不得访问公开开发者论坛，即使切换到个人页面模式。 */
+    personalAccountOnly?: boolean
     /** 后台合并中心所属业务域,用于在一个容器内切换子功能 */
     unifiedDomain?: 'agents' | 'operations' | 'access' | 'platform'
   }
@@ -73,6 +75,11 @@ export function setupGuards(router: Router): void {
     }
 
     workspace.syncIdentity(user.profile?.id, user.token)
+
+    if (to.meta.personalAccountOnly) {
+      const isEnterpriseMember = await workspace.refreshEnterpriseMembership()
+      if (isEnterpriseMember !== false) return { path: '/enterprise', replace: true }
+    }
 
     if (to.path === '/') {
       return { path: getRoleHomePath(user.profile?.role), replace: true }
