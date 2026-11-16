@@ -195,17 +195,11 @@ def reserve_model_attempt(db: Session, *, actor_id: int, attempt_key: AttemptKey
 
 
 def mark_unknown(db: Session, *, actor_id: int, attempt_key: AttemptKey) -> None:
-    """Freeze a previously reserved attempt; never releases or spends a budget."""
+    """Reject writes until attempt ownership and cancellation fencing exist.
+
+    Actor and attempt key alone do not identify an execution owner. Preserve the
+    reservation untouched; an eventual owner-aware path needs its own atomic
+    financial and cancellation contracts before this can be safely enabled.
+    """
     _require_enabled()
-    _require_no_pending_orm_changes(db)
-    _start_write_transaction(db)
-    _require_admin(db, actor_id)
-    key = _key_bytes(attempt_key)
-    attempt = (db.query(PlatformCostAttempt).filter_by(attempt_digest=hashlib.sha256(key).digest())
-               .populate_existing().with_for_update().one_or_none())
-    if attempt is None or bytes(attempt.attempt_bytes) != key or attempt.actor_id != actor_id:
-        raise ledger.BillingError('模型尝试不存在或归属不匹配')
-    if attempt.status not in {'reserved', 'unknown'}:
-        raise ledger.BillingError('模型尝试状态无效')
-    attempt.status = 'unknown'
-    db.flush()
+    raise ledger.BillingError('平台模型尝试所有权尚未接入，预占保持冻结')

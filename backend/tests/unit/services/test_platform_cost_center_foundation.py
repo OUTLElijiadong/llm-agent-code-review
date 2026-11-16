@@ -63,7 +63,7 @@ def test_server_role_and_budget_required(db, admin_user, budget, monkeypatch):
     assert db.query(PlatformCostAttempt).count() == 0
 
 
-def test_hold_freezes_verified_provider_cost_and_unknown_does_not_release(db, admin_user, budget, monkeypatch):
+def test_hold_freezes_verified_provider_cost_without_unsafe_unknown_write(db, admin_user, budget, monkeypatch):
     monkeypatch.setattr(platform, '_FOUNDATION_ENABLED', True)
     key = platform.new_attempt_key()
     attempt = reserve(db, admin_user.id, key=key)
@@ -77,9 +77,10 @@ def test_hold_freezes_verified_provider_cost_and_unknown_does_not_release(db, ad
         2_000_000, 8_000_000,
     )
     held = attempt.reserved_cny_micros
-    platform.mark_unknown(db, actor_id=admin_user.id, attempt_key=key)
+    with pytest.raises(BillingError, match='所有权'):
+        platform.mark_unknown(db, actor_id=admin_user.id, attempt_key=key)
     db.refresh(budget)
-    assert attempt.status == 'unknown' and budget.reserved_cny_micros == held and budget.spent_cny_micros == 0
+    assert attempt.status == 'reserved' and budget.reserved_cny_micros == held and budget.spent_cny_micros == 0
     with pytest.raises(BillingError):
         reserve(db, admin_user.id, key=key)
 
@@ -145,9 +146,65 @@ def test_another_admin_cannot_change_attempt_or_budget(db, admin_user, budget, m
     key = platform.new_attempt_key()
     attempt = reserve(db, admin_user.id, key=key)
     held = attempt.reserved_cny_micros
-    with pytest.raises(BillingError, match='归属'):
+    with pytest.raises(BillingError, match='所有权'):
         platform.mark_unknown(db, actor_id=other.id, attempt_key=key)
     db.refresh(budget)
+    assert attempt.status == 'reserved' and budget.reserved_cny_micros == held
+
+
+def test_same_admin_other_executor_cannot_mark_live_attempt_unknown(tmp_path, monkeypatch):
+    """A second physical connection must not mutate an attempt without its owner proof."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import NullPool
+
+    from app.core.database import Base
+    from app.services.billing_rate_catalog_service import seed_test_baseline
+
+    monkeypatch.setattr(platform, '_FOUNDATION_ENABLED', True)
+    engine = create_engine(f'sqlite:///{tmp_path / "platform-owner-red.sqlite"}', poolclass=NullPool)
+    Base.metadata.create_all(engine)
+    PlatformCostBase.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    now = datetime.utcnow()
+    try:
+        with factory.begin() as setup:
+            seed_test_baseline(setup)
+            setup.add(User(id=501, username='owner-red-admin', password='x', role='admin', status=1))
+            setup.add(PlatformCostCenter(id=1, status='active'))
+            setup.add(PlatformCostBudget(period_start=now - timedelta(days=1), period_end=now + timedelta(days=1),
+                                         limit_cny_micros=1_000_000, reserved_cny_micros=0,
+                                         spent_cny_micros=0, status='active'))
+        key = platform.new_attempt_key()
+        with factory.begin() as owner_db:
+            reserve(owner_db, 501, key=key)
+        # Knowing the actor and attempt identifier is not an execution-owner proof.
+        with factory() as other_db:
+            with pytest.raises(BillingError):
+                platform.mark_unknown(other_db, actor_id=501, attempt_key=key)
+            other_db.rollback()
+        with factory() as check:
+            assert check.query(PlatformCostAttempt).one().status == 'reserved'
+            assert check.query(PlatformCostBudget).one().reserved_cny_micros > 0
+    finally:
+        engine.dispose()
+
+
+def test_disabled_unknown_write_does_not_commit_or_refresh_callers_pending_changes(db, admin_user, budget, monkeypatch):
+    monkeypatch.setattr(platform, '_FOUNDATION_ENABLED', True)
+    key = platform.new_attempt_key()
+    attempt = reserve(db, admin_user.id, key=key)
+    db.commit()
+    held = attempt.reserved_cny_micros
+    admin_user.status = 0
+    with pytest.raises(BillingError, match='所有权'):
+        platform.mark_unknown(db, actor_id=admin_user.id, attempt_key=key)
+    assert admin_user.status == 0 and admin_user in db.dirty
+    db.rollback()
+    db.refresh(admin_user)
+    db.refresh(attempt)
+    db.refresh(budget)
+    assert admin_user.status == 1
     assert attempt.status == 'reserved' and budget.reserved_cny_micros == held
 
 
