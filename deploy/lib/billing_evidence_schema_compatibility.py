@@ -11,10 +11,23 @@ EXPECTED = """(model_search_calls_evidence IS NULL AND model_fetch_calls_evidenc
  AND model_search_calls_evidence = 0 AND model_fetch_calls_evidence = 0
  AND decision IN ('proposed', 'approved', 'rejected') AND resolution = 'settle')"""
 TOKEN = re.compile(r"\s*(?:(\b[a-z_][a-z_0-9]*\b)|('(?:[^']|'')*')|(\d+)|([(),=]))", re.I)
+ESCAPED_LITERAL = re.compile(
+    r"(?<![a-z0-9_])_utf8mb4\\'(proposed|approved|rejected|settle)\\'(?=\s*[,)]|$)"
+)
+ESCAPED_VALUES = ['approved', 'proposed', 'rejected', 'settle']
 
 
 def parse_check(expression: str):
-    expression = re.sub(r"_[a-z0-9]+(?=')", "", expression.lower().replace('`', ''))
+    expression = expression.lower().replace('`', '')
+    if '\\' in expression:
+        # MySQL 8.0.46 may render these exact four literals with escaped quotes.
+        # Reject mixed or unknown escapes before comparing the entire parsed AST.
+        if sorted(ESCAPED_LITERAL.findall(expression)) != ESCAPED_VALUES:
+            raise ValueError("unsupported CHECK escape")
+        expression = ESCAPED_LITERAL.sub(lambda match: "_utf8mb4'" + match.group(1) + "'", expression)
+        if '\\' in expression:
+            raise ValueError("unsupported CHECK escape")
+    expression = re.sub(r"_[a-z0-9]+(?=')", "", expression)
     tokens = []
     while expression.strip():
         match = TOKEN.match(expression)

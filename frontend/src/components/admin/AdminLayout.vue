@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowDown,
@@ -10,6 +10,7 @@ import {
   ChatLineSquare,
   Connection,
   Setting,
+  Switch,
   SwitchButton,
   Tools,
   User,
@@ -34,6 +35,8 @@ const router = useRouter()
 const userStore = useUserStore()
 const workspaceStore = useWorkspaceStore()
 const contentRef = ref<HTMLElement | null>(null)
+const navigationRef = ref<HTMLElement | null>(null)
+const navigationInteracted = ref(false)
 
 const menuItems: AdminMenuItem[] = [
   { path: '/admin/governance', title: 'Agent 治理', icon: Cpu },
@@ -107,15 +110,42 @@ function restorePageGuide(): void {
   window.dispatchEvent(new Event('prism:restore-page-guide'))
 }
 
+function toggleWorkspace(): void {
+  if (workspaceStore.activeSpace === 'enterprise') {
+    workspaceStore.activatePersonal()
+  } else {
+    workspaceStore.activateEnterprise()
+    void router.push('/enterprise')
+  }
+}
+
+function revealActiveNavigation(): void {
+  if (window.innerWidth <= 920) {
+    navigationRef.value?.querySelector<HTMLElement>('.admin-nav-item.is-active')
+      ?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+  }
+}
+
+onMounted(() => { void nextTick(revealActiveNavigation) })
+
+watch(() => workspaceStore.hasEnterpriseMembership, (membership, previous) => {
+  if (previous === null && membership !== null && !navigationInteracted.value) {
+    void nextTick(revealActiveNavigation)
+  }
+})
+
 watch(
   () => route.fullPath,
-  async () => {
+  async (current, previous) => {
+    const pathChanged = current.split(/[?#]/, 1)[0] !== previous.split(/[?#]/, 1)[0]
+    if (pathChanged) navigationInteracted.value = false
     const activeGroup = navigationGroups.value.find((group) => group.items.some((item) => (
       route.path === item.path || route.path.startsWith(`${item.path}/`)
     )))
     if (activeGroup) expandedGroups.value = { ...expandedGroups.value, [activeGroup.key]: true }
     await nextTick()
-    contentRef.value?.scrollTo({ top: 0, behavior: 'auto' })
+    contentRef.value?.scrollTo?.({ top: 0, behavior: 'auto' })
+    if (pathChanged) revealActiveNavigation()
   },
 )
 
@@ -158,7 +188,25 @@ async function logout(): Promise<void> {
           <div class="admin-sub font-mono">平台管理</div>
         </div>
       </div>
-      <nav class="admin-nav" aria-label="管理与社区导航">
+      <button
+        type="button"
+        class="admin-workspace-switch"
+        data-workspace-switch
+        :aria-label="workspaceStore.activeSpace === 'enterprise' ? '切换到个人空间' : '切换到企业空间'"
+        @click="toggleWorkspace"
+      >
+        <el-icon><Switch /></el-icon>
+        <span>{{ workspaceStore.activeSpace === 'enterprise' ? '企业空间' : '个人空间' }}</span>
+      </button>
+      <nav
+        ref="navigationRef"
+        class="admin-nav"
+        aria-label="管理与社区导航"
+        @pointerdown="navigationInteracted = true"
+        @touchstart.passive="navigationInteracted = true"
+        @wheel.passive="navigationInteracted = true"
+        @keydown="navigationInteracted = true"
+      >
         <section v-for="group in navigationGroups" :key="group.key" class="admin-nav-group">
           <button
             type="button"
@@ -217,7 +265,7 @@ async function logout(): Promise<void> {
           <div
             id="admin-copilot-trigger-slot"
             class="admin-copilot-trigger-slot"
-            :class="{ 'is-page-header-trigger': route.path.startsWith('/admin') }"
+            :class="{ 'is-page-header-trigger': route.path.startsWith('/admin') || route.path === '/support' }"
             aria-label="小菱入口"
           ></div>
         </div>
@@ -265,6 +313,24 @@ async function logout(): Promise<void> {
   gap: 12px;
   padding: 0 20px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.admin-workspace-switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 10px 0;
+  padding: 0 12px;
+  min-height: 44px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+}
+
+.admin-content :deep(.support-center .support-header) {
+  display: none;
 }
 
 .admin-mark {

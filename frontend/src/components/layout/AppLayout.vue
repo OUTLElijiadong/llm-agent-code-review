@@ -1,11 +1,17 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import AppSidebar from './AppSidebar.vue'
 import AppHeader from './AppHeader.vue'
 import ProactivePageGuide from '@/components/ai/ProactivePageGuide.vue'
 import XiaolingGreeter from '@/components/ai/XiaolingGreeter.vue'
+import { useUserStore } from '@/stores/user'
 
 const sidebarVisible = ref(false)
+const AdminLayout = defineAsyncComponent(() => import('@/components/admin/AdminLayout.vue'))
+const route = useRoute()
+const userStore = useUserStore()
+const useAdminSupportLayout = computed(() => route.path === '/support' && userStore.isAdmin())
 
 /**
  * 打开或关闭移动端侧边导航
@@ -33,7 +39,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', closeSidebarOnEscape
 </script>
 
 <template>
-  <div class="app-layout">
+  <AdminLayout v-if="useAdminSupportLayout" />
+  <div v-else class="app-layout">
     <AppSidebar :mobile-open="sidebarVisible" @close="closeSidebar" />
     <transition name="sidebar-mask-fade">
       <button v-if="sidebarVisible" type="button" class="sidebar-mask" aria-label="关闭导航菜单" @click="closeSidebar"></button>

@@ -3,13 +3,12 @@
     <header class="page-head">
       <div>
         <h1>充值与订阅</h1>
-        <p>按服务端商品价格创建支付宝或微信支付订单；支付确认后才发放积分、会员或企业席位。</p>
       </div>
       <button type="button" :disabled="loading" @click="() => load()">刷新</button>
     </header>
 
     <p v-if="!pricing?.sales_enabled" class="gate-note" role="status">
-      线上收款暂未开放。平台计量、权益、商户配置和验收门禁未全部通过；当前无法创建支付订单。
+      线上收款暂未开放。
     </p>
     <p v-else-if="!availablePaymentChannelCount" class="gate-note" role="status">当前没有可用的支付渠道。</p>
     <p v-if="pageError" class="error-note" role="alert">{{ pageError }}</p>
@@ -24,17 +23,15 @@
         <article class="summary-card">
           <span>个人积分余额</span>
           <strong>{{ number((wallet?.available_milli ?? 0) / 1000) }}</strong>
-          <small>积分 · 未知用量不会按零扣费</small>
+          <small>积分</small>
         </article>
         <article class="summary-card">
           <span>个人审查员</span>
           <strong>{{ entitlement?.reviewer ? '已开通' : '未开通' }}</strong>
-          <small>{{ entitlement?.enforcement_enabled ? '权益校验已启用' : '权益校验当前为兼容模式' }}</small>
         </article>
         <article v-if="selectedEnterprise" class="summary-card">
           <span>{{ selectedEnterprise.name }} 企业积分</span>
           <strong>{{ enterpriseWallet ? number(enterpriseWallet.available_milli / 1000) : '—' }}</strong>
-          <small>仅企业所有者或管理员可查看和充值</small>
         </article>
       </section>
 
@@ -125,7 +122,6 @@
             </tr></tbody>
           </table>
         </div>
-        <p class="muted">企业账单对企业所有者和管理员可见；员工只能查看自己发起的订单。</p>
       </section>
 
       <section v-if="activeOrder" class="card order-panel" aria-live="polite">
@@ -172,7 +168,6 @@
             </tr></tbody>
           </table>
         </div>
-        <p class="muted">订单列表仅显示当前账号作为付款人的订单；企业账务以服务端授权和账单记录为准。</p>
       </section>
     </template>
 
