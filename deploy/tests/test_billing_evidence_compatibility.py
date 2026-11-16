@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import ast
 import copy
+import json
 import pathlib
 import shutil
+import subprocess
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "lib"))
@@ -39,6 +41,60 @@ def test_real_mysql_normalized_check_is_accepted():
     schema['checks'][0]['clause'] = schema['checks'][0]['clause'].replace('_latin1', '_utf8mb4')
     assert classify(schema) == 'complete'
     assert classify({'table_count': 1, 'columns': [], 'checks': []}) == 'absent'
+
+
+MYSQL_ESCAPED_CHECK = (
+    r"(((`model_search_calls_evidence` is null) and (`model_fetch_calls_evidence` is null)) or "
+    r"((`model_search_calls_evidence` is not null) and (`model_fetch_calls_evidence` is not null) and "
+    r"(`model_search_calls_evidence` = 0) and (`model_fetch_calls_evidence` = 0) and "
+    r"(`decision` in (_utf8mb4\'proposed\',_utf8mb4\'approved\',_utf8mb4\'rejected\')) "
+    r"and (`resolution` = _utf8mb4\'settle\')))"
+)
+
+
+def test_mysql_8046_escaped_check_is_accepted():
+    schema = complete_schema()
+    schema['checks'][0]['clause'] = MYSQL_ESCAPED_CHECK
+    assert classify(schema) == 'complete'
+
+
+def test_mysql_8046_escaped_check_passes_json_cli():
+    schema = complete_schema()
+    schema['checks'][0]['clause'] = MYSQL_ESCAPED_CHECK
+    result = subprocess.run(
+        [sys.executable, str(ROOT / 'deploy/lib/billing_evidence_schema_compatibility.py')],
+        input=json.dumps(schema), text=True, capture_output=True, check=True,
+    )
+    assert result.stdout.strip() == 'complete'
+
+
+@pytest.mark.parametrize('field,value', [
+    ('nullable', 'NO'), ('type', 'int'), ('default', '0'), ('extra', 'DEFAULT_GENERATED'),
+])
+def test_escaped_check_does_not_bypass_column_checks(field, value):
+    schema = complete_schema()
+    schema['checks'][0]['clause'] = MYSQL_ESCAPED_CHECK
+    schema['columns'][0][field] = value
+    assert classify(schema) == 'partial'
+
+
+@pytest.mark.parametrize('bad_clause', [
+    MYSQL_ESCAPED_CHECK.replace(' = 0', ' = 1', 1),
+    MYSQL_ESCAPED_CHECK + ' OR model_search_calls_evidence = 1',
+    MYSQL_ESCAPED_CHECK.replace(' and (`resolution`', ' or (`resolution`'),
+    MYSQL_ESCAPED_CHECK.replace(r"_utf8mb4\'approved\'", r"_utf8mb4\'unknown\'"),
+    MYSQL_ESCAPED_CHECK.replace(r"_utf8mb4\'approved\'", r"_latin1\'approved\'"),
+    MYSQL_ESCAPED_CHECK.replace(r"_utf8mb4\'approved\'", "_utf8mb4'approved'"),
+    MYSQL_ESCAPED_CHECK.replace(r"\'approved\'", r"\\'approved\\'"),
+    MYSQL_ESCAPED_CHECK.replace(r"\'approved\'", r"\'approved'"),
+    MYSQL_ESCAPED_CHECK.replace(r"\'approved\'", r"\'approved\' OR 1 = 1"),
+    MYSQL_ESCAPED_CHECK.replace(r"\'settle\'", r"\'settle\' COLLATE utf8mb4_bin"),
+    MYSQL_ESCAPED_CHECK.replace(' is null', r' is \null', 1),
+])
+def test_mysql_escaped_check_rejects_unexpected_changes(bad_clause):
+    schema = complete_schema()
+    schema['checks'][0]['clause'] = bad_clause
+    assert classify(schema) == 'partial'
 
 
 def test_schema_rejects_partial_unsafe_or_unenforced_constraints():
