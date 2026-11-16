@@ -787,24 +787,28 @@ release_directory_lock() {
 # 返回: 父进程持有且锁记录有效时返回 0，否则失败关闭。
 assert_deploy_failure_lock_owner() {
   local lock_dir="$1" owner_pid owner_command owner_start owner_boot current_identity current_start current_boot
-  local alive_rc=0 proc_root="${PRISM_PROC_ROOT:-/proc}"
+  local alive_rc=0
   [[ -d "$lock_dir" ]] || fatal "自动回滚缺少 deploy.sh 持有的维护锁"
   owner_pid="$(lock_owner_field "$lock_dir" pid || true)"
   owner_command="$(lock_owner_field "$lock_dir" command || true)"
   [[ "$owner_pid" == "$PPID" && "$owner_command" == "deploy.sh" ]] \
     || fatal "--from-deploy-failure 只能由当前持锁的 deploy.sh 子进程使用"
-  if [[ -d "$proc_root" ]]; then
+  if [[ -d /proc ]]; then
     owner_start="$(lock_owner_field "$lock_dir" process_start_ticks || true)"
     owner_boot="$(lock_owner_field "$lock_dir" boot_id || true)"
-    current_identity="$(linux_process_identity "$PPID" 2>/dev/null || true)"
+    current_identity="$(PRISM_PROC_ROOT=/proc linux_process_identity "$PPID" 2>/dev/null || true)"
     current_start="${current_identity#* }"
-    current_boot="$(linux_boot_id 2>/dev/null || true)"
+    current_boot="$(PRISM_PROC_ROOT=/proc linux_boot_id 2>/dev/null || true)"
     [[ "$owner_start" =~ ^[0-9]+$ && "$owner_boot" =~ ^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$ \
       && "$current_identity" == *" "* && "$current_start" == "$owner_start" \
       && -n "$current_boot" && "$current_boot" == "$owner_boot" ]] \
       || fatal "自动回滚的 deploy.sh 锁持有者身份无法验证"
   fi
-  lock_owner_alive "$lock_dir" || alive_rc=$?
+  if [[ -d /proc ]]; then
+    PRISM_PROC_ROOT=/proc lock_owner_alive "$lock_dir" || alive_rc=$?
+  else
+    lock_owner_alive "$lock_dir" || alive_rc=$?
+  fi
   [[ "$alive_rc" == "0" ]] || fatal "自动回滚的 deploy.sh 维护锁持有者已失效或无法验证"
 }
 

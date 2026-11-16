@@ -257,6 +257,22 @@ def _has_finalizer_clearance_before_publication(function: ast.AST) -> bool:
                     and item.value.func.id == "_require_model_send_clearance"
                     for item in statement.body
                 )
+                clearance_index = next((index for index, item in enumerate(statement.body)
+                                         if isinstance(item, ast.Expr)
+                                         and isinstance(item.value, ast.Call)
+                                         and isinstance(item.value.func, ast.Name)
+                                         and item.value.func.id == "_require_model_send_clearance"), None)
+                publishes_before_clearance = (
+                    clearance_index is None
+                    or any(
+                        _calls(item, "_ensure_message")
+                        or any(isinstance(node, ast.Assign)
+                               and any(isinstance(target, ast.Attribute) and target.attr == "response_text"
+                                       for target in node.targets)
+                               for node in ast.walk(item))
+                        for item in statement.body[:clearance_index]
+                    )
+                )
                 handles_superseded = any(
                     handler.type is not None
                     and _has_name(handler.type, "SupersededByAuthorityDirectiveError")
@@ -268,7 +284,8 @@ def _has_finalizer_clearance_before_publication(function: ast.AST) -> bool:
                     and withholds_after_exception(handler)
                     for handler in statement.handlers
                 )
-                if not (direct_clearance and handles_superseded and handles_forbidden):
+                if not (direct_clearance and not publishes_before_clearance
+                        and handles_superseded and handles_forbidden):
                     continue
                 if index + 1 >= len(value):
                     continue

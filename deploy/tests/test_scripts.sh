@@ -1087,6 +1087,44 @@ with tempfile.TemporaryDirectory(prefix="prism-chat-authority-probe-") as tempor
     print("xiaoling F2 probe: finalizer cannot reset withheld after authority rejection PASS")
     runtime.write_text(original, encoding="utf-8")
 
+    class PublishBeforeFinalizerClearance(ast.NodeTransformer):
+        def __init__(self):
+            self.in_target = False
+            self.changed = False
+
+        def visit_FunctionDef(self, node):
+            previous = self.in_target
+            self.in_target = node.name == "_finalize_runtime"
+            node = self.generic_visit(node)
+            self.in_target = previous
+            return node
+
+        def visit_Try(self, node):
+            node = self.generic_visit(node)
+            if not self.in_target:
+                return node
+            gate_index = next((index for index, statement in enumerate(node.body)
+                               if isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Call)
+                               and isinstance(statement.value.func, ast.Name)
+                               and statement.value.func.id == "_require_model_send_clearance"), None)
+            if gate_index is not None:
+                node.body.insert(gate_index, ast.Assign(
+                    targets=[ast.Attribute(value=ast.Name(id="run", ctx=ast.Load()),
+                                           attr="response_text", ctx=ast.Store())],
+                    value=ast.Constant(value="unsafe pre-gate publication"),
+                ))
+                self.changed = True
+            return node
+
+    tree = ast.parse(original)
+    publish_before_gate = PublishBeforeFinalizerClearance()
+    changed_tree = publish_before_gate.visit(tree)
+    assert publish_before_gate.changed, "finalizer pre-gate publication mutation"
+    runtime.write_text(ast.unparse(ast.fix_missing_locations(changed_tree)), encoding="utf-8")
+    run_f2_probe("unsupported")
+    print("xiaoling F2 probe: finalizer clearance after response write refused PASS")
+    runtime.write_text(original, encoding="utf-8")
+
     tree = ast.parse(original)
     tree.body = [node for node in tree.body if not (
         isinstance(node, ast.FunctionDef) and node.name == "_authority_candidate_messages"
