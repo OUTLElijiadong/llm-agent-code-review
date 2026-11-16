@@ -1,7 +1,8 @@
 """Detached ownership experiment; not a production transport or migration.
 
 It creates a new test run and its run owner atomically, never adopts an old run,
-never takes over a generation, and never sends, settles or releases funds.
+never takes over a generation, and never sends or performs real provider settlement.
+Synthetic settlement mutates only the separately enabled detached test ledger.
 The outer session is owned by the caller, including its commit/rollback.
 Authenticated actor/session provenance and old-worker isolation are future gates.
 """
@@ -15,15 +16,26 @@ import math
 import secrets
 from dataclasses import InitVar, dataclass, field
 
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.agent_response_run import AgentResponseRun
-from app.models.platform_cost_center import PlatformAttemptOwner, PlatformCostAttempt, PlatformRunOwner
+from app.models.platform_cost_center import (
+    PlatformAttemptOwner,
+    PlatformCostAttempt,
+    PlatformCostBudget,
+    PlatformCostCenter,
+    PlatformCostSettlement,
+    PlatformRunOwner,
+)
 from app.services import platform_cost_center as platform
 from app.services.billing_ledger_service import BillingError
 
 _SECRET_FACTORY = object()
+# A second, code-only test gate: enabling the detached reservation experiment
+# alone never enables synthetic settlement. This is not a provider trust gate.
+_SYNTHETIC_SETTLEMENT_ENABLED = False
 
 
 @dataclass(frozen=True)
@@ -193,7 +205,7 @@ def cancel_owned_run(db: Session, *, actor_id: int, run_pk: int, session_key: st
     for binding in bindings:
         attempt = (db.query(PlatformCostAttempt).filter_by(id=binding.attempt_id)
                    .populate_existing().with_for_update().one_or_none())
-        if attempt is None or attempt.actor_id != actor_id or attempt.status not in {'reserved', 'unknown'}:
+        if attempt is None or attempt.actor_id != actor_id or attempt.status not in {'reserved', 'unknown', 'settled'}:
             raise BillingError('模型尝试状态无效')
         attempts.append(attempt)
     checkpoint['stop_requested'] = True
@@ -206,3 +218,97 @@ def cancel_owned_run(db: Session, *, actor_id: int, run_pk: int, session_key: st
         if attempt.status == 'reserved':
             attempt.status = 'unknown'
     db.flush()
+
+
+def settle_owned_attempt(db: Session, *, actor_id: int, run_pk: int, session_key: str,
+                         run_secret: OwnerSecret, attempt_id: int, attempt_secret: OwnerSecret,
+                         receipt_digest: bytes, input_tokens: int, output_tokens: int) -> int:
+    """Settle a bounded synthetic receipt; never authenticates a provider response.
+
+    Caller owns the outer transaction; aborts must not be interpreted as proof
+    of non-delivery, nor used to release or automatically retry an attempt.
+    """
+    if not _SYNTHETIC_SETTLEMENT_ENABLED:
+        raise BillingError('合成结算实验未启用')
+    _begin(db, actor_id)
+    run, run_owner = _lock_run(db, actor_id=actor_id, run_pk=run_pk, session_key=session_key)
+    _require_live(run, run_owner, run_secret)
+    center = (db.query(PlatformCostCenter).filter_by(id=1).populate_existing().with_for_update().one_or_none())
+    if center is None:
+        raise BillingError('平台成本中心不存在')
+    if type(attempt_id) is not int or attempt_id <= 0:
+        raise BillingError('模型尝试无效')
+    # The attempt's budget binding is immutable; this snapshot only selects the
+    # budget lock. Recheck the binding under an exclusive current read below.
+    budget_id = db.query(PlatformCostAttempt.budget_id).filter_by(id=attempt_id).scalar()
+    if budget_id is None:
+        raise BillingError('模型尝试不存在')
+    budget = (db.query(PlatformCostBudget).filter_by(id=budget_id, center_id=center.id)
+              .populate_existing().with_for_update().one_or_none())
+    if budget is None:
+        raise BillingError('模型尝试预算不存在')
+    # With the center and budget locked, take current locks on every outstanding
+    # hold before any release. This is an intentionally conservative experiment:
+    # its lock footprint and external-writer contract are not yet production-ready.
+    pending = (db.query(PlatformCostAttempt.id, PlatformCostAttempt.reserved_cny_micros)
+               .filter(PlatformCostAttempt.budget_id == budget.id,
+                       PlatformCostAttempt.status.in_(('reserved', 'unknown')))
+               .order_by(PlatformCostAttempt.id).with_for_update().all())
+    if (any(type(amount) is not int or amount <= 0 for _, amount in pending)
+            or sum(amount for _, amount in pending) != budget.reserved_cny_micros):
+        raise BillingError('平台预占明细与预算不一致')
+    binding = (db.query(PlatformAttemptOwner).filter_by(attempt_id=attempt_id)
+               .populate_existing().with_for_update().one_or_none())
+    if (binding is None or binding.run_owner_id != run_owner.id or binding.generation != run_owner.generation
+            or not _matches(attempt_secret, binding.owner_digest, scope='attempt', run_pk=run_pk,
+                            generation=run_owner.generation, attempt_id=attempt_id)):
+        raise BillingError('模型尝试所有权已失效')
+    attempt = (db.query(PlatformCostAttempt).filter_by(id=attempt_id)
+               .populate_existing().with_for_update().one_or_none())
+    if (attempt is None or attempt.actor_id != actor_id or attempt.budget_id != budget.id
+            or attempt.status not in {'reserved', 'settled'}):
+        raise BillingError('模型尝试不允许结算')
+    if (not isinstance(receipt_digest, bytes) or len(receipt_digest) != 32
+            or type(input_tokens) is not int or type(output_tokens) is not int
+            or not 0 <= input_tokens <= attempt.input_limit or not 0 <= output_tokens <= attempt.output_limit):
+        raise BillingError('模型回执或用量无效')
+    rates = (attempt.input_cost_cny_micros_per_million, attempt.output_cost_cny_micros_per_million)
+    if any(type(rate) is not int or rate <= 0 for rate in rates):
+        raise BillingError('冻结成本无效')
+    actual = (input_tokens * rates[0] + output_tokens * rates[1] + 999_999) // 1_000_000
+    held = attempt.reserved_cny_micros
+    if type(held) is not int or not 0 <= actual <= held <= platform._MAX_INTEGER:
+        raise BillingError('实际费用超出预占')
+    receipt = (db.query(PlatformCostSettlement).filter_by(attempt_id=attempt_id)
+               .populate_existing().with_for_update().one_or_none())
+    if attempt.status == 'settled':
+        if (receipt is None or bytes(receipt.receipt_digest) != receipt_digest
+                or receipt.input_tokens != input_tokens or receipt.output_tokens != output_tokens
+                or receipt.actual_cny_micros != actual):
+            raise BillingError('模型回执重放不一致')
+        return actual
+    if receipt is not None:
+        raise BillingError('模型回执与预占状态不一致')
+    try:
+        with db.begin_nested():
+            db.add(PlatformCostSettlement(attempt_id=attempt_id, receipt_digest=receipt_digest,
+                                          input_tokens=input_tokens, output_tokens=output_tokens,
+                                          actual_cny_micros=actual, created_at=platform._now()))
+            db.flush()
+            changed = db.execute(update(PlatformCostBudget).where(
+                PlatformCostBudget.id == budget.id,
+                PlatformCostBudget.reserved_cny_micros >= held,
+                PlatformCostBudget.reserved_cny_micros + PlatformCostBudget.spent_cny_micros - held + actual
+                <= PlatformCostBudget.limit_cny_micros,
+            ).values(
+                reserved_cny_micros=PlatformCostBudget.reserved_cny_micros - held,
+                spent_cny_micros=PlatformCostBudget.spent_cny_micros + actual,
+            ).execution_options(synchronize_session=False)).rowcount
+            if changed != 1:
+                raise BillingError('平台预占与预算不一致')
+            attempt.status = 'settled'
+            db.flush()
+    except IntegrityError as exc:
+        raise BillingError('模型回执冲突或成本状态无效') from exc
+    db.expire(budget)
+    return actual

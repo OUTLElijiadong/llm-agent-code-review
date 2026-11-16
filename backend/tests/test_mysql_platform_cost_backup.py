@@ -48,12 +48,14 @@ def test_mysql_owned_runs_backup_restore_guards():
     source_engine = create_engine(source)
     target_engine = create_engine(target)
     tables = ('agent_response_run', 'platform_cost_center', 'platform_cost_budget', 'platform_cost_attempt',
-              'platform_cost_run_owner', 'platform_cost_attempt_owner')
+              'platform_cost_run_owner', 'platform_cost_attempt_owner', 'platform_cost_settlement')
     snapshots = (
         'SELECT id,run_id,user_id,surface,session_key,status,checkpoint_json,version '
         'FROM agent_response_run ORDER BY id',
         'SELECT id,run_pk,actor_id,generation,owner_digest,status FROM platform_cost_run_owner ORDER BY id',
         'SELECT id,attempt_id,run_owner_id,generation,owner_digest FROM platform_cost_attempt_owner ORDER BY id',
+        'SELECT id,attempt_id,receipt_digest,input_tokens,output_tokens,actual_cny_micros '
+        'FROM platform_cost_settlement ORDER BY id',
         'SELECT id,budget_id,actor_id,attempt_digest,payload_digest,status,reserved_cny_micros,pricing_version '
         'FROM platform_cost_attempt ORDER BY id',
     )
@@ -69,7 +71,7 @@ def test_mysql_owned_runs_backup_restore_guards():
         with source_engine.connect() as connection:
             before = tuple(connection.execute(text(f'SELECT COUNT(*) FROM {name}')).scalar_one() for name in tables)
             snapshot_before = tuple(connection.execute(text(query)).all() for query in snapshots)
-        assert before[-2] > 0 and before[-1] > 0
+        assert all(count > 0 for count in before[-3:])
         # Credentials only enter a 0600 file in this disposable container via
         # stdin; neither command arguments nor the backup bytes are printed.
         authfile = '/tmp/prism-restore-' + secrets.token_hex(12) + '.cnf'
@@ -91,7 +93,8 @@ def test_mysql_owned_runs_backup_restore_guards():
                 .scalar_one()
             expected = {'pc_run_owner_no_delete', 'pc_run_owner_identity', 'pc_run_identity', 'pc_run_no_delete',
                         'pc_run_owner_insert', 'pc_attempt_owner_no_delete', 'pc_attempt_owner_immutable',
-                        'pc_attempt_identity', 'pc_attempt_no_delete', 'pc_attempt_owner_insert'}
+                        'pc_attempt_identity', 'pc_attempt_no_delete', 'pc_attempt_owner_insert',
+                        'pc_settlement_no_delete', 'pc_settlement_immutable'}
             present = set(connection.execute(text(
                 'SELECT TRIGGER_NAME FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = DATABASE()'
             )).scalars())
@@ -102,7 +105,8 @@ def test_mysql_owned_runs_backup_restore_guards():
                        and fk['options'].get('ondelete', '').upper() == 'RESTRICT' for fk in foreign_keys)
             for sql in ('DELETE FROM agent_response_run WHERE id=:pk',
                         'DELETE FROM platform_cost_run_owner WHERE run_pk=:pk',
-                        'UPDATE agent_response_run SET user_id=user_id+1 WHERE id=:pk'):
+                        'UPDATE agent_response_run SET user_id=user_id+1 WHERE id=:pk',
+                        'DELETE FROM platform_cost_settlement WHERE attempt_id IS NOT NULL'):
                 with pytest.raises(DBAPIError):
                     connection.execute(text(sql), {'pk': run_pk})
                 connection.rollback()

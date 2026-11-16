@@ -4,7 +4,7 @@ These tables have no production migration or call path. Do not enable them until
 migration ordering, lifecycle, authorization and deployment gates are reviewed.
 """
 
-from sqlalchemy import BigInteger, CheckConstraint, Column, DateTime, ForeignKey, Integer, LargeBinary, String
+from sqlalchemy import BigInteger, CheckConstraint, Column, DateTime, ForeignKey, Index, Integer, LargeBinary, String
 from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import declarative_base
 
@@ -50,10 +50,11 @@ class PlatformCostBudget(PlatformCostBase):
 class PlatformCostAttempt(PlatformCostBase):
     __tablename__ = 'platform_cost_attempt'
     __table_args__ = (
-        CheckConstraint("status IN ('reserved', 'unknown')", name='ck_platform_cost_attempt_status'),
+        CheckConstraint("status IN ('reserved', 'unknown', 'settled')", name='ck_platform_cost_attempt_status'),
         CheckConstraint('reserved_cny_micros > 0', name='ck_platform_cost_attempt_reserved'),
         CheckConstraint('length(attempt_digest) = 32 AND length(payload_digest) = 32',
                         name='ck_platform_cost_attempt_digest'),
+        Index('ix_platform_cost_attempt_budget_status_id', 'budget_id', 'status', 'id'),
     )
 
     id = Column(_PK, primary_key=True, autoincrement=True)
@@ -107,6 +108,24 @@ class PlatformAttemptOwner(PlatformCostBase):
     owner_digest = Column(_DIGEST, nullable=False)
 
 
+class PlatformCostSettlement(PlatformCostBase):
+    """Immutable test-only receipt; its digest is not proof of provider origin."""
+    __tablename__ = 'platform_cost_settlement'
+    __table_args__ = (
+        CheckConstraint('input_tokens >= 0 AND output_tokens >= 0 AND actual_cny_micros >= 0',
+                        name='ck_platform_settlement_nonnegative'),
+        CheckConstraint('length(receipt_digest) = 32', name='ck_platform_settlement_digest'),
+    )
+
+    id = Column(_PK, primary_key=True, autoincrement=True)
+    attempt_id = Column(_PK, ForeignKey('platform_cost_attempt.id', ondelete='RESTRICT'), nullable=False, unique=True)
+    receipt_digest = Column(_DIGEST, nullable=False, unique=True)
+    input_tokens = Column(BigInteger, nullable=False)
+    output_tokens = Column(BigInteger, nullable=False)
+    actual_cny_micros = Column(BigInteger, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+
+
 from app.models.platform_cost_guards import register_guards  # noqa: E402
 
-register_guards(PlatformRunOwner.__table__, PlatformAttemptOwner.__table__)
+register_guards(PlatformRunOwner.__table__, PlatformAttemptOwner.__table__, PlatformCostSettlement.__table__)

@@ -10,12 +10,12 @@ explicit deployment boundary. Keep creation and restore tests for both DBs.
 from sqlalchemy import DDL, event, inspect
 
 
-def register_guards(run_owner, attempt_owner):
+def register_guards(run_owner, attempt_owner, settlement):
     names = {
         'pc_run_owner_no_delete', 'pc_run_owner_identity', 'pc_run_identity', 'pc_run_no_delete',
         'pc_run_no_replace', 'pc_run_owner_insert', 'pc_attempt_owner_no_delete',
         'pc_attempt_owner_immutable', 'pc_attempt_identity', 'pc_attempt_no_delete', 'pc_attempt_no_replace',
-        'pc_attempt_owner_insert',
+        'pc_attempt_owner_insert', 'pc_settlement_no_delete', 'pc_settlement_immutable', 'pc_settlement_no_replace',
     }
 
     @event.listens_for(run_owner.metadata, 'before_create')
@@ -78,7 +78,7 @@ def register_guards(run_owner, attempt_owner):
           BEGIN SELECT RAISE(ABORT, 'platform attempt owner is immutable'); END"""),
         (attempt_owner, f"""CREATE TRIGGER pc_attempt_identity BEFORE UPDATE ON platform_cost_attempt
           WHEN EXISTS (SELECT 1 FROM platform_cost_attempt_owner o WHERE o.attempt_id = OLD.id)
-            AND ({sqlite_attempt_change} OR (OLD.status = 'unknown' AND NEW.status != 'unknown'))
+            AND ({sqlite_attempt_change} OR (OLD.status IN ('unknown','settled') AND NEW.status != OLD.status))
           BEGIN SELECT RAISE(ABORT, 'owned attempt is immutable'); END"""),
         (attempt_owner, """CREATE TRIGGER pc_attempt_no_delete BEFORE DELETE ON platform_cost_attempt
           WHEN EXISTS (SELECT 1 FROM platform_cost_attempt_owner o WHERE o.attempt_id = OLD.id)
@@ -94,6 +94,14 @@ def register_guards(run_owner, attempt_owner):
                            ON o.id = NEW.run_owner_id WHERE a.id = NEW.attempt_id
                            AND a.actor_id = o.actor_id AND o.generation = NEW.generation AND o.status = 'active')
           BEGIN SELECT RAISE(ABORT, 'platform attempt owner scope mismatch'); END"""),
+        (settlement, """CREATE TRIGGER pc_settlement_no_delete BEFORE DELETE ON platform_cost_settlement
+          BEGIN SELECT RAISE(ABORT, 'platform settlement is retained'); END"""),
+        (settlement, """CREATE TRIGGER pc_settlement_immutable BEFORE UPDATE ON platform_cost_settlement
+          BEGIN SELECT RAISE(ABORT, 'platform settlement is immutable'); END"""),
+        (settlement, """CREATE TRIGGER pc_settlement_no_replace BEFORE INSERT ON platform_cost_settlement
+          WHEN EXISTS (SELECT 1 FROM platform_cost_settlement s WHERE s.id=NEW.id
+                       OR s.attempt_id=NEW.attempt_id OR s.receipt_digest=NEW.receipt_digest)
+          BEGIN SELECT RAISE(ABORT, 'platform settlement cannot be replaced'); END"""),
     )
     mysql = (
         (run_owner, """CREATE TRIGGER pc_run_owner_no_delete BEFORE DELETE ON platform_cost_run_owner
@@ -123,7 +131,7 @@ def register_guards(run_owner, attempt_owner):
           FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'platform attempt owner is immutable'"""),
         (attempt_owner, f"""CREATE TRIGGER pc_attempt_identity BEFORE UPDATE ON platform_cost_attempt FOR EACH ROW
           BEGIN IF EXISTS (SELECT 1 FROM platform_cost_attempt_owner o WHERE o.attempt_id = OLD.id)
-            AND ({mysql_attempt_change} OR (OLD.status = 'unknown' AND NEW.status != 'unknown')) THEN
+            AND ({mysql_attempt_change} OR (OLD.status IN ('unknown','settled') AND NEW.status != OLD.status)) THEN
             SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'owned attempt is immutable'; END IF; END"""),
         (attempt_owner, """CREATE TRIGGER pc_attempt_no_delete BEFORE DELETE ON platform_cost_attempt FOR EACH ROW
           BEGIN IF EXISTS (SELECT 1 FROM platform_cost_attempt_owner o WHERE o.attempt_id = OLD.id) THEN
@@ -133,6 +141,10 @@ def register_guards(run_owner, attempt_owner):
             ON o.id = NEW.run_owner_id WHERE a.id = NEW.attempt_id AND a.actor_id = o.actor_id
             AND o.generation = NEW.generation AND o.status = 'active') THEN
             SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'platform attempt owner scope mismatch'; END IF; END"""),
+        (settlement, """CREATE TRIGGER pc_settlement_no_delete BEFORE DELETE ON platform_cost_settlement
+          FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'platform settlement is retained'"""),
+        (settlement, """CREATE TRIGGER pc_settlement_immutable BEFORE UPDATE ON platform_cost_settlement
+          FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'platform settlement is immutable'"""),
     )
     for dialect, guards in (('sqlite', sqlite), ('mysql', mysql)):
         for table, sql in guards:

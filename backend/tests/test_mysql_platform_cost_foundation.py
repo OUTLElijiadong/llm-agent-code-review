@@ -1,5 +1,6 @@
 """Explicit disposable-MySQL races; never drops a database or connects without an opt-in URL."""
 
+import hashlib
 import os
 import re
 import subprocess
@@ -482,6 +483,213 @@ def test_platform_center_and_budget_mysql_lock_order(monkeypatch):
         with factory() as db:
             budget = db.query(PlatformCostBudget).filter_by(id=1).one()
             assert budget.reserved_cny_micros <= budget.limit_cny_micros
+        # Synthetic flat-price settlement: identical concurrent receipts may
+        # settle once, while cancellation and unknown remain fail-closed.
+        from app.models.platform_cost_center import PlatformCostSettlement
+
+        monkeypatch.setattr(owner, '_SYNTHETIC_SETTLEMENT_ENABLED', True)
+        with factory.begin() as db:
+            db.query(PlatformCostCenter).filter_by(id=1).with_for_update().one()
+            db.query(PlatformCostBudget).filter_by(id=1).with_for_update().one().limit_cny_micros = 1_000_000
+        with factory.begin() as db:
+            settle_run, settle_secret = owner.create_owned_run(db, actor_id=501, run_id='mysql-settlement',
+                                                               session_key='admin-session')
+        with factory.begin() as db:
+            attempt, attempt_secret = owned_reserve(db, pk=settle_run, secret=settle_secret,
+                                                    attempt_key=platform.new_attempt_key())
+            settle_id, settle_held = attempt.id, attempt.reserved_cny_micros
+        with factory() as db:
+            budget = db.query(PlatformCostBudget).filter_by(id=1).one()
+            before_reserved, before_spent = budget.reserved_cny_micros, budget.spent_cny_micros
+        settle_args = dict(actor_id=501, run_pk=settle_run, session_key='admin-session', run_secret=settle_secret,
+                           attempt_id=settle_id, attempt_secret=attempt_secret,
+                           receipt_digest=hashlib.sha256(b'mysql-settlement').digest(),
+                           input_tokens=10, output_tokens=20)
+        barrier = Barrier(2, timeout=5)
+
+        def settle_same(_):
+            with factory.begin() as db:
+                barrier.wait()
+                return owner.settle_owned_attempt(db, **settle_args)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            assert list(pool.map(settle_same, range(2))) == [180, 180]
+        with factory() as db:
+            budget = db.query(PlatformCostBudget).filter_by(id=1).one()
+            assert (budget.reserved_cny_micros, budget.spent_cny_micros) == (
+                before_reserved - settle_held, before_spent + 180,
+            )
+            assert db.query(PlatformCostSettlement).filter_by(attempt_id=settle_id).count() == 1
+            with pytest.raises(BillingError):
+                owner.settle_owned_attempt(db, **(settle_args | {'input_tokens': 11}))
+            db.rollback()
+
+        with factory.begin() as db:
+            cancel_run, cancel_secret = owner.create_owned_run(db, actor_id=501, run_id='mysql-settle-cancel',
+                                                               session_key='admin-session')
+        with factory.begin() as db:
+            attempt, cancel_attempt_secret = owned_reserve(db, pk=cancel_run, secret=cancel_secret,
+                                                           attempt_key=platform.new_attempt_key())
+            cancel_attempt_id, cancel_held = attempt.id, attempt.reserved_cny_micros
+        with factory() as db:
+            budget = db.query(PlatformCostBudget).filter_by(id=1).one()
+            cancel_reserved, cancel_spent = budget.reserved_cny_micros, budget.spent_cny_micros
+        barrier = Barrier(2, timeout=5)
+
+        def cancel_or_settle(action):
+            with factory() as db:
+                barrier.wait()
+                try:
+                    if action == 'cancel':
+                        owner.cancel_owned_run(db, actor_id=501, run_pk=cancel_run, session_key='admin-session')
+                    else:
+                        owner.settle_owned_attempt(
+                            db, actor_id=501, run_pk=cancel_run, session_key='admin-session',
+                            run_secret=cancel_secret, attempt_id=cancel_attempt_id,
+                            attempt_secret=cancel_attempt_secret,
+                            receipt_digest=hashlib.sha256(b'cancel-settle').digest(),
+                            input_tokens=10, output_tokens=20,
+                        )
+                    db.commit()
+                    return 'ok'
+                except BillingError:
+                    db.rollback()
+                    return 'rejected'
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcome = list(pool.map(cancel_or_settle, ('cancel', 'settle')))
+        assert outcome[0] == 'ok' and outcome[1] in {'ok', 'rejected'}
+        with factory() as db:
+            budget = db.query(PlatformCostBudget).filter_by(id=1).one()
+            attempt = db.get(PlatformCostAttempt, cancel_attempt_id)
+            if outcome[1] == 'ok':
+                assert attempt.status == 'settled'
+                assert (budget.reserved_cny_micros, budget.spent_cny_micros) == (
+                    cancel_reserved-cancel_held, cancel_spent+180,
+                )
+            else:
+                assert attempt.status == 'unknown'
+                assert (budget.reserved_cny_micros, budget.spent_cny_micros) == (cancel_reserved, cancel_spent)
+
+        # Different administrators/runs share the budget. An unknown writer
+        # holds one pending row while another owner's settlement checks all holds.
+        with factory.begin() as db:
+            cross_run, cross_secret = owner.create_owned_run(db, actor_id=501, run_id='mysql-cross-settle',
+                                                             session_key='admin-session')
+        with factory.begin() as db:
+            other_run, other_secret = owner.create_owned_run(db, actor_id=502, run_id='mysql-cross-unknown',
+                                                             session_key='admin-session')
+        with factory.begin() as db:
+            cross_attempt, cross_attempt_secret = owned_reserve(db, pk=cross_run, secret=cross_secret,
+                                                                attempt_key=platform.new_attempt_key())
+            cross_id = cross_attempt.id
+        with factory.begin() as db:
+            other_attempt, other_attempt_secret = owned_reserve(db, actor=502, pk=other_run, secret=other_secret,
+                                                                attempt_key=platform.new_attempt_key())
+            other_id = other_attempt.id
+        held_unknown = Event()
+        release_unknown = Event()
+        waiting_settle = Event()
+
+        def hold_unknown():
+            with factory() as db:
+                owner.mark_owned_attempt_unknown(db, actor_id=502, run_pk=other_run, session_key='admin-session',
+                                                 run_secret=other_secret, attempt_id=other_id,
+                                                 attempt_secret=other_attempt_secret)
+                held_unknown.set()
+                assert release_unknown.wait(5)
+                db.commit()
+
+        def settle_cross():
+            with factory.begin() as db:
+                waiting_settle.set()
+                return owner.settle_owned_attempt(
+                    db, actor_id=501, run_pk=cross_run, session_key='admin-session', run_secret=cross_secret,
+                    attempt_id=cross_id, attempt_secret=cross_attempt_secret,
+                    receipt_digest=hashlib.sha256(b'cross-unknown').digest(), input_tokens=10, output_tokens=20,
+                )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            blocker = pool.submit(hold_unknown)
+            assert held_unknown.wait(5)
+            waiter = pool.submit(settle_cross)
+            assert waiting_settle.wait(5)
+            _must_wait(waiter)
+            release_unknown.set()
+            blocker.result(timeout=5)
+            assert waiter.result(timeout=5) == 180
+        with factory() as db:
+            assert db.get(PlatformCostAttempt, cross_id).status == 'settled'
+            assert db.get(PlatformCostAttempt, other_id).status == 'unknown'
+        with factory.begin() as db:
+            next_attempt, next_secret = owned_reserve(db, pk=cross_run, secret=cross_secret,
+                                                       attempt_key=platform.new_attempt_key())
+            next_id = next_attempt.id
+        with factory.begin() as db:
+            other_next, other_next_secret = owned_reserve(db, actor=502, pk=other_run, secret=other_secret,
+                                                           attempt_key=platform.new_attempt_key())
+            other_next_id = other_next.id
+        held_settlement = Event()
+        release_settlement = Event()
+        waiting_unknown = Event()
+
+        def hold_settlement():
+            with factory() as db:
+                value = owner.settle_owned_attempt(
+                    db, actor_id=501, run_pk=cross_run, session_key='admin-session', run_secret=cross_secret,
+                    attempt_id=next_id, attempt_secret=next_secret,
+                    receipt_digest=hashlib.sha256(b'cross-settlement-first').digest(),
+                    input_tokens=10, output_tokens=20,
+                )
+                held_settlement.set()
+                assert release_settlement.wait(5)
+                db.commit()
+                return value
+
+        def unknown_after_settle():
+            with factory.begin() as db:
+                waiting_unknown.set()
+                owner.mark_owned_attempt_unknown(db, actor_id=502, run_pk=other_run, session_key='admin-session',
+                                                 run_secret=other_secret, attempt_id=other_next_id,
+                                                 attempt_secret=other_next_secret)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            blocker = pool.submit(hold_settlement)
+            assert held_settlement.wait(5)
+            waiter = pool.submit(unknown_after_settle)
+            assert waiting_unknown.wait(5)
+            _must_wait(waiter)
+            release_settlement.set()
+            assert blocker.result(timeout=5) == 180
+            waiter.result(timeout=5)
+        with factory() as db:
+            assert db.get(PlatformCostAttempt, next_id).status == 'settled'
+            assert db.get(PlatformCostAttempt, other_next_id).status == 'unknown'
+
+        # A corrupted aggregate that still covers one hold must not consume
+        # the other pending hold. Restore the deliberately changed test value.
+        with factory.begin() as db:
+            bad_first, bad_first_secret = owned_reserve(db, pk=cross_run, secret=cross_secret,
+                                                         attempt_key=platform.new_attempt_key())
+            bad_id, bad_held = bad_first.id, bad_first.reserved_cny_micros
+        with factory.begin() as db:
+            owned_reserve(db, pk=cross_run, secret=cross_secret, attempt_key=platform.new_attempt_key())
+        with factory.begin() as db:
+            db.query(PlatformCostCenter).filter_by(id=1).with_for_update().one()
+            budget = db.query(PlatformCostBudget).filter_by(id=1).with_for_update().one()
+            budget.reserved_cny_micros -= bad_held
+        with factory() as db:
+            with pytest.raises(BillingError, match='不一致'):
+                owner.settle_owned_attempt(db, actor_id=501, run_pk=cross_run, session_key='admin-session',
+                                           run_secret=cross_secret, attempt_id=bad_id, attempt_secret=bad_first_secret,
+                                           receipt_digest=hashlib.sha256(b'corrupt-mysql').digest(),
+                                           input_tokens=0, output_tokens=0)
+            db.commit()
+            assert db.get(PlatformCostAttempt, bad_id).status == 'reserved'
+            assert db.query(PlatformCostSettlement).filter_by(attempt_id=bad_id).count() == 0
+        with factory.begin() as db:
+            db.query(PlatformCostCenter).filter_by(id=1).with_for_update().one()
+            db.query(PlatformCostBudget).filter_by(id=1).with_for_update().one().reserved_cny_micros += bad_held
         with pytest.raises(RuntimeError, match='已存在'):
             PlatformCostBase.metadata.create_all(engine)
         with pytest.raises(RuntimeError, match='禁止自动删除'):
