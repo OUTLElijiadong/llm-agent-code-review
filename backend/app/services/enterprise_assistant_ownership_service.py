@@ -226,28 +226,19 @@ def _wallet(db: Session, *, wallet_id: int, enterprise_id: int):
 
 
 def _reject_pending_scope_changes(
-    db: Session, *, run_id: int, wallet_id: int | None = None, reservation_id: int | None = None
+    db: Session, *, run_id: int, wallet_id: int | None = None, reservation_id: int | None = None,
+    allowed_new_reservation: BillingReservation | None = None,
 ) -> None:
-    """A locking refresh must never silently discard the caller's pending edits."""
+    """Do not refresh or implicitly flush caller work outside this primitive.
+
+    Savepoints flush all pending ORM objects even under no_autoflush. Reject all
+    such work, irrespective of current (possibly changed) identifiers. The
+    single new hold explicitly supplied to model claim is its intended input.
+    """
     for row in set(db.new).union(db.dirty, db.deleted):
-        matches = (
-            isinstance(row, EnterpriseAssistantRun)
-            and row.id == run_id
-            or isinstance(row, EnterpriseAssistantRuntimeState)
-            and row.assistant_run_id == run_id
-            or isinstance(
-                row, (EnterpriseAssistantRunOwner, EnterpriseAssistantToolOwner, EnterpriseAssistantModelAttemptOwner)
-            )
-            and row.assistant_run_id == run_id
-            or isinstance(row, BillingWallet)
-            and wallet_id is not None
-            and row.id == wallet_id
-            or isinstance(row, BillingReservation)
-            and reservation_id is not None
-            and row.id == reservation_id
-        )
-        if matches and (row in db.new or row in db.deleted or db.is_modified(row, include_collections=False)):
-            raise ForbiddenError("当前事务有未刷新的所有权范围更改，禁止覆盖")
+        if row is allowed_new_reservation and row in db.new:
+            continue
+        raise ForbiddenError("当前事务有未刷新的所有权范围更改，禁止覆盖")
 
 
 def claim_tool(
@@ -458,7 +449,9 @@ def claim_model_attempt(
     _ensure_outer_transaction(db)
     if not isinstance(reservation, BillingReservation) or reservation not in db.new or not inspect(reservation).pending:
         raise ForbiddenError("只能绑定本事务尚未写入的新模型预占")
-    _reject_pending_scope_changes(db, run_id=run_id, wallet_id=reservation.enterprise_wallet_id)
+    _reject_pending_scope_changes(
+        db, run_id=run_id, wallet_id=reservation.enterprise_wallet_id, allowed_new_reservation=reservation
+    )
     with db.no_autoflush:
         run, _state = _locked_scope(
             db,

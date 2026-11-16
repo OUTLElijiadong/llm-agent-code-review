@@ -12,6 +12,7 @@ from app.models.billing_ledger import BillingReservation, BillingWallet
 from app.models.enterprise_assistant_ownership import EnterpriseAssistantRunOwner
 from app.models.enterprise_assistant_runtime import EnterpriseAssistantRuntimeState
 from app.models.enterprise_chat import EnterpriseAssistantRun
+from app.models.user import User
 from app.services import enterprise_assistant_ownership_service as owners
 
 
@@ -450,3 +451,72 @@ def test_valid_pending_reservation_works_with_autoflush_enabled(factory):
         db.commit()
     with factory.begin() as db:
         verify(db, parent, secret, rid)
+
+
+@pytest.mark.parametrize("operation", ["claim", "assert"])
+@pytest.mark.parametrize("target", ["run", "state", "wallet", "reservation"])
+@pytest.mark.parametrize("autoflush", [False, True])
+def test_model_operations_preserve_changed_scope_identity(factory, operation, target, autoflush):
+    if operation == "claim" and target == "reservation":
+        pytest.skip("claim requires a new reservation rather than an existing reservation id")
+    with factory.begin() as db:
+        parent = owners.claim_run(db, run_id=41, enterprise_id=1, conversation_id=2, generation=7)
+        if operation == "assert":
+            hold = reservation()
+            db.add(hold)
+            secret = claim(db, parent, hold)
+            rid = hold.id
+    with factory(autoflush=autoflush) as db:
+        if target == "run":
+            row, field, changed = db.get(EnterpriseAssistantRun, 41), "id", 42
+        elif target == "state":
+            row = db.query(EnterpriseAssistantRuntimeState).filter_by(assistant_run_id=41).one()
+            field, changed = "assistant_run_id", 42
+        elif target == "wallet":
+            row, field, changed = db.get(BillingWallet, 9), "id", 10
+        else:
+            row, field, changed = db.get(BillingReservation, rid), "id", rid + 100
+        setattr(row, field, changed)
+        if operation == "claim":
+            hold = reservation()
+            db.add(hold)
+        with pytest.raises(ForbiddenError, match="未刷新"):
+            if operation == "claim":
+                claim(db, parent, hold)
+            else:
+                verify(db, parent, secret, rid)
+        assert getattr(row, field) == changed and row in db.dirty
+        if operation == "claim":
+            assert hold in db.new
+        db.rollback()
+    with factory() as db:
+        assert db.get(EnterpriseAssistantRun, 41) is not None
+        assert db.query(EnterpriseAssistantRuntimeState).one().assistant_run_id == 41
+        assert db.get(BillingWallet, 9) is not None
+
+
+@pytest.mark.parametrize("operation", ["claim", "assert"])
+@pytest.mark.parametrize("autoflush", [False, True])
+def test_model_operations_do_not_flush_unrelated_pending_object(factory, operation, autoflush):
+    with factory.begin() as db:
+        parent = owners.claim_run(db, run_id=41, enterprise_id=1, conversation_id=2, generation=7)
+        if operation == "assert":
+            hold = reservation()
+            db.add(hold)
+            secret = claim(db, parent, hold)
+            rid = hold.id
+    with factory(autoflush=autoflush) as db:
+        unrelated = User(username="unrelated-pending", password="x", role="user", status=1)
+        db.add(unrelated)
+        if operation == "claim":
+            hold = reservation()
+            db.add(hold)
+        with pytest.raises(ForbiddenError, match="未刷新"):
+            if operation == "claim":
+                claim(db, parent, hold)
+            else:
+                verify(db, parent, secret, rid)
+        assert unrelated in db.new and unrelated.id is None
+        if operation == "claim":
+            assert hold in db.new
+        db.rollback()

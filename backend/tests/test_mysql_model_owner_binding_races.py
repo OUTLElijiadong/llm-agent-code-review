@@ -11,6 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from test_mysql_enterprise_ownership_foundation import _ready
 
+from app.core.exceptions import ForbiddenError
 from app.models.billing_ledger import BillingReservation, BillingWallet
 from app.models.enterprise_assistant_ownership import (
     EnterpriseAssistantModelAttemptOwner,
@@ -350,3 +351,65 @@ def test_flushed_generation_and_run_owner_rollback_atomically(fresh_chain):
         state = db.query(EnterpriseAssistantRuntimeState).filter_by(assistant_run_id=run_id).one()
         assert state.lease_generation == 1
         assert db.query(EnterpriseAssistantRunOwner).filter_by(assistant_run_id=run_id).count() == 0
+
+
+@pytest.mark.parametrize("operation", ["claim_run", "assert_run", "claim_tool", "assert_tool", "claim_model", "assert_model"])
+@pytest.mark.parametrize("target", ["run", "state"])
+def test_changed_scope_identity_is_rejected_without_overwrite_mysql(fresh_chain, operation, target):
+    sessions, enterprise, conversation, run_id, wallet_id = _ready(fresh_chain)
+    parent = tool = attempt = rid = None
+    if operation != "claim_run":
+        with sessions.begin() as db:
+            parent = ownership.claim_run(db, run_id=run_id, enterprise_id=enterprise,
+                                         conversation_id=conversation, generation=1)
+            if operation == "assert_tool":
+                tool = ownership.claim_tool(db, run_id=run_id, enterprise_id=enterprise,
+                                            conversation_id=conversation, generation=1, run_secret=parent,
+                                            call_id="existing", tool_name="search", arguments={"query": "a"},
+                                            wallet_id=wallet_id)
+            if operation == "assert_model":
+                run = db.get(EnterpriseAssistantRun, run_id)
+                hold = _new_hold(run, wallet_id, f"enterprise-assistant:{run.public_id}:1:1")
+                db.add(hold)
+                attempt = ownership.claim_model_attempt(db, run_id=run_id, enterprise_id=enterprise,
+                                                        conversation_id=conversation, generation=1, run_secret=parent,
+                                                        round_key=ROUND_1, payload_digest=b"x" * 32, reservation=hold)
+                rid = hold.id
+    with sessions() as db:
+        run = db.get(EnterpriseAssistantRun, run_id)
+        if target == "run":
+            row, field = run, "id"
+        else:
+            row = db.query(EnterpriseAssistantRuntimeState).filter_by(assistant_run_id=run_id).one()
+            field = "assistant_run_id"
+        changed = run_id + 1000000
+        if operation == "claim_model":
+            hold = _new_hold(run, wallet_id, f"enterprise-assistant:{run.public_id}:1:1")
+            db.add(hold)
+        setattr(row, field, changed)
+        common = dict(run_id=run_id, enterprise_id=enterprise, conversation_id=conversation, generation=1)
+        with pytest.raises(ForbiddenError, match="未刷新"):
+            if operation == "claim_run":
+                ownership.claim_run(db, **common)
+            elif operation == "assert_run":
+                ownership.assert_run_owner(db, **common, secret=parent)
+            elif operation in {"claim_tool", "assert_tool"}:
+                params = dict(run_secret=parent, call_id="existing" if tool else "new", tool_name="search",
+                              arguments={"query": "a"}, wallet_id=wallet_id)
+                if tool:
+                    ownership.assert_tool_owner(db, **common, tool_secret=tool, **params)
+                else:
+                    ownership.claim_tool(db, **common, **params)
+            elif operation == "claim_model":
+                ownership.claim_model_attempt(db, **common, run_secret=parent, round_key=ROUND_1,
+                                              payload_digest=b"x" * 32, reservation=hold)
+            else:
+                ownership.assert_model_attempt(db, **common, run_secret=parent, attempt_secret=attempt,
+                                               round_key=ROUND_1, payload_digest=b"x" * 32, reservation_id=rid)
+        assert getattr(row, field) == changed and row in db.dirty
+        if operation == "claim_model":
+            assert hold in db.new
+        db.rollback()
+    with sessions() as db:
+        assert db.get(EnterpriseAssistantRun, run_id) is not None
+        assert db.query(EnterpriseAssistantRuntimeState).filter_by(assistant_run_id=run_id).one() is not None

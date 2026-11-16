@@ -12,7 +12,7 @@ from pathlib import Path
 import signal
 
 EXPECTED = {
-    'app/services/enterprise_assistant_ownership_service.py': '6a81eb3ffe911d8fad1cffb0ec7640c12c1535c57dcb705d976950d45e4776fa',
+    'app/services/enterprise_assistant_ownership_service.py': 'b4bbb6e64d2119b5bd16531e24f12e2a9a9ebddbc429bbcd930497d333f94598',
     'app/models/enterprise_assistant_ownership.py': 'bbe5669da14230d1b5dffc348f80a3deef354c6740bf53b269956bfe4102365c',
     'app/models/__init__.py': '557057a4bab7de910e3dc2e3133c5c55eb3b3d84f3393f557eaabe8d1b6950c0',
     'app/core/ownership_signals.py': 'ac98c85853637899d1c821782fcb47584745cf69cc549050a5a482f4585066e1',

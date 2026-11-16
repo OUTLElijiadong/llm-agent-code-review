@@ -12,6 +12,7 @@ from app.models.billing_ledger import BillingWallet
 from app.models.enterprise_assistant_ownership import EnterpriseAssistantRunOwner, EnterpriseAssistantToolOwner
 from app.models.enterprise_assistant_runtime import EnterpriseAssistantRuntimeState
 from app.models.enterprise_chat import EnterpriseAssistantRun
+from app.models.user import User
 from app.services import enterprise_assistant_ownership_service as ownership
 
 
@@ -573,9 +574,11 @@ def test_sqlite_existing_caller_write_is_not_committed_and_no_update_trigger(wal
 
 def test_sqlite_pending_caller_orm_write_is_never_committed(owner_db):
     with owner_db() as db:
-        db.add(BillingWallet(id=10, owner_type="enterprise", owner_id=2))
-        ownership.claim_run(db, run_id=41, enterprise_id=1, conversation_id=2, generation=7)
-        assert db.get(BillingWallet, 10) is not None
+        pending = BillingWallet(id=10, owner_type="enterprise", owner_id=2)
+        db.add(pending)
+        with pytest.raises(ForbiddenError, match="未刷新"):
+            ownership.claim_run(db, run_id=41, enterprise_id=1, conversation_id=2, generation=7)
+        assert pending in db.new
         db.rollback()
     with owner_db() as db:
         assert db.get(BillingWallet, 10) is None
@@ -692,3 +695,74 @@ def test_flushed_new_generation_and_run_owner_share_caller_transaction(owner_db)
     with owner_db() as db:
         assert db.query(EnterpriseAssistantRuntimeState).one().lease_generation == 7
         assert db.query(EnterpriseAssistantRunOwner).count() == 0
+
+
+@pytest.mark.parametrize("operation", ["claim_run", "assert_run", "claim_tool", "assert_tool"])
+@pytest.mark.parametrize("target", ["run", "state"])
+@pytest.mark.parametrize("autoflush", [False, True])
+def test_changed_scope_identity_is_never_overwritten(owner_db, operation, target, autoflush):
+    parent = tool = None
+    if operation != "claim_run":
+        with owner_db.begin() as db:
+            parent = ownership.claim_run(db, run_id=41, enterprise_id=1, conversation_id=2, generation=7)
+            if operation == "assert_tool":
+                tool = ownership.claim_tool(
+                    db, run_id=41, enterprise_id=1, conversation_id=2, generation=7,
+                    run_secret=parent, call_id="old", tool_name="search", arguments={"query": "a"}, wallet_id=9,
+                )
+    with owner_db(autoflush=autoflush) as db:
+        if target == "run":
+            row, field = db.get(EnterpriseAssistantRun, 41), "id"
+        else:
+            row, field = db.query(EnterpriseAssistantRuntimeState).filter_by(assistant_run_id=41).one(), "assistant_run_id"
+        setattr(row, field, 42)
+        common = dict(run_id=41, enterprise_id=1, conversation_id=2, generation=7)
+        with pytest.raises(ForbiddenError, match="未刷新"):
+            if operation == "claim_run":
+                ownership.claim_run(db, **common)
+            elif operation == "assert_run":
+                ownership.assert_run_owner(db, **common, secret=parent)
+            else:
+                tool_args = dict(run_secret=parent, call_id="old" if tool else "new", tool_name="search",
+                                 arguments={"query": "a"}, wallet_id=9)
+                if tool:
+                    ownership.assert_tool_owner(db, **common, tool_secret=tool, **tool_args)
+                else:
+                    ownership.claim_tool(db, **common, **tool_args)
+        assert getattr(row, field) == 42 and row in db.dirty
+        db.rollback()
+    with owner_db() as db:
+        assert db.get(EnterpriseAssistantRun, 41) is not None
+        assert db.query(EnterpriseAssistantRuntimeState).one().assistant_run_id == 41
+
+
+@pytest.mark.parametrize("operation", ["claim_run", "assert_run", "claim_tool", "assert_tool"])
+@pytest.mark.parametrize("autoflush", [False, True])
+def test_unrelated_pending_object_is_not_implicitly_flushed(owner_db, operation, autoflush):
+    parent = tool = None
+    if operation != "claim_run":
+        with owner_db.begin() as db:
+            parent = ownership.claim_run(db, run_id=41, enterprise_id=1, conversation_id=2, generation=7)
+            if operation == "assert_tool":
+                tool = ownership.claim_tool(
+                    db, run_id=41, enterprise_id=1, conversation_id=2, generation=7,
+                    run_secret=parent, call_id="old", tool_name="search", arguments={"query": "a"}, wallet_id=9,
+                )
+    with owner_db(autoflush=autoflush) as db:
+        unrelated = User(username="unrelated-pending", password="x", role="user", status=1)
+        db.add(unrelated)
+        common = dict(run_id=41, enterprise_id=1, conversation_id=2, generation=7)
+        with pytest.raises(ForbiddenError, match="未刷新"):
+            if operation == "claim_run":
+                ownership.claim_run(db, **common)
+            elif operation == "assert_run":
+                ownership.assert_run_owner(db, **common, secret=parent)
+            else:
+                tool_args = dict(run_secret=parent, call_id="old" if tool else "new", tool_name="search",
+                                 arguments={"query": "a"}, wallet_id=9)
+                if tool:
+                    ownership.assert_tool_owner(db, **common, tool_secret=tool, **tool_args)
+                else:
+                    ownership.claim_tool(db, **common, **tool_args)
+        assert unrelated in db.new and unrelated.id is None
+        db.rollback()
