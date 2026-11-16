@@ -754,7 +754,8 @@ def test_resume_replays_exact_pending_call_after_decision(records_db, monkeypatc
     )
     transport = ScriptedTransport([_message_response("完成")])
 
-    def build(work, *, enterprise_id, conversation_id, run, state, actor_user_id):
+    def build(work, *, enterprise_id, conversation_id, run, state, actor_user_id, expected_generation):
+        assert state.lease_generation == expected_generation
         store = runtime.EnterpriseAssistantCheckpointStore(
             work,
             enterprise_id=enterprise_id,

@@ -361,6 +361,7 @@ def _current_discussion_messages(
 
 def _newer_human_messages(
     db: Session, *, enterprise_id: int, conversation_id: int, source_message_id: int, lock: bool = False,
+    shared_lock: bool = False,
 ) -> list[EnterpriseChatMessage]:
     """Bound repeated freshness checks so post-source message floods fail closed."""
     query = (
@@ -375,7 +376,7 @@ def _newer_human_messages(
         .limit(_MAX_DISCUSSION_MESSAGES + 1)
         .populate_existing()
     )
-    messages = (query.with_for_update() if lock else query).all()
+    messages = (query.with_for_update(read=shared_lock) if lock else query).all()
     if len(messages) > _MAX_DISCUSSION_MESSAGES:
         raise ForbiddenError("会话后续消息超过安全处理上限，小菱旧任务已停止")
     return messages
@@ -550,6 +551,7 @@ def _live_role_snapshot(
     state: EnterpriseAssistantRuntimeState,
     *,
     require_billing_access: bool = True,
+    current_authority_read: bool = False,
 ) -> dict[str, Any]:
     saved = _parse_json(state.permission_snapshot_json, message="企业运行权限快照损坏")
     # Organization writers take the company lock before changing membership.
@@ -611,6 +613,7 @@ def _live_role_snapshot(
         source_message_id=int(state.source_message_id),
         initiator_id=int(state.initiator_user_id),
         initiator_rank=int(source_role.get("rank") or 0),
+        current_authority_read=current_authority_read,
     )
     return saved
 
@@ -623,17 +626,17 @@ def _assert_no_newer_authority_directive(
     source_message_id: int,
     initiator_id: int,
     initiator_rank: int,
+    current_authority_read: bool = False,
 ) -> None:
     """Do not continue a frozen run after another same-or-higher authority speaks in the room."""
-    # Use a fresh short-lived session: the worker's long-lived MySQL RR transaction may
-    # otherwise hide a message committed after this run was queued. Do not retain room
-    # locks while a provider call or a published asset is running.
-    with Session(bind=db.get_bind(), autoflush=False) as current_db:
+    def check(current_db: Session) -> None:
         newer = _newer_human_messages(
             current_db,
             enterprise_id=enterprise_id,
             conversation_id=int(room.id),
             source_message_id=source_message_id,
+            lock=current_authority_read,
+            shared_lock=current_authority_read,
         )
         if not newer:
             return
@@ -655,10 +658,19 @@ def _assert_no_newer_authority_directive(
             ) >= initiator_rank
             for message, authority in zip(newer, current_snapshot["messages"])
         )
-    if superseded:
-        raise SupersededByAuthorityDirectiveError(
-            "会话中有新的同级或更高权限消息；旧运行已停止后续工具调用，请按最新会话重新发起"
-        )
+        if superseded:
+            raise SupersededByAuthorityDirectiveError(
+                "会话中有新的同级或更高权限消息；旧运行已停止后续工具调用，请按最新会话重新发起"
+            )
+
+    if current_authority_read:
+        # A locking read sees the current committed rows even inside MySQL RR and
+        # avoids a second session waiting on locks already held by this transaction.
+        check(db)
+    else:
+        # Provider calls retain no locks; use a fresh snapshot for those paths.
+        with Session(bind=db.get_bind(), autoflush=False) as current_db:
+            check(current_db)
 
 
 def _state_for_run(db: Session, *, enterprise_id: int, conversation_id: int, run_public_id: str, lock: bool = False):
@@ -1324,7 +1336,7 @@ class EnterpriseAssistantToolExecutor:
         return tools
 
     def _current(self, *, db: Session | None = None, lock_state: bool = True,
-                 allowed_statuses: set[str] | None = None):
+                 allowed_statuses: set[str] | None = None, current_authority_read: bool = False):
         current_db = db or self._db
         if lock_state and _run_record(current_db, self._enterprise_id, self._conversation_id,
                                       self._run_public_id, lock=True) is None:
@@ -1348,7 +1360,8 @@ class EnterpriseAssistantToolExecutor:
             RunCheckpoint.from_dict(_parse_json(state.checkpoint_json, message="企业运行检查点损坏"))
         )
         _require_enterprise_active(current_db, self._enterprise_id, lock=True)
-        snapshot = _live_role_snapshot(current_db, state)
+        snapshot = (_live_role_snapshot(current_db, state, current_authority_read=True)
+                    if current_authority_read else _live_role_snapshot(current_db, state))
         if _digest(snapshot) != state.permission_snapshot_sha256:
             raise ForbiddenError("企业或会话角色发生变化，已禁止继续调用工具")
         # The model may have been waiting on the provider while another transaction
@@ -1575,7 +1588,9 @@ class EnterpriseAssistantToolExecutor:
             return ToolExecutionResult.failure(str(exc), failure_kind="billing")
 
     async def execute(self, call: ToolCall, *, approved: bool = False) -> ToolExecutionResult:
-        independent_tool = call.name in {"search_enterprise_web", "fetch_enterprise_web_page"}
+        search_tool = call.name in {"search_enterprise_web", "fetch_enterprise_web_page"}
+        team_control_tool = call.name in {"cancel_enterprise_agent_team", "retry_enterprise_agent_team_task"}
+        independent_tool = search_tool or team_control_tool
         try:
             if self._is_proactive_run():
                 return ToolExecutionResult.failure("主动讨论仅可提供建议，不能执行工具", failure_kind="authorization")
@@ -1584,7 +1599,7 @@ class EnterpriseAssistantToolExecutor:
                     "本次小菱运行已有 Search/Fetch 结果待恢复或账单待核对，已停止后续工具。",
                     failure_kind=self._search_fetch_blocked,
                 )
-            if independent_tool:
+            if search_tool:
                 # The executor session belongs to the caller. This tool opens
                 # multiple billing transactions, so preflight in an independent
                 # short transaction and never commit caller-owned writes.
@@ -1599,6 +1614,49 @@ class EnterpriseAssistantToolExecutor:
                 return await self._execute_search_fetch(
                     call, state, group_id=group_id, tool_name=call.name, arguments=dict(call.arguments),
                 )
+            if team_control_tool:
+                args = dict(call.arguments)
+                team_id = args.get("team_id")
+                task_id = args.get("task_id")
+                reason = args.get("reason", "由小菱停止")
+                if type(team_id) is not int or team_id <= 0:
+                    return ToolExecutionResult.failure("团队参数无效")
+                if call.name == "retry_enterprise_agent_team_task" and (type(task_id) is not int or task_id <= 0):
+                    return ToolExecutionResult.failure("团队重试参数无效")
+                if call.name == "cancel_enterprise_agent_team" and not isinstance(reason, str):
+                    return ToolExecutionResult.failure("团队停止参数无效")
+                if approved:
+                    raise ForbiddenError("团队控制只能由当前运行的原发起人执行")
+
+                def preflight(db: Session):
+                    state, _ = self._current(db=db, current_authority_read=True)
+                    if int(state.initiator_user_id) != self._actor_user_id:
+                        raise ForbiddenError("团队控制只能由当前运行的原发起人执行")
+                    return None
+
+                def check_clarification(db: Session):
+                    state = _state_for_run(
+                        db, enterprise_id=self._enterprise_id, conversation_id=self._conversation_id,
+                        run_public_id=self._run_public_id, lock=True,
+                    )
+                    if state is None:
+                        raise NotFoundError("企业运行不存在")
+                    return self._action_clarification(state, call, db)
+
+                kwargs = dict(
+                    enterprise_id=self._enterprise_id, team_id=team_id, actor_user_id=self._actor_user_id,
+                    source_run_public_id=self._run_public_id, source_conversation_id=self._conversation_id,
+                    assistant_preflight=preflight,
+                )
+                if call.name == "cancel_enterprise_agent_team":
+                    outcome = enterprise_agent_team_runtime_service.cancel_team(
+                        _factory(self._db), reason=reason, **kwargs,
+                    )
+                else:
+                    outcome = enterprise_agent_team_runtime_service.retry_task(
+                        _factory(self._db), task_id=task_id, assistant_clarification=check_clarification, **kwargs,
+                    )
+                return outcome if isinstance(outcome, ToolExecutionResult) else ToolExecutionResult.success(outcome)
             state, snapshot = self._current()
             args = dict(call.arguments)
             if call.name in _TOOL_CLARIFICATION_LABELS and call.name != "cancel_enterprise_agent_team":
@@ -1665,36 +1723,6 @@ class EnterpriseAssistantToolExecutor:
                 # and future members may read durable chat history.  The existing
                 # progress panel rechecks the actual viewer when loading details.
                 return ToolExecutionResult.success({"location": _TEAM_PROGRESS_REFERENCE})
-            if call.name == "cancel_enterprise_agent_team":
-                if int(state.initiator_user_id) != self._actor_user_id or approved:
-                    raise ForbiddenError("团队停止只能由当前运行的原发起人执行")
-                team_id, reason = args.get("team_id"), args.get("reason", "由小菱停止")
-                if type(team_id) is not int or team_id <= 0 or not isinstance(reason, str):
-                    return ToolExecutionResult.failure("团队停止参数无效")
-                return ToolExecutionResult.success(
-                    enterprise_agent_team_runtime_service.cancel_team(
-                        _factory(self._db),
-                        enterprise_id=self._enterprise_id,
-                        team_id=team_id,
-                        actor_user_id=self._actor_user_id,
-                        reason=reason,
-                    )
-                )
-            if call.name == "retry_enterprise_agent_team_task":
-                if int(state.initiator_user_id) != self._actor_user_id or approved:
-                    raise ForbiddenError("团队任务重试只能由当前运行的原发起人执行")
-                team_id, task_id = args.get("team_id"), args.get("task_id")
-                if type(team_id) is not int or team_id <= 0 or type(task_id) is not int or task_id <= 0:
-                    return ToolExecutionResult.failure("团队重试参数无效")
-                return ToolExecutionResult.success(
-                    enterprise_agent_team_runtime_service.retry_task(
-                        _factory(self._db),
-                        enterprise_id=self._enterprise_id,
-                        team_id=team_id,
-                        task_id=task_id,
-                        actor_user_id=self._actor_user_id,
-                    )
-                )
             if call.name == "run_approved_enterprise_asset_team":
                 if int(state.initiator_user_id) != self._actor_user_id or approved:
                     raise ForbiddenError("已发布资产团队只能以原始发起人身份运行")
@@ -2540,7 +2568,12 @@ def _build_runtime(
     run: EnterpriseAssistantRun,
     state: EnterpriseAssistantRuntimeState,
     actor_user_id: int,
+    expected_generation: int,
 ):
+    if run is None or state is None:
+        raise NotFoundError("企业小菱运行不存在")
+    if int(state.lease_generation) != expected_generation:
+        raise ConflictError("企业小菱运行已由其他请求接管")
     config, model = assistant_service._model_config(db)
     store = EnterpriseAssistantCheckpointStore(
         db,
@@ -2957,7 +2990,9 @@ def _reservation_is_closed_for_runtime(reservation: BillingReservation) -> bool:
     )
 
 
-def _finalize_runtime(factory, *, enterprise_id: int, conversation_id: int, run_public_id: str) -> dict[str, Any]:
+def _finalize_runtime(
+    factory, *, enterprise_id: int, conversation_id: int, run_public_id: str, expected_generation: int
+) -> dict[str, Any]:
     withheld = False
     reconciliation_required = False
     result: dict[str, Any] | None = None
@@ -2968,6 +3003,8 @@ def _finalize_runtime(factory, *, enterprise_id: int, conversation_id: int, run_
         )
         if run is None or state is None:
             raise NotFoundError("企业小菱运行不存在")
+        if int(state.lease_generation) != expected_generation:
+            raise ConflictError("企业小菱运行已由其他请求接管")
         checkpoint = RunCheckpoint.from_dict(_parse_json(state.checkpoint_json, message="企业运行检查点损坏"))
         if checkpoint.status != COMPLETED or not checkpoint.output_text.strip():
             raise ConflictError("企业小菱运行尚未完成")
@@ -3041,11 +3078,13 @@ def _finalize_runtime(factory, *, enterprise_id: int, conversation_id: int, run_
 
 
 def _result_for_runtime(
-    factory, *, enterprise_id: int, conversation_id: int, run_public_id: str, result: RuntimeResult
+    factory, *, enterprise_id: int, conversation_id: int, run_public_id: str, result: RuntimeResult,
+    expected_generation: int,
 ) -> dict[str, Any]:
     if result.status == COMPLETED:
         return _finalize_runtime(
-            factory, enterprise_id=enterprise_id, conversation_id=conversation_id, run_public_id=run_public_id
+            factory, enterprise_id=enterprise_id, conversation_id=conversation_id, run_public_id=run_public_id,
+            expected_generation=expected_generation,
         )
     message_text = {
         WAITING_APPROVAL: "小菱的企业公告请求已提交审批；发布前需要企业所有者或管理员确认。",
@@ -3062,6 +3101,8 @@ def _result_for_runtime(
         )
         if run is None or state is None:
             raise NotFoundError("企业小菱运行不存在")
+        if int(state.lease_generation) != expected_generation:
+            raise ConflictError("企业小菱运行已由其他请求接管")
         if getattr(run, "trigger_kind", "manual") == "proactive":
             reservations = _reservations_for_run(db, run)
             pending = any(row.status in {"reserved", "unknown"} for row in reservations)
@@ -3808,6 +3849,7 @@ async def execute_queued_run(engine, *, enterprise_id: int, conversation_id: int
                 run=run,
                 state=state,
                 actor_user_id=initiator_id,
+                expected_generation=lease_generation,
             )
             with _billing_scope(factory, run=run, state=state, wallet_id=wallet_id):
                 result = await runtime.drive_persisted(run_public_id)
@@ -3817,6 +3859,7 @@ async def execute_queued_run(engine, *, enterprise_id: int, conversation_id: int
                 conversation_id=conversation_id,
                 run_public_id=run_public_id,
                 result=result,
+                expected_generation=lease_generation,
             )
         finally:
             run_session.close()
@@ -4242,6 +4285,7 @@ async def decide_approval(
         elif approval.status != next_status or int(approval.decided_by or 0) != int(user_id):
             raise ConflictError("该企业审批已经由其他人作出不可逆决定")
         state.lease_generation = int(state.lease_generation or 0) + 1
+        lease_generation = int(state.lease_generation)
         state.billing_invocation_count = int(state.billing_invocation_count or 0) + 1
         state.lease_expires_at = _now() + timedelta(seconds=_LEASE_SECONDS)
         state.version = int(state.version or 0) + 1
@@ -4268,6 +4312,7 @@ async def decide_approval(
             run=run,
             state=state,
             actor_user_id=int(run.initiator_user_id),
+            expected_generation=lease_generation,
         )
         with _billing_scope(factory, run=run, state=state, wallet_id=int(wallet.id)):
             if decision == "approve":
@@ -4275,7 +4320,8 @@ async def decide_approval(
             else:
                 result = await runtime.reject(run_id, approval.call_id, reason=reason.strip() or "企业管理员拒绝此公告")
         return _result_for_runtime(
-            factory, enterprise_id=enterprise_id, conversation_id=conversation_id, run_public_id=run_id, result=result
+            factory, enterprise_id=enterprise_id, conversation_id=conversation_id, run_public_id=run_id, result=result,
+            expected_generation=lease_generation,
         )
     except Exception:
         run_session.rollback()
@@ -4535,6 +4581,7 @@ async def resume_clarification(db: Session, *, enterprise_id: int, conversation_
         except (SupersededByAuthorityDirectiveError, ForbiddenError, NotFoundError):
             _close_clarification(run, state, checkpoint, record, "会话权限或指令已变化，请重新发起。")
             return {"run_id": run_public_id, "status": "stale", "message": None, "pending": None}
+        lease_generation = int(state.lease_generation)
         _check_unresolved_billing(work, run)
         assistant_service._require_subscription(work, enterprise_id)
         assistant_service._require_active_limit(work, enterprise_id=enterprise_id,
@@ -4568,7 +4615,8 @@ async def resume_clarification(db: Session, *, enterprise_id: int, conversation_
         state = _state_for_run(work, enterprise_id=enterprise_id, conversation_id=conversation_id,
                                run_public_id=run_public_id)
         runtime, executor, _store, _model = _build_runtime(work, enterprise_id=enterprise_id,
-            conversation_id=conversation_id, run=run, state=state, actor_user_id=user_id)
+            conversation_id=conversation_id, run=run, state=state, actor_user_id=user_id,
+            expected_generation=lease_generation)
         with _billing_scope(factory, run=run, state=state, wallet_id=wallet_id):
             if model_send:
                 result = await runtime.drive_persisted(run_public_id)
@@ -4578,7 +4626,7 @@ async def resume_clarification(db: Session, *, enterprise_id: int, conversation_
                 executor._clarification_request = (request_id, request_version)
                 result = await runtime.resume_clarification(run_public_id, call_id)
         return _result_for_runtime(factory, enterprise_id=enterprise_id, conversation_id=conversation_id,
-                                   run_public_id=run_public_id, result=result)
+                                   run_public_id=run_public_id, result=result, expected_generation=lease_generation)
 
 
 async def answer_run(
@@ -4604,6 +4652,7 @@ async def answer_run(
             actor_user_id=user_id,
             require_initiator=True,
         )
+        lease_generation = int(state.lease_generation)
         checkpoint = RunCheckpoint.from_dict(_parse_json(state.checkpoint_json, message="企业运行检查点损坏"))
         if checkpoint.pending is None or checkpoint.pending.call.call_id != call_id:
             raise ConflictError("小菱追问标识已经变化")
@@ -4625,6 +4674,7 @@ async def answer_run(
             run=run,
             state=state,
             actor_user_id=user_id,
+            expected_generation=lease_generation,
         )
         with _billing_scope(factory, run=run, state=state, wallet_id=int(wallet.id)):
             result = await runtime.answer(run_public_id, answer.strip(), call_id)
@@ -4634,6 +4684,7 @@ async def answer_run(
             conversation_id=conversation_id,
             run_public_id=run_public_id,
             result=result,
+            expected_generation=lease_generation,
         )
     except Exception:
         run_session.rollback()
@@ -4680,6 +4731,7 @@ async def retry_run(
             allow_statuses=_RETRYABLE | {"queued"},
             actor_user_id=user_id,
         )
+        lease_generation = int(state.lease_generation)
         _check_unresolved_billing(work, run)
         assistant_service._require_subscription(work, enterprise_id)
         assistant_service._require_active_limit(
@@ -4705,6 +4757,7 @@ async def retry_run(
             run=run,
             state=state,
             actor_user_id=int(run.initiator_user_id),
+            expected_generation=lease_generation,
         )
         with _billing_scope(
             factory, run=run, state=state, wallet_id=int(wallet.id), controller_user_id=user_id, controller_room=room
@@ -4730,6 +4783,7 @@ async def retry_run(
             conversation_id=conversation_id,
             run_public_id=run_public_id,
             result=result,
+            expected_generation=lease_generation,
         )
     except Exception:
         run_session.rollback()

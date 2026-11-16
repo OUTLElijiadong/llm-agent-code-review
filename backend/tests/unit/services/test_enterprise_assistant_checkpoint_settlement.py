@@ -200,7 +200,10 @@ def test_legacy_team_result_blocks_new_charge_and_publication_but_preserves_sett
         )
         monkeypatch.setattr(runtime.assistant_service, "_require_subscription", lambda *_a: None)
         with pytest.raises(ForbiddenError):
-            runtime._finalize_runtime(factory, enterprise_id=10, conversation_id=20, run_public_id=checkpoint.run_id)
+            runtime._finalize_runtime(
+                factory, enterprise_id=10, conversation_id=20, run_public_id=checkpoint.run_id,
+                expected_generation=1,
+            )
         with factory() as db:
             assert db.get(EnterpriseAssistantRun, run_id).status == "suppressed"
             assert db.get(EnterpriseAssistantRun, run_id).response_text is None
@@ -253,10 +256,33 @@ def test_authority_change_after_approval_is_not_reported_as_billing_error():
             state.checkpoint_json = runtime._json(checkpoint.to_dict())
         result = runtime._result_for_runtime(
             factory, enterprise_id=10, conversation_id=20, run_public_id=checkpoint.run_id,
-            result=RuntimeResult(run_id=checkpoint.run_id, status="failed"),
+            result=RuntimeResult(run_id=checkpoint.run_id, status="failed"), expected_generation=1,
         )
         assert "权限需要重新澄清" in result["message"].content
         assert "账单" not in result["message"].content
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("old_status", ["failed", "cancelled"])
+def test_stale_worker_result_cannot_modify_reclaimed_run(old_status):
+    """A prior driver's late result must not cancel or overwrite a newer lease."""
+    engine, factory, _wallet_id, run_id, state_id, checkpoint = _runtime_db()
+    try:
+        with factory.begin() as db:
+            state = db.get(EnterpriseAssistantRuntimeState, state_id)
+            state.lease_generation = 2
+            state.lease_expires_at = runtime._now() + timedelta(minutes=10)
+        with pytest.raises(ConflictError):
+            runtime._result_for_runtime(
+                factory, enterprise_id=10, conversation_id=20, run_public_id=checkpoint.run_id,
+                expected_generation=1,
+                result=RuntimeResult(run_id=checkpoint.run_id, status=old_status, error="旧任务结果"),
+            )
+        with factory() as db:
+            assert db.get(EnterpriseAssistantRun, run_id).status == "running"
+            assert db.get(EnterpriseAssistantRuntimeState, state_id).status == "running"
+            assert db.query(EnterpriseChatMessage).filter_by(assistant_run_id=run_id).count() == 0
     finally:
         engine.dispose()
 
@@ -971,5 +997,47 @@ def test_approved_not_sent_asset_child_allows_only_explicit_fenced_parent_retry(
             assert current_state.error_code is None
             assert current_state.lease_generation == 2
             assert current_state.billing_invocation_count == 2
+    finally:
+        engine.dispose()
+
+
+def test_stale_finalization_cannot_publish_reclaimed_run():
+    engine, factory, _wallet_id, run_id, state_id, checkpoint = _runtime_db()
+    try:
+        checkpoint.status = "completed"
+        checkpoint.output_text = "新一代的结果"
+        with factory.begin() as db:
+            state = db.get(EnterpriseAssistantRuntimeState, state_id)
+            state.lease_generation = 2
+            state.checkpoint_json = runtime._json(checkpoint.to_dict())
+        with pytest.raises(ConflictError):
+            runtime._finalize_runtime(
+                factory, enterprise_id=10, conversation_id=20, run_public_id=checkpoint.run_id,
+                expected_generation=1,
+            )
+        with factory() as db:
+            assert db.get(EnterpriseAssistantRun, run_id).status == "running"
+            assert db.get(EnterpriseAssistantRuntimeState, state_id).status == "running"
+            assert db.query(EnterpriseChatMessage).filter_by(assistant_run_id=run_id).count() == 0
+    finally:
+        engine.dispose()
+
+
+def test_stale_reload_is_rejected_before_model_configuration(monkeypatch):
+    engine, factory, _wallet_id, run_id, state_id, _checkpoint = _runtime_db()
+    model_calls = []
+    monkeypatch.setattr(runtime.assistant_service, "_model_config", lambda *_a: model_calls.append(1))
+    try:
+        with factory.begin() as db:
+            db.get(EnterpriseAssistantRuntimeState, state_id).lease_generation = 2
+        with factory() as db:
+            with pytest.raises(ConflictError):
+                runtime._build_runtime(
+                    db, enterprise_id=10, conversation_id=20,
+                    run=db.get(EnterpriseAssistantRun, run_id),
+                    state=db.get(EnterpriseAssistantRuntimeState, state_id),
+                    actor_user_id=2, expected_generation=1,
+                )
+        assert model_calls == []
     finally:
         engine.dispose()

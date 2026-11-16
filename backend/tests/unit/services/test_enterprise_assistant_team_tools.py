@@ -32,7 +32,7 @@ def test_registered_team_tools_dispatch_to_enterprise_services(monkeypatch):
         lease_generation=3,
         actor_user_id=7,
     )
-    monkeypatch.setattr(executor, "_current", lambda: (state, {}))
+    monkeypatch.setattr(executor, "_current", lambda **_kwargs: (state, {}))
     monkeypatch.setattr(executor, "_action_clarification", lambda *_args: None)
     monkeypatch.setattr(runtime, "_factory", lambda session: ("session-factory", session))
     subscription_gate = Mock()
@@ -80,7 +80,13 @@ def test_registered_team_tools_dispatch_to_enterprise_services(monkeypatch):
     wallet_balance.assert_called_once_with(db, 92, lock=True)
     assert observed[1][2] == {"enterprise_id": 10, "user_id": 7, "team_id": 41, "expected_conversation_id": 20}
     assert observed[2][2]["actor_user_id"] == 7
-    assert observed[3][2] == {"enterprise_id": 10, "team_id": 41, "task_id": 51, "actor_user_id": 7}
+    assert {key: observed[3][2][key] for key in ("enterprise_id", "team_id", "task_id", "actor_user_id")} == {
+        "enterprise_id": 10, "team_id": 41, "task_id": 51, "actor_user_id": 7,
+    }
+    for entry in observed[2:]:
+        assert entry[2]["source_run_public_id"] == "enterprise-run"
+        assert entry[2]["source_conversation_id"] == 20
+        assert entry[2]["assistant_preflight"](db) is None
 
 
 def test_registered_team_tools_cannot_be_used_by_non_initiator_or_approval_runner(monkeypatch):
@@ -93,7 +99,7 @@ def test_registered_team_tools_cannot_be_used_by_non_initiator_or_approval_runne
         lease_generation=3,
         actor_user_id=8,
     )
-    monkeypatch.setattr(executor, "_current", lambda: (state, {}))
+    monkeypatch.setattr(executor, "_current", lambda **_kwargs: (state, {}))
     call = _call("create_registered_enterprise_agent_team", {"title": "不可代建"})
 
     result = asyncio.run(executor.execute(call))
