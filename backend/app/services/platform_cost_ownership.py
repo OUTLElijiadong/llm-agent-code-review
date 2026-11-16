@@ -56,6 +56,9 @@ def _begin(db: Session, actor_id: int) -> None:
     platform._require_enabled()
     platform._require_no_pending_orm_changes(db)
     platform._start_write_transaction(db)
+    if (db.connection().dialect.name == 'sqlite'
+            and db.connection().exec_driver_sql('PRAGMA foreign_keys').scalar_one() != 1):
+        raise BillingError('数据库外键约束未启用')
     platform._require_admin(db, actor_id)
 
 

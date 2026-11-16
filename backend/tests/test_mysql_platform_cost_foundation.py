@@ -11,6 +11,7 @@ from threading import Barrier, Event
 import pytest
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
@@ -240,6 +241,38 @@ def test_platform_center_and_budget_mysql_lock_order(monkeypatch):
         with factory.begin() as db:
             run_pk, run_secret = owner.create_owned_run(db, actor_id=501, run_id='mysql-owner-run',
                                                         session_key='admin-session')
+        # Database-level identity protection, including a case-only edit under
+        # MySQL's usual case-insensitive collation and REPLACE semantics.
+        for statement in (
+            'DELETE FROM agent_response_run WHERE id=:pk',
+            'DELETE FROM platform_cost_run_owner WHERE run_pk=:pk',
+            "UPDATE agent_response_run SET run_id='MYSQL-OWNER-RUN' WHERE id=:pk",
+            'UPDATE agent_response_run SET user_id=502 WHERE id=:pk',
+            'UPDATE platform_cost_run_owner SET actor_id=502 WHERE run_pk=:pk',
+            'REPLACE INTO platform_cost_run_owner (id,run_pk,actor_id,generation,owner_digest,status) '
+            'SELECT id,run_pk,actor_id,generation,owner_digest,status FROM platform_cost_run_owner WHERE run_pk=:pk',
+        ):
+            with factory() as db:
+                with pytest.raises(DBAPIError):
+                    db.execute(text(statement), {'pk': run_pk})
+                db.rollback()
+                assert db.get(AgentResponseRun, run_pk).user_id == 501
+        with factory() as db:
+            connection = db.connection()
+            try:
+                connection.exec_driver_sql('SET FOREIGN_KEY_CHECKS=0')
+                with pytest.raises(DBAPIError):
+                    connection.execute(text('DELETE FROM agent_response_run WHERE id=:pk'), {'pk': run_pk})
+                with pytest.raises(DBAPIError):
+                    connection.execute(text(
+                        'REPLACE INTO agent_response_run '
+                        '(id,run_id,user_id,surface,session_key,status,checkpoint_json,version,create_time,'
+                        'update_time) '
+                        "VALUES (:pk,'replacement',501,'admin','admin-session','running','{}',1,NOW(),NOW())"
+                    ), {'pk': run_pk})
+            finally:
+                connection.exec_driver_sql('SET FOREIGN_KEY_CHECKS=1')
+                db.rollback()
         key = platform.new_attempt_key()
 
         def owned_reserve(db, actor=501, pk=run_pk, secret=run_secret, attempt_key=key):
@@ -366,6 +399,18 @@ def test_platform_center_and_budget_mysql_lock_order(monkeypatch):
             assert db.get(PlatformCostAttempt, attempt_id).status == 'unknown'
             budget = db.query(PlatformCostBudget).filter_by(id=1).one()
             assert budget.reserved_cny_micros == held_before_cancel + auth_held and attempt_held > 0
+        for statement in (
+            'UPDATE platform_cost_attempt SET actor_id=502 WHERE id=:attempt',
+            'UPDATE platform_cost_attempt SET reserved_cny_micros=reserved_cny_micros+1 WHERE id=:attempt',
+            "UPDATE platform_cost_attempt SET status='reserved' WHERE id=:attempt",
+            'DELETE FROM platform_cost_attempt WHERE id=:attempt',
+            'DELETE FROM platform_cost_attempt_owner WHERE attempt_id=:attempt',
+        ):
+            with factory() as db:
+                with pytest.raises(DBAPIError):
+                    db.execute(text(statement), {'attempt': attempt_id})
+                db.rollback()
+                assert db.get(PlatformCostAttempt, attempt_id).status == 'unknown'
 
         # Hold reservation locks while cancellation waits, then check the reverse order.
         with factory.begin() as db:
@@ -437,5 +482,12 @@ def test_platform_center_and_budget_mysql_lock_order(monkeypatch):
         with factory() as db:
             budget = db.query(PlatformCostBudget).filter_by(id=1).one()
             assert budget.reserved_cny_micros <= budget.limit_cny_micros
+        with pytest.raises(RuntimeError, match='已存在'):
+            PlatformCostBase.metadata.create_all(engine)
+        with pytest.raises(RuntimeError, match='禁止自动删除'):
+            PlatformCostBase.metadata.drop_all(engine)
+        with factory() as db:
+            assert db.get(AgentResponseRun, run_pk).status == 'cancelled'
+            assert db.get(PlatformCostAttempt, attempt_id).status == 'unknown'
     finally:
         engine.dispose()

@@ -8,6 +8,8 @@ from sqlalchemy import BigInteger, CheckConstraint, Column, DateTime, ForeignKey
 from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import declarative_base
 
+from app.models.agent_response_run import AgentResponseRun
+
 PlatformCostBase = declarative_base()
 _PK = BigInteger().with_variant(Integer, 'sqlite')
 _DIGEST = LargeBinary(32).with_variant(mysql.VARBINARY(32), 'mysql')
@@ -75,10 +77,7 @@ class PlatformCostAttempt(PlatformCostBase):
 
 
 class PlatformRunOwner(PlatformCostBase):
-    """Detached owner identity; run_pk references the actual Responses run logically.
-
-    No cross-metadata foreign key is claimed by this test-only schema.
-    """
+    """Detached owner identity with an actual, restrictive cross-metadata FK."""
     __tablename__ = 'platform_cost_run_owner'
     __table_args__ = (
         CheckConstraint('generation > 0', name='ck_platform_run_owner_generation'),
@@ -87,7 +86,7 @@ class PlatformRunOwner(PlatformCostBase):
     )
 
     id = Column(_PK, primary_key=True, autoincrement=True)
-    run_pk = Column(BigInteger, nullable=False, unique=True)
+    run_pk = Column(_PK, ForeignKey(AgentResponseRun.__table__.c.id, ondelete='RESTRICT'), nullable=False, unique=True)
     actor_id = Column(BigInteger, nullable=False)
     generation = Column(BigInteger, nullable=False)
     owner_digest = Column(_DIGEST, nullable=False)
@@ -106,3 +105,8 @@ class PlatformAttemptOwner(PlatformCostBase):
     run_owner_id = Column(_PK, ForeignKey('platform_cost_run_owner.id', ondelete='RESTRICT'), nullable=False)
     generation = Column(BigInteger, nullable=False)
     owner_digest = Column(_DIGEST, nullable=False)
+
+
+from app.models.platform_cost_guards import register_guards  # noqa: E402
+
+register_guards(PlatformRunOwner.__table__, PlatformAttemptOwner.__table__)

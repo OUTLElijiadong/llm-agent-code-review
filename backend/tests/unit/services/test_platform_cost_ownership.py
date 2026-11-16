@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from app.models.agent_response_run import AgentResponseRun
 from app.models.platform_cost_center import (
@@ -20,9 +21,13 @@ from app.services.billing_ledger_service import BillingError
 
 @pytest.fixture(autouse=True)
 def detached_tables(db):
+    db.connection().exec_driver_sql('PRAGMA foreign_keys=ON')
+    assert db.connection().exec_driver_sql('PRAGMA foreign_keys').scalar_one() == 1
+    db.commit()
     PlatformCostBase.metadata.create_all(db.get_bind())
     now = datetime.utcnow()
     db.add(PlatformCostCenter(id=1, status='active'))
+    db.flush()
     db.add(PlatformCostBudget(period_start=now - timedelta(days=1), period_end=now + timedelta(days=1),
                               limit_cny_micros=1_000_000, reserved_cny_micros=0, spent_cny_micros=0,
                               status='active'))
@@ -46,6 +51,28 @@ def test_owner_default_closed(db, admin_user):
     with pytest.raises(BillingError, match='启用'):
         create(db, admin_user.id)
     assert db.query(AgentResponseRun).count() == 0
+
+
+def test_disabled_sqlite_foreign_keys_reject_owner_operations(tmp_path, monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app.core.database import Base
+
+    monkeypatch.setattr(platform, '_FOUNDATION_ENABLED', True)
+    engine = create_engine(f'sqlite:///{tmp_path / "no-foreign-keys.sqlite"}')
+    Base.metadata.create_all(engine)
+    PlatformCostBase.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, autoflush=False)
+    try:
+        with factory() as session:
+            assert session.connection().exec_driver_sql('PRAGMA foreign_keys').scalar_one() == 0
+            with pytest.raises(BillingError, match='外键'):
+                create(session, 501)
+            session.rollback()
+            assert session.query(PlatformRunOwner).count() == 0
+    finally:
+        engine.dispose()
 
 
 def test_creation_and_reservation_are_outer_transaction_owned(db, admin_user, monkeypatch):
@@ -223,19 +250,174 @@ def test_existing_run_is_never_adopted(db, admin_user, monkeypatch):
     assert db.query(AgentResponseRun).count() == 1
 
 
-@pytest.mark.xfail(strict=True, reason='缺少真实 FK 与不可变运行身份，必须禁止上线')
 def test_recreated_run_with_same_primary_key_cannot_reuse_old_owner(db, admin_user, monkeypatch):
     monkeypatch.setattr(platform, '_FOUNDATION_ENABLED', True)
     run_pk, run_secret = create(db, admin_user.id)
     db.commit()
-    db.delete(db.get(AgentResponseRun, run_pk))
+    with pytest.raises(IntegrityError):
+        db.connection().exec_driver_sql('DELETE FROM agent_response_run WHERE id = ?', (run_pk,))
+    db.rollback()
+    assert db.get(AgentResponseRun, run_pk).run_id == 'platform-owned-run'
+    attempt, _ = reserve(db, admin_user.id, run_pk, run_secret)
+    assert attempt.status == 'reserved'
+    db.rollback()
+
+
+def test_parent_delete_and_replace_rejected_even_when_sqlite_foreign_keys_are_off(db, admin_user, monkeypatch):
+    monkeypatch.setattr(platform, '_FOUNDATION_ENABLED', True)
+    run_pk, _ = create(db, admin_user.id)
     db.commit()
-    db.add(AgentResponseRun(id=run_pk, run_id='replacement', user_id=admin_user.id, surface='admin',
+    connection = db.connection()
+    connection.exec_driver_sql('PRAGMA foreign_keys=OFF')
+    assert connection.exec_driver_sql('PRAGMA foreign_keys').scalar_one() == 0
+    with pytest.raises(IntegrityError):
+        connection.exec_driver_sql('DELETE FROM agent_response_run WHERE id=?', (run_pk,))
+    with pytest.raises(IntegrityError):
+        connection.exec_driver_sql('INSERT OR REPLACE INTO agent_response_run SELECT * '
+                                   'FROM agent_response_run WHERE id=?', (run_pk,))
+    db.rollback()
+    db.connection().exec_driver_sql('PRAGMA foreign_keys=ON')
+    db.commit()
+    assert db.get(AgentResponseRun, run_pk).run_id == 'platform-owned-run'
+
+
+@pytest.mark.parametrize('sql', [
+    'DELETE FROM platform_cost_run_owner',
+    'INSERT OR REPLACE INTO platform_cost_run_owner (id,run_pk,actor_id,generation,owner_digest,status) '
+    'SELECT id,run_pk,actor_id,generation,owner_digest,status FROM platform_cost_run_owner',
+    'UPDATE platform_cost_run_owner SET actor_id = actor_id + 1',
+    'UPDATE platform_cost_run_owner SET run_pk = run_pk + 1',
+    "UPDATE platform_cost_run_owner SET owner_digest = zeroblob(32)",
+    "UPDATE agent_response_run SET run_id = 'another-run'",
+    "UPDATE agent_response_run SET session_key = 'another-session'",
+    "UPDATE agent_response_run SET surface = 'user'",
+    'UPDATE agent_response_run SET user_id = user_id + 1',
+])
+def test_database_direct_changes_cannot_break_owned_run_identity(db, admin_user, monkeypatch, sql):
+    monkeypatch.setattr(platform, '_FOUNDATION_ENABLED', True)
+    run_pk, _ = create(db, admin_user.id)
+    db.commit()
+    with pytest.raises(IntegrityError):
+        db.connection().exec_driver_sql(sql)
+    db.rollback()
+    assert db.get(AgentResponseRun, run_pk).user_id == admin_user.id
+    assert db.query(PlatformRunOwner).filter_by(run_pk=run_pk).count() == 1
+
+
+def test_database_prevents_owner_resurrection_after_cancellation(db, admin_user, monkeypatch):
+    monkeypatch.setattr(platform, '_FOUNDATION_ENABLED', True)
+    run_pk, _ = create(db, admin_user.id)
+    db.commit()
+    owner.cancel_owned_run(db, actor_id=admin_user.id, run_pk=run_pk, session_key='admin-session')
+    db.commit()
+    with pytest.raises(IntegrityError):
+        db.connection().exec_driver_sql("UPDATE platform_cost_run_owner SET status='active', generation=1")
+    db.rollback()
+    row = db.query(PlatformRunOwner).filter_by(run_pk=run_pk).one()
+    assert row.status == 'cancelled' and row.generation == 2
+
+
+def test_database_prevents_deleting_attempt_owner(db, admin_user, monkeypatch):
+    monkeypatch.setattr(platform, '_FOUNDATION_ENABLED', True)
+    run_pk, secret = create(db, admin_user.id)
+    db.commit()
+    attempt, _ = reserve(db, admin_user.id, run_pk, secret)
+    db.commit()
+    with pytest.raises(IntegrityError):
+        db.connection().exec_driver_sql('DELETE FROM platform_cost_attempt_owner')
+    db.rollback()
+    with pytest.raises(IntegrityError):
+        db.connection().exec_driver_sql(
+            'INSERT OR REPLACE INTO platform_cost_attempt_owner (id,attempt_id,run_owner_id,generation,owner_digest) '
+            'SELECT id,attempt_id,run_owner_id,generation,owner_digest FROM platform_cost_attempt_owner'
+        )
+    db.rollback()
+    assert db.get(PlatformCostAttempt, attempt.id).status == 'reserved'
+
+
+@pytest.mark.parametrize('sql', [
+    'UPDATE platform_cost_attempt SET actor_id=actor_id+1',
+    'UPDATE platform_cost_attempt SET budget_id=budget_id+1',
+    'UPDATE platform_cost_attempt SET reserved_cny_micros=reserved_cny_micros+1',
+    'UPDATE platform_cost_attempt SET payload_digest=zeroblob(32)',
+    "UPDATE platform_cost_attempt SET pricing_version='different'",
+    "UPDATE platform_cost_attempt SET status='reserved'",
+    'DELETE FROM platform_cost_attempt',
+    'INSERT OR REPLACE INTO platform_cost_attempt SELECT * FROM platform_cost_attempt',
+])
+def test_bound_attempt_snapshot_and_unknown_are_immutable(db, admin_user, monkeypatch, sql):
+    monkeypatch.setattr(platform, '_FOUNDATION_ENABLED', True)
+    run_pk, run_secret = create(db, admin_user.id)
+    db.commit()
+    attempt, attempt_secret = reserve(db, admin_user.id, run_pk, run_secret)
+    attempt_id = attempt.id
+    db.commit()
+    owner.mark_owned_attempt_unknown(db, actor_id=admin_user.id, run_pk=run_pk, session_key='admin-session',
+                                     run_secret=run_secret, attempt_id=attempt_id, attempt_secret=attempt_secret)
+    db.commit()
+    with pytest.raises(IntegrityError):
+        db.connection().exec_driver_sql(sql)
+    db.rollback()
+    assert db.get(PlatformCostAttempt, attempt_id).status == 'unknown'
+
+
+def test_sqlite_backup_restores_owned_run_and_database_guards(db, admin_user, monkeypatch, tmp_path):
+    import sqlite3
+
+    monkeypatch.setattr(platform, '_FOUNDATION_ENABLED', True)
+    run_pk, secret = create(db, admin_user.id)
+    db.commit()
+    attempt, _ = reserve(db, admin_user.id, run_pk, secret)
+    attempt_id = attempt.id
+    db.commit()
+    destination = tmp_path / 'owner-backup.sqlite'
+    source = db.connection().connection.driver_connection
+    with sqlite3.connect(destination) as backup:
+        source.backup(backup)
+    with sqlite3.connect(destination) as restored:
+        restored.execute('PRAGMA foreign_keys=ON')
+        assert restored.execute('PRAGMA foreign_key_check').fetchall() == []
+        assert restored.execute('SELECT run_pk FROM platform_cost_run_owner').fetchone() == (run_pk,)
+        assert restored.execute('SELECT attempt_id FROM platform_cost_attempt_owner').fetchone() == (attempt_id,)
+        with pytest.raises(sqlite3.IntegrityError):
+            restored.execute('DELETE FROM agent_response_run WHERE id=?', (run_pk,))
+        with pytest.raises(sqlite3.IntegrityError):
+            restored.execute('DELETE FROM platform_cost_run_owner WHERE run_pk=?', (run_pk,))
+        with pytest.raises(sqlite3.IntegrityError):
+            restored.execute("UPDATE agent_response_run SET user_id=user_id+1 WHERE id=?", (run_pk,))
+
+
+def test_automatic_schema_drop_is_blocked_without_altering_unowned_runs(db, admin_user):
+    db.add(AgentResponseRun(run_id='unowned', user_id=admin_user.id, surface='admin',
                             session_key='admin-session', status='running',
                             checkpoint_json='{"status": "running"}', version=1))
     db.commit()
-    with pytest.raises(BillingError):
-        reserve(db, admin_user.id, run_pk, run_secret)
+    with pytest.raises(RuntimeError, match='禁止自动删除'):
+        PlatformCostBase.metadata.drop_all(db.get_bind())
+    db.connection().exec_driver_sql("UPDATE agent_response_run SET status='cancelled' WHERE run_id='unowned'")
+    db.commit()
+    assert db.query(AgentResponseRun).filter_by(run_id='unowned').one().status == 'cancelled'
+
+
+def test_existing_trigger_collision_rejects_install_without_deleting_existing_trigger(tmp_path):
+    from sqlalchemy import create_engine, inspect
+
+    from app.core.database import Base
+
+    engine = create_engine(f'sqlite:///{tmp_path / "existing-trigger.sqlite"}')
+    Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.exec_driver_sql('CREATE TRIGGER pc_run_identity AFTER UPDATE ON agent_response_run '
+                                   'BEGIN SELECT 1; END')
+    try:
+        with pytest.raises(RuntimeError, match='已有触发器'):
+            PlatformCostBase.metadata.create_all(engine)
+        with engine.connect() as connection:
+            assert connection.exec_driver_sql("SELECT count(*) FROM sqlite_master WHERE type='trigger' "
+                                              "AND name='pc_run_identity'").scalar_one() == 1
+        assert 'platform_cost_run_owner' not in inspect(engine).get_table_names()
+    finally:
+        engine.dispose()
 
 
 def test_unknown_idempotent_and_cancel_rollback_keeps_owner(db, admin_user, monkeypatch):
@@ -264,7 +446,7 @@ def test_owned_attempt_concurrent_replay_and_cancel_unknown(tmp_path, monkeypatc
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier
 
-    from sqlalchemy import create_engine
+    from sqlalchemy import create_engine, event
     from sqlalchemy.orm import sessionmaker
     from sqlalchemy.pool import NullPool
 
@@ -275,6 +457,10 @@ def test_owned_attempt_concurrent_replay_and_cancel_unknown(tmp_path, monkeypatc
     monkeypatch.setattr(platform, '_FOUNDATION_ENABLED', True)
     engine = create_engine(f'sqlite:///{tmp_path / "owner-race.sqlite"}', poolclass=NullPool,
                            connect_args={'timeout': 5})
+    @event.listens_for(engine, 'connect')
+    def enable_foreign_keys(connection, _record):
+        connection.execute('PRAGMA foreign_keys=ON')
+
     Base.metadata.create_all(engine)
     PlatformCostBase.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
@@ -284,6 +470,7 @@ def test_owned_attempt_concurrent_replay_and_cancel_unknown(tmp_path, monkeypatc
             seed_test_baseline(setup)
             setup.add(User(id=501, username='owner-race', password='x', role='admin', status=1))
             setup.add(PlatformCostCenter(id=1, status='active'))
+            setup.flush()
             setup.add(PlatformCostBudget(period_start=now - timedelta(days=1), period_end=now + timedelta(days=1),
                                          limit_cny_micros=1_000_000, reserved_cny_micros=0,
                                          spent_cny_micros=0, status='active'))
