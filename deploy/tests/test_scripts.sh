@@ -984,10 +984,63 @@ with tempfile.TemporaryDirectory(prefix="prism-chat-authority-probe-") as tempor
         assert result.stdout.strip() == expected, (result.stdout, result.stderr)
 
     run_f2_probe("supported")
-    print("xiaoling F2 probe: current authority semantics supported PASS")
+    print("xiaoling F2 probe: authority and published discussion boundary supported PASS")
+
+    model_file = root / "models/enterprise_chat.py"
+    original_model = model_file.read_text(encoding="utf-8")
+
+    class RemoveDiscussionWatermarkColumn(ast.NodeTransformer):
+        def __init__(self):
+            self.in_message_model = False
+            self.changed = False
+
+        def visit_ClassDef(self, node):
+            previous = self.in_message_model
+            self.in_message_model = node.name == "EnterpriseChatMessage"
+            node = self.generic_visit(node)
+            self.in_message_model = previous
+            return node
+
+        def visit_Assign(self, node):
+            if (self.in_message_model and any(isinstance(target, ast.Name)
+                    and target.id == "discussion_closed_through_message_id" for target in node.targets)):
+                self.changed = True
+                return None
+            return self.generic_visit(node)
+
+    model_tree = ast.parse(original_model)
+    remove_column = RemoveDiscussionWatermarkColumn()
+    changed_model = remove_column.visit(model_tree)
+    assert remove_column.changed, "discussion watermark ORM column"
+    model_file.write_text(ast.unparse(ast.fix_missing_locations(changed_model)), encoding="utf-8")
+    run_f2_probe("unsupported")
+    print("xiaoling F2 probe: missing publication watermark column refused PASS")
+    model_file.write_text(original_model, encoding="utf-8")
 
     runtime = root / "services/enterprise_assistant_runtime_service.py"
     original = runtime.read_text(encoding="utf-8")
+
+    class RemoveDiscussionWatermark(ast.NodeTransformer):
+        def __init__(self):
+            self.changed = False
+
+        def visit_Assign(self, node):
+            if any(isinstance(target, ast.Attribute)
+                   and target.attr == "discussion_closed_through_message_id" for target in node.targets):
+                self.changed = True
+                node.value = ast.Constant(value=0)
+                return node
+            return self.generic_visit(node)
+
+    tree = ast.parse(original)
+    remove_watermark = RemoveDiscussionWatermark()
+    changed_tree = remove_watermark.visit(tree)
+    assert remove_watermark.changed, "published discussion watermark assignment"
+    runtime.write_text(ast.unparse(ast.fix_missing_locations(changed_tree)), encoding="utf-8")
+    run_f2_probe("unsupported")
+    print("xiaoling F2 probe: missing publication watermark refused PASS")
+    runtime.write_text(original, encoding="utf-8")
+
     finalizer_without_clearance = original.replace(
         "_require_model_send_clearance(db, run=run, state=state, checkpoint=checkpoint)",
         "pass",

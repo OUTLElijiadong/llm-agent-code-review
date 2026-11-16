@@ -53,6 +53,33 @@ def _has_attribute(node: ast.AST, name: str) -> bool:
     return any(isinstance(child, ast.Attribute) and child.attr == name for child in ast.walk(node))
 
 
+def _has_attribute_assignment_from_call(function: ast.AST, attribute: str, function_name: str) -> bool:
+    return any(
+        isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Attribute) and target.attr == attribute for target in node.targets)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == function_name
+        for node in ast.walk(function)
+    )
+
+
+def _has_nullable_bigint_column(owner: ast.ClassDef, name: str) -> bool:
+    return any(
+        isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == name for target in node.targets)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == "Column"
+        and node.value.args
+        and isinstance(node.value.args[0], ast.Name)
+        and node.value.args[0].id == "BigInteger"
+        and any(keyword.arg == "nullable" and isinstance(keyword.value, ast.Constant)
+                and keyword.value.value is True for keyword in node.value.keywords)
+        for node in owner.body
+    )
+
+
 def _has_string(node: ast.AST, value: str) -> bool:
     return any(isinstance(child, ast.Constant) and child.value == value for child in ast.walk(node))
 
@@ -328,21 +355,37 @@ def _probe(root: pathlib.Path) -> bool:
         return False
 
     runtime = _module(root, "services/enterprise_assistant_runtime_service.py")
+    chat_models = _module(root, "models/enterprise_chat.py")
+    message_model = next(
+        (node for node in chat_models.body if isinstance(node, ast.ClassDef)
+         and node.name == "EnterpriseChatMessage"),
+        None,
+    )
+    if message_model is None or not _has_nullable_bigint_column(
+        message_model, "discussion_closed_through_message_id",
+    ):
+        return False
     if (not _integer_constant(runtime, "_MAX_DISCUSSION_MESSAGES", 2000)
             or not _integer_constant(runtime, "_MAX_AUTHORITY_CANDIDATES", 64)):
         return False
-    completed_boundary = _function(runtime, "_last_completed_assistant_message_id")
+    completed_boundary = _function(runtime, "_last_completed_assistant_discussion_cutoff")
     boundary_terms = ast.unparse(completed_boundary)
     if ("EnterpriseAssistantRun.status == 'completed'" not in boundary_terms
             or "EnterpriseAssistantRun.response_text != ''" not in boundary_terms
-            or "EnterpriseChatMessage.sender_type == 'assistant'" not in boundary_terms):
+            or "EnterpriseChatMessage.sender_type == 'assistant'" not in boundary_terms
+            or "discussion_closed_through_message_id" not in boundary_terms):
         return False
 
     discussion = _function(runtime, "_current_discussion_messages")
-    if (not _calls(discussion, "_last_completed_assistant_message_id")
+    if (not _calls(discussion, "_last_completed_assistant_discussion_cutoff")
             or not _has_limit_plus_one(discussion, "_MAX_DISCUSSION_MESSAGES")
             or not _has_len_greater_than(discussion, "messages", "_MAX_DISCUSSION_MESSAGES")
             or not _has_raise(discussion, "ValidationError")):
+        return False
+
+    publisher = _function(runtime, "_latest_human_message_id")
+    if ("EnterpriseChatMessage.sender_type == 'human'" not in ast.unparse(publisher)
+            or not _has_attribute(publisher, "with_for_update")):
         return False
 
     candidates = _function(runtime, "_authority_candidate_messages")
@@ -388,7 +431,11 @@ def _probe(root: pathlib.Path) -> bool:
         return False
 
     finalize = _function(runtime, "_finalize_runtime")
-    if not _has_finalizer_clearance_before_publication(finalize):
+    if (not _has_finalizer_clearance_before_publication(finalize)
+            or not _calls(finalize, "_latest_human_message_id")
+            or not _has_attribute_assignment_from_call(
+                finalize, "discussion_closed_through_message_id", "_latest_human_message_id",
+            )):
         return False
 
     clarification = _module(root, "services/enterprise_assistant_clarification_service.py")
