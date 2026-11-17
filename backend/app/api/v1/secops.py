@@ -50,7 +50,7 @@ _READ = [
 
 
 def _client_ip(request: Request) -> str:
-    policy = copilot_security_service.load_policy
+    """取真实来源 IP（沿用安全中心的可信代理链解析）。"""
     return copilot_security_service.resolve_client_ip(request)
 
 

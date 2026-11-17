@@ -74,9 +74,14 @@ class TestThreatDigest:
         weak = [row for row in digest["sources"] if row["ip"] == "203.0.113.9"][0]
         assert weak["severity"] in {"low", "medium"}
 
-    def test_all_sensors_go_through_security_center_source(self, db, ops_stub):
+    def test_scheduler_identity_uses_scheduler_source(self, db, ops_stub):
+        """无人值守巡检必须用 scheduler 来源，否则执行器会拒掉安全动作。"""
         secops_service.threat_digest(db, None)
         assert ops_stub
+        assert {call["source"] for call in ops_stub} == {"scheduler"}
+
+    def test_interactive_identity_uses_security_center_source(self, db, super_admin, ops_stub):
+        secops_service.threat_digest(db, super_admin)
         assert {call["source"] for call in ops_stub} == {"security_center"}
 
     def test_digest_is_audited(self, db, ops_stub):

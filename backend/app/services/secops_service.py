@@ -23,10 +23,9 @@ from __future__ import annotations
 
 import ipaddress
 import json
-import re
 import socket
 import ssl
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import urlparse
 
@@ -41,8 +40,11 @@ from app.models.pentest import PentestEngagement
 from app.models.user import User
 from app.services import copilot_security_service, geoip_service, observability_service, ops_service
 
-# 宿主机执行器要求的"交互来源"标识（见 ops_service.INTERNAL_SECURITY_ACTIONS 的校验）。
-OPS_SOURCE = "security_center"
+# 宿主机执行器要求的来源标识（见 ops_service 对 INTERNAL_SECURITY_ACTIONS 的两条校验分支）：
+# - 最高管理员在小菱/安全中心里发起 → "security_center"（interactive）
+# - 无人值守巡检（actor=None）→ "scheduler"（automatic，只放行固定只读与自动封禁动作）
+OPS_SOURCE_INTERACTIVE = "security_center"
+OPS_SOURCE_SCHEDULER = "scheduler"
 # 审计动作前缀。
 EVENT_PREFIX = "secops."
 # 感知类动作：只读、可无人值守执行。
@@ -138,13 +140,16 @@ def _audit(
 
 def _run(db: Session, actor: Optional[User], action: str, params: Optional[dict] = None) -> dict:
     """统一调用宿主机白名单执行器，异常降级为结构化错误而不是抛给前端。"""
+    # 来源随身份切换：调度身份（actor=None）必须用 scheduler，否则执行器会按
+    # "无交互调度只允许运维只读动作"把安全动作全部拒掉。
+    source = OPS_SOURCE_SCHEDULER if actor is None else OPS_SOURCE_INTERACTIVE
     try:
         result = ops_service.execute(
             db,
             actor,
             action=action,
             params=params or {},
-            source=OPS_SOURCE,
+            source=source,
         )
         return result if isinstance(result, dict) else {"data": result}
     except Exception as exc:  # noqa: BLE001 - 单源失败不影响整体研判
@@ -307,7 +312,11 @@ def block_candidates(db: Session, actor: Optional[User] = None) -> dict:
     result = _run(db, actor, "security_block_candidates")
     candidates = _pick_items(result)
     _audit(db, kind="block_candidates", actor=actor, detail={"candidates": len(candidates)})
-    return {"available": not result.get("error"), "candidates": candidates, "raw": result if result.get("error") else None}
+    return {
+        "available": not result.get("error"),
+        "candidates": candidates,
+        "raw": result if result.get("error") else None,
+    }
 
 
 # ── 处置 ──────────────────────────────────────────────────────────────────
@@ -538,7 +547,8 @@ def baseline_check(db: Session, actor: Optional[User] = None) -> dict:
             "openapi", "OpenAPI/文档未公开", not exposed,
             f"docs={docs.get('status')} type={docs.get('content_type')}; "
             f"openapi={openapi.get('status')} type={openapi.get('content_type')}",
-            "在 Nginx 加 `location ~ ^/(docs|redoc|openapi\\.json)$ { return 404; }`", weight=3,
+            "在 Nginx 加 `location ~ ^/(docs|redoc|openapi\\.json)$ { return 404; }`",
+            weight=3,
         )
 
         root = _http_probe(base + "/")
@@ -701,12 +711,15 @@ SECOPS_TOOLS: tuple[str, ...] = READ_ONLY_TOOLS + STATEFUL_TOOLS
 def tool_catalog() -> list[dict]:
     """安全运营工具目录（读 + 写），写类标注需要审批。"""
     catalog = [
-        {"tool": "secops.threat_digest", "risk": "read", "description": "聚合 SSH/Nginx/蜜罐/数据库四类传感器，输出攻击源画像与处置建议"},
+        {"tool": "secops.threat_digest", "risk": "read",
+         "description": "聚合 SSH/Nginx/蜜罐/数据库四类传感器，输出攻击源画像与处置建议"},
         {"tool": "secops.surface_audit", "risk": "read", "description": "盘点自身监听端口与公开路径"},
         {"tool": "secops.block_candidates", "risk": "read", "description": "读取自动封禁候选名单"},
-        {"tool": "secops.baseline_check", "risk": "read", "description": "自身安全基线核查（文档暴露/响应头/TLS/证书/备份）"},
+        {"tool": "secops.baseline_check", "risk": "read",
+         "description": "自身安全基线核查（文档暴露/响应头/TLS/证书/备份）"},
         {"tool": "secops.patrol_status", "risk": "read", "description": "最近一次自动巡检与告警状态"},
-        {"tool": "secops.block_apply", "risk": "critical", "description": "封禁一个攻击源（需超级管理员 + confirm）"},
+        {"tool": "secops.block_apply", "risk": "critical",
+         "description": "封禁一个攻击源（需超级管理员 + confirm）"},
         {"tool": "secops.block_release", "risk": "critical", "description": "解封一个来源"},
         {"tool": "secops.pentest_start", "risk": "critical", "description": "启动已授权且处于时间窗内的渗透测试委托"},
     ]
