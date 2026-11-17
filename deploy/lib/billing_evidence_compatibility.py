@@ -17,6 +17,7 @@ EXPECTED_MODULES = {
     'services/billing_reservation_reconciliation_service.py': 'ea7d3a4b24122b6833739278006d18d520390d5784a5e402c86f84b1edb0f226',
     'services/billing_ledger_service.py': 'd4fb310a97cdc5bd394b6a464f7e347776dd7f7dc9e3ff4ab918ecf628d92a7a',
     'services/billing_metered_call.py': 'e188b657c8e9e90bfe3c5baab504cc3e1fa0f3265847f8f20c3f5712c7c243a3',
+    'services/billing_statement_gateway.py': '07b3d66351753bee9ebcc5d31466db9a44ce38f7306f7bb624206d9cb050a2bd',
     'services/enterprise_agent_team_runtime_service.py': 'f7d86d5c1de83d96a06677eab59eb72aecee3b72f3b35fad9fff8f10915a135f',
     'services/enterprise_agent_team_dispatcher.py': 'e90afbf0bf7b0c00f9d9bae6c2e6273de013d59a943e488e6c89dea1fe4bc66e',
     'services/enterprise_assistant_billing_group.py': 'f67915278451a3bd4658c85fed9dd1e8c6a8fe8bf3cab43e67f43a3213288093',
@@ -47,7 +48,8 @@ EXPECTED_MODULES = {
     'models/rbac.py': 'f6e6b5a9eb36e70236c051677adfdda4eda2e9cd6d2b63bd89a4dfabb525b699',
 }
 
-# Review these modules as complete combinations, including the billing API.
+# Review these modules as complete combinations, including the billing API
+# and its statement gateway; their call signatures must remain compatible.
 # 4.1.53 used the old entry and API; 4.1.54/55 use the new entry and old API;
 # the sandbox candidate uses the new entry and the reviewed new API.
 REVIEWED_ENTRY_PROFILES = {
@@ -56,21 +58,25 @@ REVIEWED_ENTRY_PROFILES = {
         '33e6b79d3e605b840564af8e26da07b16e2246506df5cd65476ad96d0b3c711c',
         None,
         '2348f600c2dc7043d22b1b47be0d1fcbb17d12f28fd9c958e9ada9ad23c908eb',
+        '332eabeffd61f97eee705a413e19a6decf00caaf04ab536e7a8e136cbeda4d84',
     ),
     (
         EXPECTED_MODULES['main.py'],
         EXPECTED_MODULES['core/error_handlers.py'],
         EXPECTED_MODULES['core/uvicorn_log_filter.py'],
         '2348f600c2dc7043d22b1b47be0d1fcbb17d12f28fd9c958e9ada9ad23c908eb',
+        '332eabeffd61f97eee705a413e19a6decf00caaf04ab536e7a8e136cbeda4d84',
     ),
     (
         EXPECTED_MODULES['main.py'],
         EXPECTED_MODULES['core/error_handlers.py'],
         EXPECTED_MODULES['core/uvicorn_log_filter.py'],
         EXPECTED_MODULES['api/v1/billing.py'],
+        EXPECTED_MODULES['services/billing_statement_gateway.py'],
     ),
 }
-PROFILE_MODULES = ('main.py', 'core/error_handlers.py', 'core/uvicorn_log_filter.py', 'api/v1/billing.py')
+PROFILE_MODULES = ('main.py', 'core/error_handlers.py', 'core/uvicorn_log_filter.py', 'api/v1/billing.py',
+                   'services/billing_statement_gateway.py')
 
 
 def module_digest(path: pathlib.Path) -> str:
@@ -85,9 +91,10 @@ def probe(root: pathlib.Path) -> bool:
             continue
         if module_digest(root / path) != expected:
             return False
-    main, handlers, hook, billing = (root / path for path in PROFILE_MODULES)
+    main, handlers, hook, billing, statement = (root / path for path in PROFILE_MODULES)
     hook_digest = module_digest(hook) if os.path.lexists(hook) else None
-    return (module_digest(main), module_digest(handlers), hook_digest, module_digest(billing)) in REVIEWED_ENTRY_PROFILES
+    return (module_digest(main), module_digest(handlers), hook_digest, module_digest(billing),
+            module_digest(statement)) in REVIEWED_ENTRY_PROFILES
 
 
 

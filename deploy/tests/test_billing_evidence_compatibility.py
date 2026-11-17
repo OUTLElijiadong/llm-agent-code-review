@@ -168,7 +168,9 @@ def test_reader_rejects_changed_application_entry(tmp_path, change):
 
 def _reader_fixture_with_log_dependencies(tmp_path):
     app = ROOT / 'backend/app'
-    for relative in set(FINGERPRINTS) | {'core/error_handlers.py', 'core/uvicorn_log_filter.py'}:
+    for relative in set(FINGERPRINTS) | {
+        'core/error_handlers.py', 'core/uvicorn_log_filter.py', 'services/billing_statement_gateway.py',
+    }:
         target = tmp_path / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(app / relative, target)
@@ -217,6 +219,39 @@ def _legacy_billing_api(root):
     return ast.unparse(ast.fix_missing_locations(tree))
 
 
+def _legacy_statement_gateway(root):
+    """Reconstruct the gateway used by 4.1.53 through 4.1.55."""
+    tree = ast.parse((root / 'services/billing_statement_gateway.py').read_text(encoding='utf-8'))
+    func = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+                and node.name == 'download_alipay_trade_statement')
+    index = next(i for i, arg in enumerate(func.args.kwonlyargs) if arg.arg == 'sandbox')
+    func.args.kwonlyargs.pop(index)
+    func.args.kw_defaults.pop(index)
+    guard = next(node for node in func.body if isinstance(node, ast.If)
+                 and any(isinstance(child, ast.Name) and child.id == 'sandbox' for child in ast.walk(node.test)))
+    func.body.remove(guard)
+    return ast.unparse(ast.fix_missing_locations(tree))
+
+
+def test_reader_rejects_billing_api_and_statement_gateway_mixed_versions(tmp_path):
+    import hashlib
+    from itertools import product
+
+    _reader_fixture_with_log_dependencies(tmp_path)
+    billing = tmp_path / 'api/v1/billing.py'
+    gateway = tmp_path / 'services/billing_statement_gateway.py'
+    new_billing, old_billing = billing.read_text(encoding='utf-8'), _legacy_billing_api(tmp_path)
+    new_gateway, old_gateway = gateway.read_text(encoding='utf-8'), _legacy_statement_gateway(tmp_path)
+    assert hashlib.sha256(ast.dump(ast.parse(old_gateway), include_attributes=False).encode()).hexdigest() == (
+        '332eabeffd61f97eee705a413e19a6decf00caaf04ab536e7a8e136cbeda4d84'
+    )
+    for api, service in product(('old', 'new'), ('old', 'new', 'altered')):
+        billing.write_text(old_billing if api == 'old' else new_billing, encoding='utf-8')
+        gateway.write_text(old_gateway if service == 'old' else new_gateway + (
+            '\nprobe_bypass = True\n' if service == 'altered' else ''), encoding='utf-8')
+        assert probe(tmp_path) == ((api, service) in {('old', 'old'), ('new', 'new')})
+
+
 @pytest.mark.parametrize('relative', ['core/uvicorn_log_filter.py', 'core/error_handlers.py'])
 @pytest.mark.parametrize('change', ['missing', 'altered'])
 def test_reader_rejects_missing_or_altered_logging_dependency(tmp_path, relative, change):
@@ -244,6 +279,8 @@ def test_reader_accepts_only_reviewed_entry_dependency_combinations(tmp_path):
     old_main, old_handler = _legacy_4153_entry_and_handlers(tmp_path)
     billing_path = tmp_path / 'api/v1/billing.py'
     new_billing, old_billing = billing_path.read_text(encoding='utf-8'), _legacy_billing_api(tmp_path)
+    gateway_path = tmp_path / 'services/billing_statement_gateway.py'
+    new_gateway, old_gateway = gateway_path.read_text(encoding='utf-8'), _legacy_statement_gateway(tmp_path)
     def digest(source):
         return hashlib.sha256(ast.dump(ast.parse(source), include_attributes=False).encode()).hexdigest()
     # Verified independently against release commit 38f181c86c3f74f40ce73c43ce73ff23b0f6a292.
@@ -258,6 +295,7 @@ def test_reader_accepts_only_reviewed_entry_dependency_combinations(tmp_path):
         handler_path.write_text(old_handler if handler == 'old' else new_handler, encoding='utf-8')
         billing_path.write_text(old_billing if billing_api == 'old' else new_billing + (
             '\nprobe_bypass = True\n' if billing_api == 'altered' else ''), encoding='utf-8')
+        gateway_path.write_text(old_gateway if billing_api == 'old' else new_gateway, encoding='utf-8')
         if hook == 'absent':
             filter_path.unlink(missing_ok=True)
         else:
@@ -287,24 +325,30 @@ def test_image_gate_runs_real_probe_for_old_new_and_mixed_readers(tmp_path):
     billing_path = tmp_path / 'api/v1/billing.py'
     new_billing = billing_path.read_text(encoding='utf-8')
     old_billing = _legacy_billing_api(tmp_path)
+    gateway_path = tmp_path / 'services/billing_statement_gateway.py'
+    new_gateway = gateway_path.read_text(encoding='utf-8')
+    old_gateway = _legacy_statement_gateway(tmp_path)
     script = r'''
 source "$1"
 docker() { "$TEST_PYTHON" -; }
 assert_billing_evidence_image_compatible "sha256:$(printf '%064d' 0)"
 '''
-    for entry, handler, hook, billing_api, expected in [
-        (new_main, new_handler, new_hook, new_billing, True),
-        (new_main, new_handler, new_hook, old_billing, True),
-        (old_main, old_handler, None, old_billing, True),
-        (old_main, old_handler, None, new_billing, False),
-        (new_main, new_handler, new_hook, new_billing + '\nprobe_bypass = True\n', False),
-        (old_main, new_handler, new_hook, old_billing, False),
-        (new_main, old_handler, new_hook, old_billing, False),
-        (new_main, new_handler, None, old_billing, False),
+    for entry, handler, hook, billing_api, gateway, expected in [
+        (new_main, new_handler, new_hook, new_billing, new_gateway, True),
+        (new_main, new_handler, new_hook, old_billing, old_gateway, True),
+        (old_main, old_handler, None, old_billing, old_gateway, True),
+        (new_main, new_handler, new_hook, old_billing, new_gateway, False),
+        (new_main, new_handler, new_hook, new_billing, old_gateway, False),
+        (old_main, old_handler, None, new_billing, new_gateway, False),
+        (new_main, new_handler, new_hook, new_billing + '\nprobe_bypass = True\n', new_gateway, False),
+        (old_main, new_handler, new_hook, old_billing, old_gateway, False),
+        (new_main, old_handler, new_hook, old_billing, old_gateway, False),
+        (new_main, new_handler, None, old_billing, old_gateway, False),
     ]:
         main_path.write_text(entry, encoding='utf-8')
         handler_path.write_text(handler, encoding='utf-8')
         billing_path.write_text(billing_api, encoding='utf-8')
+        gateway_path.write_text(gateway, encoding='utf-8')
         if hook is None:
             hook_path.unlink(missing_ok=True)
         else:
