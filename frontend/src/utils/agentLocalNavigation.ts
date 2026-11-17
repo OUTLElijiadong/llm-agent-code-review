@@ -1,6 +1,6 @@
 import { isNavigationFailure, NavigationFailureType, type Router } from 'vue-router'
 import { loadAgentChatSnapshot, saveAgentChatSnapshot, type AgentChatSnapshotMessage } from './agentChatSessions'
-import { hasReachedNavigationTarget } from './agentNavigation'
+import { hasReachedNavigationTarget, type isRouteAllowed } from './agentNavigation'
 import { requestXiaolingNavigation } from './xiaolingNavigation'
 
 export type LocalNavigationAction = NonNullable<AgentChatSnapshotMessage['localAction']>
@@ -71,6 +71,7 @@ export function performLocalNavigation(
   router: Router, route: string, label: string, canExecute: () => boolean,
   onResult: (status: NavigationResult, content: string) => void,
   ownsAccount: () => boolean = canExecute,
+  guardSource?: Parameters<typeof isRouteAllowed>[1],
 ): Promise<void> {
   return new Promise(resolve => {
     let settled = false
@@ -79,7 +80,7 @@ export function performLocalNavigation(
       settled = true
       try { onResult(status, content) } finally { resolve() }
     }
-    const confirmed = () => ownsAccount() && hasReachedNavigationTarget(router, route)
+    const confirmed = () => ownsAccount() && hasReachedNavigationTarget(router, route, guardSource)
     const finishNavigation = (success: boolean) => {
       if (success && confirmed()) finish('completed', `已打开「${label}」。`)
       else finish('failed', '未能确认目标页面已打开，请检查当前页面后重新发起导航。')
