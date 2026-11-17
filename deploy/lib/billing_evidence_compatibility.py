@@ -30,7 +30,9 @@ EXPECTED_MODULES = {
     'core/security.py': '4cb6ad192bb5f4a3d0633da8a6cedc64ef3a745ffce7df0a369cd0abe9bbcde9',
     'core/super_admin.py': '5acabc74bd3119c3dec2fcc8023088ad473cd75ee0d0f7d5504dff2f355e0b55',
     'schemas/common.py': 'c61d1d397875b379159ca6418cf2ac3a52acccf52c16bea6aa78de99d993509e',
-    'main.py': '0debff8636df3f2fb8759dd1ebd8cf6145e3abfb4cddd252782a383715e02c5d',
+    'main.py': '3d428170583111645a53c8e083b003ffa3025cb37f30ac26e0a1f71bf5493cc6',
+    'core/error_handlers.py': '772b02866283691617cee1748227af6eef6abbd69188fc50cb89caf1c0efb930',
+    'core/uvicorn_log_filter.py': 'de73f5eafc59e05b3968f67c08082f708ced0d32410f4be7b35e84c75350bcb7',
     'services/enterprise_assistant_runtime_service.py': '5f55251dae0c1adf7ad66fece72f3e72066fdbc14ebd761afe8f51cf8fb9a5e4',
     'services/billing_search_fetch_service.py': 'cc9d988b86578c4c4ae6a0ff119349fc9ca0ca3d761154b5ad6f3fa4a1065e8d',
     'services/billing_rate_catalog_service.py': '56b122e417386721f1319965fbbd31dbad0de5a836bf3ab3d0abfbbb2c0112c2',
@@ -45,15 +47,39 @@ EXPECTED_MODULES = {
     'models/rbac.py': 'f6e6b5a9eb36e70236c051677adfdda4eda2e9cd6d2b63bd89a4dfabb525b699',
 }
 
+# The 4.1.53 image and the new logging candidate are reviewed as whole
+# combinations. In particular, an old entry point cannot authorize a mixed
+# new handler/hook, and the hook must be absent for the old image.
+REVIEWED_ENTRY_PROFILES = {
+    (
+        '0debff8636df3f2fb8759dd1ebd8cf6145e3abfb4cddd252782a383715e02c5d',
+        '33e6b79d3e605b840564af8e26da07b16e2246506df5cd65476ad96d0b3c711c',
+        None,
+    ),
+    (
+        EXPECTED_MODULES['main.py'],
+        EXPECTED_MODULES['core/error_handlers.py'],
+        EXPECTED_MODULES['core/uvicorn_log_filter.py'],
+    ),
+}
+ENTRY_MODULES = ('main.py', 'core/error_handlers.py', 'core/uvicorn_log_filter.py')
+
+
+def module_digest(path: pathlib.Path) -> str:
+    module = ast.parse(path.read_text(encoding='utf-8'))
+    return hashlib.sha256(ast.dump(module, include_attributes=False).encode()).hexdigest()
+
 
 def probe(root: pathlib.Path) -> bool:
     # Parse one module at a time to fit the isolated image probe memory cap.
     for path, expected in EXPECTED_MODULES.items():
-        module = ast.parse((root / path).read_text(encoding="utf-8"))
-        digest = hashlib.sha256(ast.dump(module, include_attributes=False).encode()).hexdigest()
-        if digest != expected:
+        if path in ENTRY_MODULES:
+            continue
+        if module_digest(root / path) != expected:
             return False
-    return True
+    main, handlers, hook = (root / path for path in ENTRY_MODULES)
+    hook_digest = module_digest(hook) if os.path.lexists(hook) else None
+    return (module_digest(main), module_digest(handlers), hook_digest) in REVIEWED_ENTRY_PROFILES
 
 
 
