@@ -95,6 +95,49 @@ def test_alipay_sandbox_precreate_uses_fixed_sandbox_gateway_and_matching_signat
     assert result["payment_code_url"] == "https://qr.alipay.com/sandbox-order"
 
 
+@pytest.mark.parametrize("method,kwargs,response,state", [
+    ("query_alipay_trade", {"order_no": "sand-order", "amount_fen": 400},
+     {"code": "10000", "out_trade_no": "sand-order", "trade_status": "TRADE_SUCCESS",
+      "trade_no": "sandbox-trade", "total_amount": "4.00"}, "TRADE_SUCCESS"),
+    ("close_alipay_trade", {"order_no": "sand-order"},
+     {"code": "10000", "out_trade_no": "sand-order"}, "CLOSED"),
+    ("create_alipay_refund", {"order_no": "sand-order", "refund_no": "sand-refund",
+                              "amount_fen": 400, "reason": "test"},
+     {"code": "10000", "out_trade_no": "sand-order", "fund_change": "Y"}, "SUCCESS"),
+    ("query_alipay_refund", {"order_no": "sand-order", "refund_no": "sand-refund",
+                             "amount_fen": 400, "total_fen": 400},
+     {"code": "10000", "out_trade_no": "sand-order", "out_request_no": "sand-refund",
+      "refund_amount": "4.00", "refund_status": "REFUND_SUCCESS"}, "SUCCESS"),
+])
+def test_alipay_sandbox_operations_use_only_the_fixed_gateway(method, kwargs, response, state):
+    from app.services import billing_payment_gateway as gateway
+
+    private, private_pem, public_pem = _key_pair()
+    expected_method = {
+        "query_alipay_trade": "alipay.trade.query",
+        "close_alipay_trade": "alipay.trade.close",
+        "create_alipay_refund": "alipay.trade.refund",
+        "query_alipay_refund": "alipay.trade.fastpay.refund.query",
+    }[method]
+
+    def handle(request):
+        assert request.url == "https://openapi-sandbox.dl.alipaydev.com/gateway.do"
+        params = {key: values[0] for key, values in parse_qs(request.content.decode()).items()}
+        assert params["method"] == expected_method
+        signed = "&".join(f"{key}={params[key]}" for key in sorted(params) if key != "sign")
+        private.public_key().verify(
+            base64.b64decode(params["sign"]), signed.encode(), padding.PKCS1v15(), hashes.SHA256()
+        )
+        signature = _signed(private, json.dumps(response, separators=(",", ":")).encode())
+        return httpx.Response(200, json={expected_method.replace(".", "_") + "_response": response,
+                                        "sign": signature})
+
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        result = getattr(gateway, method)(app_id="sandbox-app", private_key_pem=private_pem,
+                                          public_key_pem=public_pem, client=client, sandbox=True, **kwargs)
+    assert result["state"] == state
+
+
 def test_alipay_precreate_rejects_provider_error_and_untrusted_qr_scheme():
     private, private_pem, public_pem = _key_pair()
 

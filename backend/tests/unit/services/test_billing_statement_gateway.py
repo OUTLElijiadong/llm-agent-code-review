@@ -21,6 +21,18 @@ from app.services.billing_statement_gateway import (
 NOW = datetime(2026, 11, 6, 12, 0, tzinfo=timezone.utc)
 
 
+def test_alipay_sandbox_statement_is_rejected_before_any_network_request():
+    def handle(_request):
+        pytest.fail("sandbox statement must not reach any gateway")
+
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        with pytest.raises(StatementGatewayError, match="沙箱"):
+            download_alipay_trade_statement(
+                app_id="sandbox-app", private_key_pem=b"unused", public_key_pem=b"unused",
+                bill_date="2026-11-05", client=client, now=NOW, sandbox=True,
+            )
+
+
 def _key_pair():
     private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     private_pem = private.private_bytes(

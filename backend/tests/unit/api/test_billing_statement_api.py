@@ -14,6 +14,41 @@ from app.models.billing_ledger import BillingOrder, BillingPaymentEvent, Billing
 from app.models.user import User
 
 
+def test_sandbox_statement_download_never_calls_provider(monkeypatch):
+    from app.api.v1 import billing
+    from app.services import billing_payment_gateway, billing_statement_gateway
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine, expire_on_commit=False)()
+    admin = User(username="sandbox-statement-admin", password="x", role="super_admin", status=1)
+    db.add(admin)
+    db.commit()
+    called = []
+
+    def fake_call(**kwargs):
+        called.append(kwargs.get("sandbox", False))
+        raise billing_payment_gateway.PaymentGatewayError("offline test")
+
+    monkeypatch.setattr(billing.settings, "alipay_gateway_mode", "sandbox")
+    monkeypatch.setattr(billing.settings, "alipay_app_id", "sandbox-app")
+    monkeypatch.setattr(billing, "_read_key", lambda *_args: b"test-key")
+    monkeypatch.setattr(billing_statement_gateway, "_alipay_call", fake_call)
+    client = _client(db, admin)
+    try:
+        response = client.post(
+            "/api/billing/admin/statements/download", headers={"x-test-user": str(admin.id)},
+            json={"channel": "alipay", "bill_date": "2026-11-05", "bill_type": "trade"},
+        )
+        assert response.status_code == 502
+        assert "沙箱" in response.text
+        assert called == []
+    finally:
+        client.close()
+        db.close()
+        engine.dispose()
+
+
 def _wechat_csv() -> bytes:
     output = io.StringIO(newline="")
     writer = csv.writer(output)

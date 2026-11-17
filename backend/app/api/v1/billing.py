@@ -1464,6 +1464,8 @@ def download_payment_statement(
         if payload.channel == "alipay":
             if payload.bill_type != "trade":
                 raise StatementImportError("支付宝仅支持 trade 账单")
+            if settings.alipay_gateway_mode == "sandbox":
+                raise billing_statement_gateway.StatementGatewayError("支付宝沙箱账单下载尚未验证，已停止请求")
             if not settings.alipay_app_id:
                 raise PaymentVerificationError("支付宝商户应用尚未配置")
             downloaded = billing_statement_gateway.download_alipay_trade_statement(
@@ -1471,6 +1473,7 @@ def download_payment_statement(
                 private_key_pem=_read_key(settings.alipay_private_key_path, "支付宝商户私钥"),
                 public_key_pem=_read_key(settings.alipay_public_key_path, "支付宝公钥"),
                 bill_date=bill_date,
+                sandbox=settings.alipay_gateway_mode == "sandbox",
             )
         else:
             if payload.bill_type not in {"ALL", "SUCCESS", "REFUND"}:
