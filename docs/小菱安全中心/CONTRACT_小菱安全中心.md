@@ -254,3 +254,5 @@ audit_security_for_file, audit_security_for_task
 | 2026-11-17 | 默认策略改为"只检测不硬拦"，`governed_agents` 补 `operations` / `orchestrator` | 小菱在网关上以 `chat_assistant` / `operations` 出现；默认硬拦会掐断既有管理流程，收紧交给 preset |
 | 2026-11-17 | `/api/ai/chat` 也接入入站守卫 | 旧入口不能成为绕过点（该路径没有工具网关，只有入站守卫） |
 | 2026-11-17 | 守卫改为 `Depends(optional_request)` 可选依赖 | 既有单测直接调用端点函数，不能因为新增参数而破坏签名 |
+| 2026-11-17 | 更新 121 计费证据镜像指纹（`api/__init__.py`、`core/dependencies.py`） | 本次发布只在这两个被 pin 的模块里加了"注册小菱安全中心路由"和"可选 Request 依赖"，未触碰任何计费/证据读取逻辑；按 `deploy/lib/billing_evidence_compatibility.py` 的约定，评审后同步指纹 |
+| 2026-11-17 | 红队复核后补齐 B1~B5 五处绕过 | 见 `fix(security): 按红队复核补齐小菱安全闸门的五处绕过` 提交；管理面强制服务端历史、工具输出回流扫描、会话绑定改存不脱敏列、新增 trusted_proxies、风险词表补洞 + 未声明工具转审批 |
