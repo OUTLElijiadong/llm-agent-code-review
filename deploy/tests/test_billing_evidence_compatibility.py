@@ -132,6 +132,150 @@ def test_reader_requires_reviewed_modules_and_rejects_old_or_altered_code(tmp_pa
         pass  # The CLI catches errors and reports unsupported.
 
 
+@pytest.mark.parametrize('change', ['old_entry', 'remove_api_router', 'override_entry'])
+def test_reader_rejects_changed_application_entry(tmp_path, change):
+    """The reviewed startup fingerprint stays strict after adding log filtering."""
+    app = ROOT / 'backend/app'
+    for relative in FINGERPRINTS:
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(app / relative, target)
+    assert probe(tmp_path)
+    target = tmp_path / 'main.py'
+    tree = ast.parse(target.read_text(encoding='utf-8'))
+    if change == 'old_entry':
+        original_count = len(tree.body)
+        tree.body = [node for node in tree.body if not (
+            isinstance(node, ast.ImportFrom) and node.module == 'app.core.uvicorn_log_filter'
+            or isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Name)
+            and node.value.func.id == 'install_uvicorn_asgi_error_filter'
+        )]
+        assert len(tree.body) == original_count - 2
+    elif change == 'remove_api_router':
+        matches = [node for node in tree.body if isinstance(node, ast.Expr)
+                   and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute)
+                   and node.value.func.attr == 'include_router'
+                   and node.value.args and isinstance(node.value.args[0], ast.Name)
+                   and node.value.args[0].id == 'api_router']
+        assert len(matches) == 1
+        tree.body.remove(matches[0])
+    else:
+        tree.body.extend(ast.parse('app.include_router = lambda *args, **kwargs: None').body)
+    target.write_text(ast.unparse(ast.fix_missing_locations(tree)), encoding='utf-8')
+    assert not probe(tmp_path)
+
+
+def _reader_fixture_with_log_dependencies(tmp_path):
+    app = ROOT / 'backend/app'
+    for relative in set(FINGERPRINTS) | {'core/error_handlers.py', 'core/uvicorn_log_filter.py'}:
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(app / relative, target)
+
+
+def _legacy_4153_entry_and_handlers(root):
+    """Build the reviewed old AST without requiring Git history in CI."""
+    main = ast.parse((root / 'main.py').read_text(encoding='utf-8'))
+    main.body = [node for node in main.body if not (
+        isinstance(node, ast.ImportFrom) and node.module == 'app.core.uvicorn_log_filter'
+        or isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name) and node.value.func.id == 'install_uvicorn_asgi_error_filter'
+    )]
+    handlers = ast.parse((root / 'core/error_handlers.py').read_text(encoding='utf-8'))
+    handlers.body = [node for node in handlers.body if not (
+        isinstance(node, ast.Import) and [alias.name for alias in node.names] == ['re']
+        or isinstance(node, ast.FunctionDef) and node.name == '_safe_error_locations'
+    )]
+    register = next(node for node in handlers.body if isinstance(node, ast.FunctionDef) and node.name == 'register_handlers')
+    unhandled = next(node for node in register.body if isinstance(node, ast.AsyncFunctionDef)
+                     and node.name == 'unhandled_handler')
+    content_index = next(index for index, node in enumerate(unhandled.body)
+                         if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+                         and node.target.id == 'content')
+    unhandled.body = [unhandled.body[0], *ast.parse('logger.exception(exc)\nrequest_id = get_request_id(req)').body,
+                      *unhandled.body[content_index:]]
+    return ast.unparse(ast.fix_missing_locations(main)), ast.unparse(ast.fix_missing_locations(handlers))
+
+
+@pytest.mark.parametrize('relative', ['core/uvicorn_log_filter.py', 'core/error_handlers.py'])
+@pytest.mark.parametrize('change', ['missing', 'altered'])
+def test_reader_rejects_missing_or_altered_logging_dependency(tmp_path, relative, change):
+    _reader_fixture_with_log_dependencies(tmp_path)
+    assert probe(tmp_path)
+    target = tmp_path / relative
+    if change == 'missing':
+        target.unlink()
+    else:
+        target.write_text(target.read_text(encoding='utf-8') + '\nprobe_bypass = True\n', encoding='utf-8')
+    try:
+        assert not probe(tmp_path)
+    except FileNotFoundError:
+        pass
+
+
+def test_reader_accepts_only_reviewed_entry_dependency_combinations(tmp_path):
+    import hashlib
+    from itertools import product
+
+    _reader_fixture_with_log_dependencies(tmp_path)
+    main_path, handler_path, filter_path = (tmp_path / 'main.py', tmp_path / 'core/error_handlers.py',
+                                             tmp_path / 'core/uvicorn_log_filter.py')
+    new_main, new_handler, new_filter = (path.read_text(encoding='utf-8') for path in (main_path, handler_path, filter_path))
+    old_main, old_handler = _legacy_4153_entry_and_handlers(tmp_path)
+    digest = lambda source: hashlib.sha256(ast.dump(ast.parse(source), include_attributes=False).encode()).hexdigest()
+    # Verified independently against release commit 38f181c86c3f74f40ce73c43ce73ff23b0f6a292.
+    assert digest(old_main) == '0debff8636df3f2fb8759dd1ebd8cf6145e3abfb4cddd252782a383715e02c5d'
+    assert digest(old_handler) == '33e6b79d3e605b840564af8e26da07b16e2246506df5cd65476ad96d0b3c711c'
+    for entry, handler, hook in product(('old', 'new'), ('old', 'new'), ('absent', 'new', 'altered')):
+        main_path.write_text(old_main if entry == 'old' else new_main, encoding='utf-8')
+        handler_path.write_text(old_handler if handler == 'old' else new_handler, encoding='utf-8')
+        if hook == 'absent':
+            filter_path.unlink(missing_ok=True)
+        else:
+            filter_path.write_text(new_filter + ('\nprobe_bypass = True\n' if hook == 'altered' else ''), encoding='utf-8')
+        try:
+            supported = probe(tmp_path)
+        except FileNotFoundError:
+            supported = False
+        assert supported == ((entry, handler, hook) in {('old', 'old', 'absent'), ('new', 'new', 'new')})
+
+
+def test_image_gate_runs_real_probe_for_old_new_and_mixed_readers(tmp_path):
+    import os
+
+    _reader_fixture_with_log_dependencies(tmp_path)
+    main_path = tmp_path / 'main.py'
+    handler_path = tmp_path / 'core/error_handlers.py'
+    hook_path = tmp_path / 'core/uvicorn_log_filter.py'
+    new_main = main_path.read_text(encoding='utf-8')
+    new_handler = handler_path.read_text(encoding='utf-8')
+    new_hook = hook_path.read_text(encoding='utf-8')
+    old_main, old_handler = _legacy_4153_entry_and_handlers(tmp_path)
+    script = r'''
+source "$1"
+docker() { "$TEST_PYTHON" -; }
+assert_billing_evidence_image_compatible "sha256:$(printf '%064d' 0)"
+'''
+    for entry, handler, hook, expected in [
+        (new_main, new_handler, new_hook, True),
+        (old_main, old_handler, None, True),
+        (old_main, new_handler, new_hook, False),
+        (new_main, old_handler, new_hook, False),
+        (new_main, new_handler, None, False),
+    ]:
+        main_path.write_text(entry, encoding='utf-8')
+        handler_path.write_text(handler, encoding='utf-8')
+        if hook is None:
+            hook_path.unlink(missing_ok=True)
+        else:
+            hook_path.write_text(hook, encoding='utf-8')
+        result = subprocess.run(['bash', '-c', script, '_', str(ROOT / 'deploy/lib/common.sh')],
+                                env={**os.environ, 'TEST_PYTHON': sys.executable, 'PRISM_APP_ROOT': str(tmp_path)},
+                                capture_output=True, text=True, check=False)
+        assert (result.returncode == 0) is expected
+
+
 @pytest.mark.parametrize('relative,function', [
     ('services/billing_reservation_reconciliation_service.py', '_fenced_team_model_attempt'),
     ('services/billing_reservation_reconciliation_service.py', 'recover_stale_team_model_attempt'),
