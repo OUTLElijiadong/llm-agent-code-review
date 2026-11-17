@@ -25,7 +25,7 @@ def test_120_is_in_the_single_chain_and_follows_119():
     config = Config(str(backend / "alembic.ini"))
     config.set_main_option("script_location", str(backend / "alembic"))
     script = ScriptDirectory.from_config(config)
-    assert script.get_heads() == ["121_billing_model_evidence"]
+    assert len(script.get_heads()) == 1
     assert script.get_revision("121_billing_model_evidence").down_revision == module.revision
     assert module.down_revision == "119_chat_message_authority"
 

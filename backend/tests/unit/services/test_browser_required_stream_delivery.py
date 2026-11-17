@@ -8,6 +8,7 @@ import pytest
 
 from app.api.v1 import agent_responses as api
 from app.models.agent_response_run import AgentResponseRun, AgentToolExecution
+from app.models.user import User
 from app.services import agent_browser_service as browser
 from app.services import agent_responses_service as service
 from app.services.deepseek_responses_runtime import RuntimeResult, ToolCall
@@ -23,7 +24,7 @@ async def collect_events(response):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("surface", ["user", "admin"])
 @pytest.mark.parametrize("action,args", [("inspect", {}), ("navigate", {"route": "/forum"})])
-async def test_signed_browser_event_survives_complete_api_queue_and_encoding(monkeypatch, surface, action, args):
+async def test_signed_browser_event_survives_complete_api_queue_and_encoding(db, monkeypatch, surface, action, args):
     """必须经过端点 sink→queue→encode，单独 public_required_event 测试不足以覆盖。"""
     run_id = "run_delivery_browser_required"
     row = SimpleNamespace(
@@ -54,13 +55,21 @@ async def test_signed_browser_event_survives_complete_api_queue_and_encoding(mon
             )
 
     monkeypatch.setattr(api, "AgentResponsesService", FakeService)
-    monkeypatch.setattr(api, "_is_admin_actor", lambda *_args: True)
+    actor = User(
+        username=f"browser-delivery-{surface}", password="x", role="admin" if surface == "admin" else "user",
+        status=1,
+    )
+    db.add(actor)
+    db.commit()
+    monkeypatch.setattr(api, "_is_admin_actor", lambda _db, candidate: candidate.role in {"admin", "super_admin"})
+    monkeypatch.setattr(api.agent_mesh_service, "heartbeat", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(api.agent_mesh_service, "update_title_from_user_message", lambda *_args, **_kwargs: False)
     response = await api.stream_agent_response(
         api.AgentResponsesRequest(
             surface=surface, session_id=row.session_key, run_id=run_id,
             messages=[{"role": "user", "content": "只读取当前页面"}],
         ),
-        db=object(), user=SimpleNamespace(id=7, role="admin" if surface == "admin" else "user"),
+        db=db, user=actor,
     )
     events = await collect_events(response)
     delivered = [event for event in events if event["type"] == "response.browser.required"]
