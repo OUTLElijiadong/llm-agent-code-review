@@ -1,6 +1,7 @@
 import base64
 import json
 import re
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from urllib.parse import parse_qs
 
@@ -69,6 +70,33 @@ def test_alipay_precreate_signs_server_priced_request_and_returns_only_provider_
 
     assert result == {"payment_code_url": "https://qr.alipay.com/abc123", "provider_order_id": "pr-order-1"}
     assert public_pem.startswith(b"-----BEGIN PUBLIC KEY-----")
+
+
+@pytest.mark.parametrize("instant", [
+    datetime(2026, 11, 17, 16, 30, tzinfo=timezone.utc),
+    datetime(2026, 11, 17, 11, 30, tzinfo=timezone(timedelta(hours=-5))),
+])
+def test_alipay_timestamp_uses_gmt_plus_eight_before_signing(instant):
+    private, private_pem, public_pem = _key_pair()
+
+    def handle(request):
+        params = {key: values[0] for key, values in parse_qs(request.content.decode()).items()}
+        assert params["timestamp"] == "2026-11-18 00:30:00"
+        signed = "&".join(f"{key}={params[key]}" for key in sorted(params) if key != "sign")
+        private.public_key().verify(
+            base64.b64decode(params["sign"]), signed.encode(), padding.PKCS1v15(), hashes.SHA256()
+        )
+        result = {"code": "10000", "qr_code": "https://qr.alipay.com/sandbox-order"}
+        signature = _signed(private, json.dumps(result, separators=(",", ":")).encode())
+        return httpx.Response(200, json={"alipay_trade_precreate_response": result, "sign": signature})
+
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        create_alipay_preorder(
+            app_id="sandbox-app", seller_id="sandbox-seller", private_key_pem=private_pem,
+            public_key_pem=public_pem, notify_url="https://prism.example/sandbox-notify",
+            order_no="sandbox-order-1", amount_fen=400, subject="测试订单",
+            client=client, sandbox=True, now=instant,
+        )
 
 
 def test_alipay_sandbox_precreate_uses_fixed_sandbox_gateway_and_matching_signature():
