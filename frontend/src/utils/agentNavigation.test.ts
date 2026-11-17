@@ -5,6 +5,7 @@ import { useWorkspaceStore } from '@/stores/workspace'
 
 import {
   extractAgentNavigations,
+  hasReachedNavigationTarget,
   isNavigationPathAllowed,
   resolveLocalNavigationRequest,
   renderAuthorizedAgentMarkdown,
@@ -24,6 +25,65 @@ function guard(permission: boolean) {
 }
 
 describe('shared navigation visibility', () => {
+  it('personal-account-only links fail closed until non-membership is known', () => {
+    const router = createRouter({ history: createMemoryHistory(), routes: [
+      { path: '/forum', component: {}, meta: { workspace: 'personal', personalAccountOnly: true } },
+    ] })
+    const workspace = useWorkspaceStore()
+    workspace.syncIdentity(7, 'token')
+    workspace.activatePersonal()
+    expect(isNavigationPathAllowed(router, '/forum', guard(true))).toBe(false)
+    workspace.hasEnterpriseMembership = true
+    expect(isNavigationPathAllowed(router, '/forum', guard(true))).toBe(false)
+    workspace.hasEnterpriseMembership = false
+    expect(isNavigationPathAllowed(router, '/forum', guard(true))).toBe(true)
+    expect(isNavigationPathAllowed(router, '/forum', { ...guard(true), token: 'other-session' })).toBe(false)
+    workspace.activateEnterprise(23)
+    expect(isNavigationPathAllowed(router, '/forum', guard(true))).toBe(false)
+  })
+
+  it('allows a canonical numeric forum detail with query and hash for an eligible personal account', () => {
+    const router = createRouter({ history: createMemoryHistory(), routes: [
+      { path: '/forum/:id', component: {}, meta: { workspace: 'personal', personalAccountOnly: true } },
+    ] })
+    useWorkspaceStore().syncIdentity(7, 'token')
+    useWorkspaceStore().activatePersonal()
+    useWorkspaceStore().hasEnterpriseMembership = false
+    expect(isNavigationPathAllowed(router, '/forum/44?sort=latest#reply', guard(true))).toBe(true)
+    expect(isNavigationPathAllowed(router, '/forum/44?sort=latest&sort=old#reply', guard(true))).toBe(true)
+    expect(isNavigationPathAllowed(router, '/forum/44?sort=latest&next=/admin#reply', guard(true))).toBe(false)
+    expect(isNavigationPathAllowed(router, '/forum/44?%6e%65%78%74=/admin', guard(true))).toBe(false)
+    expect(isNavigationPathAllowed(router, '/forum/44?NEXT=/admin&next=/safe', guard(true))).toBe(false)
+    expect(isNavigationPathAllowed(router, '/forum/44?next%5B%5D=/admin', guard(true))).toBe(false)
+    expect(isNavigationPathAllowed(router, '/forum/44?returnUrl=https%3A%2F%2Fevil.example', guard(true))).toBe(false)
+    expect(isNavigationPathAllowed(router, '/forum/44#next=/admin', guard(true))).toBe(true)
+    expect(isNavigationPathAllowed(router, '/forum/44#anchor?next=/admin', guard(true))).toBe(true)
+    expect(isNavigationPathAllowed(router, '//evil.example/forum/44?sort=latest', guard(true))).toBe(false)
+    expect(isNavigationPathAllowed(router, '/forum/0?sort=latest#reply', guard(true))).toBe(false)
+  })
+
+  it('does not report reaching an unregistered admin section which falls back to the first tab', async () => {
+    const router = createRouter({ history: createMemoryHistory(), routes: [
+      { path: '/admin/operations', component: {}, meta: { role: 'admin', unifiedDomain: 'operations' } },
+    ] })
+    const admin = { ...guard(true), isAdmin: () => true }
+    await router.push('/admin/operations?section=does-not-exist')
+    expect(isNavigationPathAllowed(router, '/admin/operations?section=does-not-exist', admin)).toBe(false)
+    expect(hasReachedNavigationTarget(router, '/admin/operations?section=does-not-exist')).toBe(false)
+    expect(isNavigationPathAllowed(router, '/admin/operations?section=logs&section=overview', admin)).toBe(false)
+    await router.push('/admin/operations?section=audit')
+    expect(isNavigationPathAllowed(router, '/admin/operations?section=audit', admin)).toBe(true)
+    expect(hasReachedNavigationTarget(router, '/admin/operations?section=audit')).toBe(true)
+  })
+
+  it('does not allow unknown sections through redirects into a unified center', () => {
+    const router = createRouter({ history: createMemoryHistory(), routes: [
+      { path: '/admin/old', redirect: { path: '/admin/platform', query: { section: 'invented' } } },
+      { path: '/admin/platform', component: {}, meta: { role: 'admin', unifiedDomain: 'platform' } },
+    ] })
+    expect(isNavigationPathAllowed(router, '/admin/old', { ...guard(true), isAdmin: () => true })).toBe(false)
+  })
+
   it('企业空间的小菱导航不会显示或执行个人论坛链接', () => {
     useWorkspaceStore().activateEnterprise(23)
     const router = {
@@ -430,8 +490,12 @@ describe('local navigation cost guard', () => {
 
 describe('真实管理入口重定向权限', () => {
   const routes = [{ path: '/admin', meta: { role: 'admin' }, children: [
-    { path: 'platform', component: {}, meta: { title: '平台配置中心' } },
-    { path: 'operations', component: {}, meta: { title: '运行与审计中心' } },
+    { path: 'platform', component: {}, meta: { title: '平台配置中心', unifiedDomain: 'platform' as const } },
+    { path: 'operations', component: {}, meta: { title: '运行与审计中心', unifiedDomain: 'operations' as const } },
+    { path: 'beta-codes', redirect: { path: '/admin/platform', query: { section: 'beta-codes' } } },
+    { path: 'legacy-string', redirect: '/admin/platform' },
+    { path: 'legacy-query', redirect: '/admin/platform?section=beta-codes' },
+    { path: 'legacy-hash', redirect: '/admin/platform#new' },
     ...['embedding', 'mcp-workers', 'llm'].map(section => ({
       path: section, redirect: { path: '/admin/platform', query: { section } },
       meta: { superAdmin: true },
@@ -451,6 +515,58 @@ describe('真实管理入口重定向权限', () => {
     const actor = { ...guard(true), isAdmin: () => true }
     expect(isNavigationPathAllowed(router, '/admin/operations?section=pentest-evidence', actor)).toBe(false)
     expect(isNavigationPathAllowed(router, '/admin/operations?section=pentest-evidence',
+      { ...actor, isSuperAdmin: () => true })).toBe(true)
+  })
+
+  it.each([
+    '/admin/platform/?section=llm', '/ADMIN/PLATFORM?section=llm',
+    '/admin/operations/?section=pentest-evidence', '/ADMIN/OPERATIONS?section=pentest-evidence',
+  ])('真实路由的大小写和尾斜杠不能绕过敏感分区 %s', async (route) => {
+    const actor = { ...guard(true), isAdmin: () => true }
+    const superAdmin = { ...actor, isSuperAdmin: () => true }
+    expect(isNavigationPathAllowed(router, route, actor)).toBe(false)
+    expect(isNavigationPathAllowed(router, route, superAdmin)).toBe(true)
+    await router.push('/admin')
+    await router.push(route)
+    expect(hasReachedNavigationTarget(router, route, actor)).toBe(false)
+    expect(hasReachedNavigationTarget(router, route, superAdmin)).toBe(true)
+    expect(hasReachedNavigationTarget(router, route)).toBe(false)
+  })
+
+  it('敏感分区跳转后角色降级不得被误报为已到达', async () => {
+    let superAdmin = true
+    const actor = { ...guard(true), isAdmin: () => true, isSuperAdmin: () => superAdmin }
+    await router.push('/admin/platform?section=llm')
+    expect(hasReachedNavigationTarget(router, '/admin/platform?section=llm', actor)).toBe(true)
+    superAdmin = false
+    expect(hasReachedNavigationTarget(router, '/admin/platform?section=llm', actor)).toBe(false)
+  })
+
+  it('旧敏感入口由最高管理员进入并完成重定向后可确认', async () => {
+    const actor = { ...guard(true), isAdmin: () => true, isSuperAdmin: () => true }
+    await router.push('/admin/embedding')
+    expect(hasReachedNavigationTarget(router, '/admin/embedding', actor)).toBe(true)
+    expect(hasReachedNavigationTarget(router, '/admin/embedding', { ...actor, isSuperAdmin: () => false })).toBe(false)
+  })
+
+  it.each([
+    ['/admin/beta-codes#anchor', '/admin/platform?section=beta-codes#anchor'],
+    ['/admin/beta-codes?x=1#anchor', '/admin/platform?section=beta-codes#anchor'],
+    ['/admin/legacy-string?section=beta-codes#anchor', '/admin/platform?section=beta-codes#anchor'],
+    ['/admin/legacy-query?x=1#anchor', '/admin/platform?section=beta-codes'],
+    ['/admin/legacy-hash?section=beta-codes#old', '/admin/platform#new'],
+  ])('旧入口 %s 的到达确认遵循真实路由 query/hash 继承', async (source, expected) => {
+    const actor = { ...guard(true), isAdmin: () => true }
+    await router.push('/admin/platform')
+    await router.push(source)
+    expect(router.currentRoute.value.fullPath).toBe(expected)
+    expect(hasReachedNavigationTarget(router, source, actor)).toBe(true)
+  })
+
+  it('继承的 section 在旧字符串入口仍受最高管理员权限限制', () => {
+    const actor = { ...guard(true), isAdmin: () => true }
+    expect(isNavigationPathAllowed(router, '/admin/legacy-string?section=llm#anchor', actor)).toBe(false)
+    expect(isNavigationPathAllowed(router, '/admin/legacy-string?section=llm#anchor',
       { ...actor, isSuperAdmin: () => true })).toBe(true)
   })
 })

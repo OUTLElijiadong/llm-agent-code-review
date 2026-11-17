@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import PrismLoading from '@/components/common/PrismLoading.vue'
 import AgentActivityBorder from '@/components/ai/AgentActivityBorder.vue'
 import VirtualCursor from '@/components/ai/VirtualCursor.vue'
 import { useUserStore } from '@/stores/user'
 import { setupSecurityAlerts, type SecurityAlertsHandle } from '@/composables/useSecurityAlerts'
+import { adminAssistantUnreadKey } from '@/utils/assistantSurface'
+import { isAdminSharedRoute } from '@/utils/adminSharedLayout'
 
 const AgentChatDrawer = defineAsyncComponent(() => import('@/components/ai/AgentChatDrawer.vue'))
 const AdminCopilot = defineAsyncComponent(() => import('@/components/admin/AdminCopilot.vue'))
@@ -19,6 +21,7 @@ const agentPrefill = ref('')
 const agentAutoSend = ref(false)
 const agentPreferredSessionId = ref('')
 const agentSessionRequestId = ref(0)
+const adminAssistantUnread = ref(0)
 let showTimer: number | undefined
 let hideTimer: number | undefined
 let securityAlerts: SecurityAlertsHandle | null = null
@@ -26,6 +29,27 @@ const canUseAgent = computed(() => (
   Boolean(userStore.token && userStore.profile)
   && userStore.hasPermission('agent:chat')
 ))
+const showAdminLauncher = computed(() => {
+  const current = router.currentRoute?.value
+  return !current || isAdminSharedRoute(current.path) || !current.matched.some(record => record.path === '/')
+})
+provide(adminAssistantUnreadKey, adminAssistantUnread)
+
+async function switchAssistantSurface(surface: 'user' | 'admin'): Promise<void> {
+  if (!canUseAgent.value || !userStore.isAdmin()) return
+  if (surface === 'admin') {
+    window.dispatchEvent(new Event('prism:open-admin-copilot'))
+  } else {
+    window.dispatchEvent(new Event('prism:close-admin-copilot'))
+    agentVisible.value = true
+  }
+  await nextTick()
+  document.querySelector<HTMLButtonElement>(`[data-assistant-panel="${surface}"] [data-surface="${surface}"]`)?.focus()
+}
+
+watch([canUseAgent, () => userStore.isAdmin(), () => userStore.profile?.id], ([allowed, admin, id], previous) => {
+  if (!allowed || !admin || (previous && id !== previous[2])) adminAssistantUnread.value = 0
+})
 
 const AGENT_VISIBLE_PREFIX = 'prism-agent-drawer-visible:'
 
@@ -162,7 +186,8 @@ onBeforeUnmount(() => {
   </router-view>
   <AgentActivityBorder />
   <VirtualCursor />
-  <AdminCopilot v-if="canUseAgent && userStore.isAdmin()" />
+  <AdminCopilot v-if="canUseAgent && userStore.isAdmin()" :show-launcher="showAdminLauncher"
+    @unread-change="adminAssistantUnread = $event" @switch-surface="switchAssistantSurface" />
   <AgentChatDrawer
     v-if="canUseAgent"
     v-model:visible="agentVisible"
@@ -170,6 +195,7 @@ onBeforeUnmount(() => {
     :auto-send-prefill="agentAutoSend"
     :preferred-session-id="agentPreferredSessionId"
     :preferred-session-request-id="agentSessionRequestId"
+    @switch-surface="switchAssistantSurface"
     :show-launcher="false"
     @consumed-prefill="agentPrefill = ''"
   />

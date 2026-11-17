@@ -39,7 +39,15 @@ declare module 'vue-router' {
  * @param router - Vue Router 实例
  */
 export function setupGuards(router: Router): void {
+  let latestNavigation = 0
+  // Vue Router skips beforeEach for a duplicate target. Count the explicit
+  // attempt too, so an older asynchronous guard cannot override that choice.
+  const push = router.push.bind(router)
+  const replace = router.replace.bind(router)
+  router.push = (to) => { latestNavigation += 1; return push(to) }
+  router.replace = (to) => { latestNavigation += 1; return replace(to) }
   router.beforeEach(async (to: RouteLocationNormalized, _from: RouteLocationNormalized) => {
+    const navigation = ++latestNavigation
     const user = useUserStore()
     const workspace = useWorkspaceStore()
 
@@ -77,7 +85,8 @@ export function setupGuards(router: Router): void {
     workspace.syncIdentity(user.profile?.id, user.token)
 
     if (to.meta.personalAccountOnly) {
-      const isEnterpriseMember = await workspace.refreshEnterpriseMembership()
+      const isEnterpriseMember = await workspace.refreshEnterpriseMembership(true)
+      if (navigation !== latestNavigation) return false
       if (isEnterpriseMember !== false) return { path: '/enterprise', replace: true }
     }
 

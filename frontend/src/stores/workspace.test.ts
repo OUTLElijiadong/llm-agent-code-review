@@ -65,6 +65,30 @@ describe('全站工作空间上下文', () => {
     expect(workspace.hasEnterpriseMembership).toBe(true)
   })
 
+  it('强制刷新读取当前成员资格，失败时不沿用旧资格', async () => {
+    const workspace = useWorkspaceStore()
+    workspace.syncIdentity(17, 'account-token-a')
+    enterpriseApi.hasEnterpriseMembership.mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+    expect(await workspace.refreshEnterpriseMembership()).toBe(false)
+    expect(await workspace.refreshEnterpriseMembership(true)).toBe(true)
+    enterpriseApi.hasEnterpriseMembership.mockRejectedValueOnce(new Error('offline'))
+    expect(await workspace.refreshEnterpriseMembership(true)).toBeNull()
+    expect(workspace.hasEnterpriseMembership).toBeNull()
+  })
+
+  it('强制刷新使同一身份的旧请求失效，旧结果不能覆盖新资格', async () => {
+    let resolveOld!: (value: boolean | null) => void
+    enterpriseApi.hasEnterpriseMembership.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))
+      .mockResolvedValueOnce(true)
+    const workspace = useWorkspaceStore()
+    workspace.syncIdentity(17, 'account-token-a')
+    const oldRequest = workspace.refreshEnterpriseMembership()
+    expect(await workspace.refreshEnterpriseMembership(true)).toBe(true)
+    resolveOld(false)
+    expect(await oldRequest).toBeNull()
+    expect(workspace.hasEnterpriseMembership).toBe(true)
+  })
+
   it('旧账号迟到的企业目录不能覆盖当前登录账号', async () => {
     let resolveOld!: (isMember: boolean | null) => void
     enterpriseApi.hasEnterpriseMembership.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve }))
@@ -78,6 +102,49 @@ describe('全站工作空间上下文', () => {
     resolveOld(true)
 
     expect(await oldRequest).toBeNull()
+    expect(workspace.hasEnterpriseMembership).toBe(false)
+  })
+
+  it('同用户不同 token 即使指纹碰撞也必须重置资格，且不持久化 token', async () => {
+    const first = 'synthetic-test-1jc5bd4-52324'
+    const second = 'synthetic-test-mtpubf-67639'
+    const workspace = useWorkspaceStore()
+    workspace.syncIdentity(17, first)
+    workspace.activateEnterprise(42)
+    expect(await workspace.refreshEnterpriseMembership()).toBe(false)
+    const savedBefore = sessionStorage.getItem('prism.workspace-context.v1')
+    workspace.syncIdentity(17, second)
+    const savedAfter = sessionStorage.getItem('prism.workspace-context.v1')
+    expect(JSON.parse(savedBefore!).identity).toBe(JSON.parse(savedAfter!).identity) // 固定的合成 token 产生同一指纹。
+    expect(savedAfter).not.toContain(first)
+    expect(savedAfter).not.toContain(second)
+    expect(workspace.hasEnterpriseMembership).toBeNull()
+    expect(workspace.activeSpace).toBe('personal')
+    expect(workspace.activeEnterpriseId).toBeNull()
+    enterpriseApi.hasEnterpriseMembership.mockResolvedValueOnce(true)
+    expect(await workspace.refreshEnterpriseMembership()).toBe(true)
+    expect(enterpriseApi.hasEnterpriseMembership).toHaveBeenLastCalledWith(second)
+  })
+
+  it('指纹碰撞后的旧请求及登出后的迟到请求不得写回资格', async () => {
+    let resolveOld!: (value: boolean | null) => void
+    let resolveNew!: (value: boolean | null) => void
+    enterpriseApi.hasEnterpriseMembership.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))
+      .mockImplementationOnce(() => new Promise(resolve => { resolveNew = resolve }))
+    const workspace = useWorkspaceStore()
+    workspace.syncIdentity(17, 'synthetic-test-1jc5bd4-52324')
+    const oldRequest = workspace.refreshEnterpriseMembership()
+    workspace.syncIdentity(17, 'synthetic-test-mtpubf-67639')
+    const newRequest = workspace.refreshEnterpriseMembership()
+    resolveOld(false)
+    expect(await oldRequest).toBeNull()
+    expect(workspace.hasEnterpriseMembership).toBeNull()
+    const sameNewRequest = workspace.refreshEnterpriseMembership()
+    expect(enterpriseApi.hasEnterpriseMembership).toHaveBeenCalledTimes(2)
+    workspace.syncIdentity(null, null)
+    resolveNew(true)
+    expect(await newRequest).toBeNull()
+    expect(await sameNewRequest).toBeNull()
     expect(workspace.hasEnterpriseMembership).toBe(false)
   })
 })

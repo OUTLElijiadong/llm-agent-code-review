@@ -2,7 +2,7 @@
 import { computed, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { resolveAdminSection, sectionQuery, type AdminCenterDomain } from '@/utils/adminUnifiedNavigation'
+import { isKnownAdminSection, resolveAdminSection, sectionQuery, type AdminCenterDomain } from '@/utils/adminUnifiedNavigation'
 
 const AdminOverview = defineAsyncComponent(() => import('./AdminOverview.vue'))
 const AgentGovernance = defineAsyncComponent(() => import('./AgentGovernance.vue'))
@@ -76,7 +76,8 @@ const visibleTabs = computed(() => tabs[domain.value].filter((tab) => !tab.super
 const activeName = computed(() => {
   const requested = String(route.query.section || '')
   const alias = resolveAdminSection(domain.value, requested)
-  return visibleTabs.value.some((tab) => tab.name === alias) ? alias : visibleTabs.value[0]?.name || ''
+  return isKnownAdminSection(domain.value, requested) && visibleTabs.value.some((tab) => tab.name === alias)
+    ? alias : visibleTabs.value[0]?.name || ''
 })
 const activeTab = computed(() => visibleTabs.value.find((tab) => tab.name === activeName.value) || visibleTabs.value[0])
 const sectionDescription = computed(() => {

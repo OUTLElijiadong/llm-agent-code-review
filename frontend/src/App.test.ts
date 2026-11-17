@@ -1,6 +1,7 @@
 import { mount } from '@vue/test-utils'
-import { nextTick } from 'vue'
+import { nextTick, type Ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { adminAssistantUnreadKey } from '@/utils/assistantSurface'
 
 const auth = vi.hoisted(() => ({
   token: 'token',
@@ -55,10 +56,10 @@ function mountApp() {
         PrismLoading: true,
         AgentActivityBorder: true,
         VirtualCursor: true,
-        AdminCopilot: { template: '<aside class="admin-copilot-stub" />' },
+        AdminCopilot: { name: 'AdminCopilotStub', template: '<aside class="admin-copilot-stub"><button class="switch-user" @click="$emit(\'switch-surface\', \'user\')">代码</button></aside>' },
         AgentChatDrawer: {
           props: ['visible', 'prefill', 'showLauncher', 'preferredSessionId', 'preferredSessionRequestId'],
-          template: '<aside class="user-agent-stub" :data-visible="String(visible)" :data-prefill="prefill" :data-launcher="String(showLauncher)" :data-session-id="preferredSessionId" :data-session-request-id="preferredSessionRequestId" />',
+          template: '<aside class="user-agent-stub" :data-visible="String(visible)" :data-prefill="prefill" :data-launcher="String(showLauncher)" :data-session-id="preferredSessionId" :data-session-request-id="preferredSessionRequestId"><button class="switch-admin" @click="$emit(\'switch-surface\', \'admin\')">管理</button></aside>',
         },
       },
     },
@@ -117,6 +118,48 @@ describe('全局小菱宿主', () => {
     expect(wrapper.get('.user-agent-stub').attributes('data-visible')).toBe('true')
     expect(wrapper.get('.user-agent-stub').attributes('data-prefill')).toBe('分析代码')
     wrapper.unmount()
+  })
+
+  it('管理员切换 surface 不带历史 session 或自动提交，角色撤销后不能再唤起管理会话', async () => {
+    const openAdmin = vi.fn()
+    const closeAdmin = vi.fn()
+    window.addEventListener('prism:open-admin-copilot', openAdmin)
+    window.addEventListener('prism:close-admin-copilot', closeAdmin)
+    const wrapper = mountApp()
+    try {
+      await wrapper.get('.switch-admin').trigger('click')
+      expect(openAdmin).toHaveBeenCalledTimes(1)
+      expect((openAdmin.mock.calls[0][0] as CustomEvent).detail).toBeUndefined()
+      await wrapper.get('.switch-user').trigger('click')
+      expect(closeAdmin).toHaveBeenCalledTimes(1)
+      expect(wrapper.get('.user-agent-stub').attributes('data-visible')).toBe('true')
+      expect(wrapper.get('.user-agent-stub').attributes('data-session-id')).toBe('')
+      auth.state.profile = { id: 1, role: 'user' }
+      await nextTick()
+      expect(wrapper.find('.admin-copilot-stub').exists()).toBe(false)
+      await wrapper.get('.switch-admin').trigger('click')
+      expect(openAdmin).toHaveBeenCalledTimes(1)
+    } finally {
+      wrapper.unmount()
+      window.removeEventListener('prism:open-admin-copilot', openAdmin)
+      window.removeEventListener('prism:close-admin-copilot', closeAdmin)
+    }
+  })
+
+  it('切换管理员账号时清除旧账号未读状态', async () => {
+    const wrapper = mountApp()
+    try {
+      const unread = Reflect.get(wrapper.vm.$, 'provides')[adminAssistantUnreadKey as symbol] as Ref<number>
+      const copilot = wrapper.findComponent({ name: 'AdminCopilotStub' })
+      copilot.vm.$emit('unread-change', 2)
+      await nextTick()
+      expect(unread.value).toBe(2)
+      auth.state.profile = { id: 2, role: 'super_admin' }
+      await nextTick()
+      expect(unread.value).toBe(0)
+    } finally {
+      wrapper.unmount()
+    }
   })
 
   it('待办唤起指定会话，并在当前抽屉关闭后清除首选会话', async () => {

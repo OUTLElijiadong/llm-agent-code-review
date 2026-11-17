@@ -10,6 +10,12 @@ export function getActiveWorkspaceMode(): WorkspaceMode {
   return pinia ? useWorkspaceStore(pinia).activeSpace : 'personal'
 }
 
+/** 仅返回与当前认证令牌绑定的成员资格；未知或不匹配时不得推断为散客。 */
+export function getActiveEnterpriseMembership(token: string): boolean | null {
+  const pinia = getActivePinia()
+  return pinia ? useWorkspaceStore(pinia).membershipForToken(token) : null
+}
+
 interface SavedWorkspace {
   identity: string
   mode: WorkspaceMode
@@ -88,7 +94,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
 
     const nextIdentity = `${userId}:${tokenFingerprint(token)}`
-    if (identityStamp === nextIdentity) return
+    // 指纹只用于会话偏好，不可用于认证身份等价判定；完整令牌仅保留在内存。
+    if (identityStamp === nextIdentity && identityToken === token) return
+    const changedLiveIdentity = identityStamp !== null
     identityStamp = nextIdentity
     identityToken = token
     membershipIdentity = null
@@ -96,17 +104,25 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     membershipRequest = null
     membershipRevision += 1
     hasEnterpriseMembership.value = null
-    const saved = readSavedWorkspace(nextIdentity)
+    const saved = changedLiveIdentity ? null : readSavedWorkspace(nextIdentity)
     activeSpace.value = saved?.mode ?? 'personal'
     activeEnterpriseId.value = saved?.mode === 'enterprise' ? saved.enterpriseId : null
     if (!saved) persist()
   }
 
   /** 服务端成员目录决定账号能否访问公开论坛；本地空间选择不参与授权。 */
-  async function refreshEnterpriseMembership(): Promise<boolean | null> {
+  async function refreshEnterpriseMembership(force = false): Promise<boolean | null> {
     const requestedIdentity = identityStamp
     const requestedToken = identityToken
     if (!requestedIdentity || !requestedToken) return false
+    if (force) {
+      // Discard both cached and in-flight results before sensitive navigation.
+      membershipRevision += 1
+      membershipIdentity = null
+      membershipRequestIdentity = null
+      membershipRequest = null
+      hasEnterpriseMembership.value = null
+    }
     if (membershipIdentity === requestedIdentity && hasEnterpriseMembership.value !== null) {
       return hasEnterpriseMembership.value
     }
@@ -123,7 +139,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       })
       .catch(() => null)
       .finally(() => {
-        if (membershipRequestIdentity === requestedIdentity) {
+        if (membershipRequestIdentity === requestedIdentity && membershipRevision === requestedRevision) {
           membershipRequestIdentity = null
           membershipRequest = null
         }
@@ -140,6 +156,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     membershipRequest = null
     hasEnterpriseMembership.value = hasMembership
     membershipIdentity = identityStamp
+  }
+
+  function membershipForToken(token: string): boolean | null {
+    return identityStamp && token && identityToken === token ? hasEnterpriseMembership.value : null
   }
 
   function activatePersonal(): void {
@@ -165,6 +185,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     syncIdentity,
     refreshEnterpriseMembership,
     setEnterpriseMembership,
+    membershipForToken,
     activatePersonal,
     activateEnterprise,
   }

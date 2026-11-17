@@ -498,7 +498,7 @@ function syncTargetGeometry(): void {
 }
 
 watch(
-  () => [store.isActing, store.current?.key] as const,
+  () => [store.isActing, store.current?.key, store.current?.targetHint] as const,
   ([acting]) => {
     activitySequence += 1
     window.clearTimeout(arriveTimer)

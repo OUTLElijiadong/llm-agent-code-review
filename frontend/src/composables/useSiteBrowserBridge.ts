@@ -36,8 +36,8 @@ export function useSiteBrowserBridge(options: {
     settle: async () => { await nextTick(); await new Promise(resolve => setTimeout(resolve, 80)); await nextTick() },
     onStatus: status => {
       const id = `browser-${status.actionId}`
-      if (status.phase === 'executing') activity.begin(status.message, id)
-      else activity.end(id)
+      if (status.phase === 'executing') activity.begin(status.message, id, undefined, options.surface)
+      else activity.end(id, options.surface)
     },
   })
   function stop(): void { if (timer !== undefined) clearTimeout(timer); timer = undefined }

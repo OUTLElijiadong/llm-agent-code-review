@@ -79,4 +79,24 @@ describe('真实导航结果确认', () => {
       expect(settled.mock.calls[0]![1]).not.toMatch(/^已打开/)
     }
   })
+
+  it('最高管理员的敏感分区只有在确认时仍有权限才报告成功', async () => {
+    const target = createRouter({ history: createMemoryHistory(), routes: [
+      { path: '/', component: {} },
+      { path: '/admin/platform', component: {}, meta: { role: 'admin', unifiedDomain: 'platform' } },
+    ] })
+    await target.push('/')
+    let privileged = true
+    const actor = {
+      token: 'test-token', isAdmin: () => true, isSuperAdmin: () => privileged,
+      hasRole: () => true, hasPermission: () => true,
+    }
+    const settled = vi.fn()
+    await performLocalNavigation(target, '/ADMIN/PLATFORM/?section=llm', '大模型', () => true, settled, () => true, actor)
+    expect(settled).toHaveBeenCalledExactlyOnceWith('completed', '已打开「大模型」。')
+    privileged = false
+    settled.mockClear()
+    await performLocalNavigation(target, '/ADMIN/PLATFORM/?section=llm', '大模型', () => true, settled, () => true, actor)
+    expect(settled).toHaveBeenCalledExactlyOnceWith('failed', expect.any(String))
+  })
 })

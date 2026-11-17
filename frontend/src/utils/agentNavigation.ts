@@ -11,12 +11,18 @@ import type { RouteMeta, Router, RouteRecordRaw } from 'vue-router'
 import type { AgentNavigateDirective } from '@/types/agentGuide'
 import { normalizeAgentText, transformOutsideCodeFences } from '@/utils/agentText'
 import { renderMarkdown } from '@/utils/markdown'
-import { getActiveWorkspaceMode } from '@/stores/workspace'
+import { getActiveEnterpriseMembership, getActiveWorkspaceMode } from '@/stores/workspace'
+import { isKnownAdminSection, type AdminCenterDomain } from '@/utils/adminUnifiedNavigation'
 
 const NAVIGATE_DIRECTIVE_RE = /<!--\s*PRISM_NAVIGATE\s*([\s\S]*?)\s*-->/g
 const MAX_DIRECTIVE_JSON_LENGTH = 2048
 const MAX_LOCAL_NAVIGATION_TEXT_LENGTH = 180
 const SUPER_ADMIN_PLATFORM_SECTIONS = new Set(['embedding', 'mcp-workers', 'llm'])
+const FORUM_REDIRECT_QUERY_KEYS = new Set([
+  'next', 'redirect', 'redirect_uri', 'redirect_url', 'redirecturl', 'redirectto',
+  'return', 'returnto', 'return_url', 'returnurl', 'return_uri', 'url', 'target',
+  'continue', 'continueurl', 'callback', 'callbackurl', 'destination', 'dest',
+])
 const KNOWN_ROUTE_RE = /\/[a-z0-9][a-z0-9/_-]*(?:\?[a-z0-9%&=_.~-]+)?(?:#[a-z0-9%_.~-]+)?/gi
 const NAVIGATION_CUE_RE = /路由|页面|导航|前往|进入|打开|带(?:我|你)去/
 const LOCAL_NAVIGATION_PREFIX_RE = /^(?:小菱)?(?:请帮我|请|帮我|麻烦|可以)?(?:只(?:执行|做)?页面导航|仅(?:执行|做)?页面导航|页面导航)?(?:打开|前往|进入|跳转到|导航到|带我去|把我带到|去)(?:一下)?$/
@@ -244,6 +250,7 @@ export function isRouteAllowed(resolved: {
   const meta = resolved.meta ?? {}
   if (meta.public) return true
   if (!guardSource.token) return false
+  if (meta.personalAccountOnly && getActiveEnterpriseMembership(guardSource.token) !== false) return false
   if (meta.workspace === 'personal' && getActiveWorkspaceMode() === 'enterprise') return false
   if (meta.superAdmin && !guardSource.isSuperAdmin()) return false
   const isAdmin = guardSource.isAdmin()
@@ -267,7 +274,22 @@ function resolveRedirectTarget(
   try {
     const target = typeof redirect === 'function' ? (redirect as (to: unknown) => unknown)(resolved) : redirect
     if (typeof target !== 'string' && (typeof target !== 'object' || target === null)) return null
-    const next = router.resolve(target as Parameters<Router['resolve']>[0])
+    // 与 Vue Router 的重定向语义一致：对象及不含 query/hash 的字符串
+    // 默认继承原位置；包含 query 或 hash 的字符串会解析并覆盖两者。
+    const location = typeof target === 'string'
+      ? (target.includes('?') || target.includes('#')
+          ? (() => {
+              const parsed = router.resolve(target)
+              return { path: parsed.path, query: parsed.query, hash: parsed.hash, params: {} }
+            })()
+          : { path: target, params: {} })
+      : target as { path?: string; name?: string; params?: typeof resolved.params }
+    const next = router.resolve({
+      query: resolved.query,
+      hash: resolved.hash,
+      params: location.path != null ? {} : resolved.params,
+      ...location,
+    } as Parameters<Router['resolve']>[0])
     if (!next.matched.length || next.matched.some((item) => String(item.path ?? '').includes(':pathMatch'))) return null
     return next
   } catch {
@@ -275,15 +297,37 @@ function resolveRedirectTarget(
   }
 }
 
+function hasKnownRequestedAdminSection(resolved: ReturnType<Router['resolve']>): boolean {
+  const domain = resolved.meta?.unifiedDomain
+  const section = resolved.query?.section
+  if (!domain || section === undefined || section === null || section === '') return true
+  if (!['agents', 'operations', 'access', 'platform'].includes(String(domain))) return false
+  return isKnownAdminSection(domain as AdminCenterDomain, String(section))
+}
+
+function requiresSuperAdminSection(resolved: ReturnType<Router['resolve']>): boolean {
+  const domain = resolved.meta?.unifiedDomain
+  const section = String(resolved.query?.section || '')
+  return (domain === 'platform' && SUPER_ADMIN_PLATFORM_SECTIONS.has(section))
+    || (domain === 'operations' && section === 'pentest-evidence')
+}
+
 /** 路由 Promise 完成后核对真实目标，包括已登记的旧入口重定向。 */
-export function hasReachedNavigationTarget(router: Pick<Router, 'resolve' | 'currentRoute'>, path: string): boolean {
+export function hasReachedNavigationTarget(
+  router: Pick<Router, 'resolve' | 'currentRoute'>,
+  path: string,
+  guardSource?: Parameters<typeof isRouteAllowed>[1],
+): boolean {
   try {
+    if (guardSource && !isNavigationPathAllowed(router, path, guardSource)) return false
     let target = router.resolve(path)
     const seen = new Set<string>()
     while (!seen.has(target.fullPath)) {
       seen.add(target.fullPath)
       const redirect = resolveRedirectTarget(router, target)
-      if (!redirect) return router.currentRoute.value.fullPath === target.fullPath
+      if (!redirect) return hasKnownRequestedAdminSection(target)
+        && (!requiresSuperAdminSection(target) || !!guardSource?.isSuperAdmin())
+        && router.currentRoute.value.fullPath === target.fullPath
       target = redirect
     }
   } catch { /* 无法确认目标时不能宣称成功。 */ }
@@ -302,28 +346,36 @@ export function isNavigationPathAllowed(
   if (!path.startsWith('/') || path.startsWith('//')) return false
   try {
     const pathname = path.split(/[?#]/, 1)[0]
-    const query = Object.fromEntries(new URLSearchParams(path.split('?')[1]?.split('#')[0] || ''))
+    const beforeHash = path.split('#', 1)[0]
+    const queryOffset = beforeHash.indexOf('?')
+    const queryParams = new URLSearchParams(queryOffset < 0 ? '' : beforeHash.slice(queryOffset + 1))
+    const query: Record<string, string | string[]> = Object.create(null)
+    for (const [key, value] of queryParams) {
+      const previous = query[key]
+      query[key] = previous === undefined ? value : Array.isArray(previous) ? [...previous, value] : [previous, value]
+    }
     const resolved = router.resolve({ path: pathname, query })
     if (!resolved.matched.length) return false
+    if (!hasKnownRequestedAdminSection(resolved)) return false
     if (resolved.matched.some((record) => String(record.path ?? '').includes(':pathMatch'))) return false
     // 论坛详情与编辑页只接受业务 ID 的规范正整数形式；Vue Router 的 :id
     // 参数本身会匹配任意字符串，不能因此把 /forum/未知路径渲染成可点击入口。
     const dynamicForumRoute = resolved.matched.some((record) => (
       ['/forum/:id', '/forum/:id/edit'].includes(String(record.path ?? ''))
     ))
-    if (dynamicForumRoute && !/^\/forum\/[1-9]\d*(?:\/edit)?$/.test(path)) return false
+    if (dynamicForumRoute && !/^\/forum\/[1-9]\d*(?:\/edit)?$/.test(pathname)) return false
+    if (dynamicForumRoute && [...queryParams.keys()].some(key => (
+      FORUM_REDIRECT_QUERY_KEYS.has(key.toLowerCase().replace(/(?:\[\d*\])+$/, ''))
+    ))) return false
     // 旧入口是重定向占位：真实守卫只检查重定向后的页面，可见性必须同口径判定，
     // 否则会因占位 meta 更严而隐藏实际可打开的入口。
     const redirectTarget = resolveRedirectTarget(router, resolved)
+    if (redirectTarget && !hasKnownRequestedAdminSection(redirectTarget)) return false
     // 统一平台中心的敏感分区会隐藏并回退普通页；不能把这个回退误报成成功打开目标。
     // 旧入口的 superAdmin 约束也不能在重定向后被普通 admin 的通用放行覆盖。
     if (!guardSource.isSuperAdmin()) {
       if (resolved.meta?.superAdmin || redirectTarget?.meta?.superAdmin) return false
-      if (pathname === '/admin/platform' && SUPER_ADMIN_PLATFORM_SECTIONS.has(query.section || '')) return false
-      if (pathname === '/admin/operations' && query.section === 'pentest-evidence') return false
-      if (redirectTarget?.path === '/admin/platform'
-        && SUPER_ADMIN_PLATFORM_SECTIONS.has(String(redirectTarget.query?.section || ''))) return false
-      if (redirectTarget?.path === '/admin/operations' && redirectTarget.query?.section === 'pentest-evidence') return false
+      if (requiresSuperAdminSection(resolved) || (redirectTarget && requiresSuperAdminSection(redirectTarget))) return false
     }
     if (redirectTarget) return isRouteAllowed(redirectTarget, guardSource)
     return isRouteAllowed(resolved, guardSource)

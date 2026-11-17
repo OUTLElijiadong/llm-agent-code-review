@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 
 import type { FormInstance, FormRules } from 'element-plus'
@@ -12,8 +12,16 @@ const userStore = useUserStore()
 
 const formRef = ref<FormInstance>()
 const loading = ref(false)
+const authenticated = computed(() => !!userStore.token)
 const loginError = ref('')
 const loginStatus = ref('')
+
+watch(() => userStore.token, (token, previous) => {
+  if (!token && previous) {
+    loginError.value = '登录状态已失效，请重新登录。'
+    loginStatus.value = '请重新登录。'
+  }
+})
 
 const cooldownStorageKey = 'prism:login-cooldown-until'
 const cooldownUntil = ref(0)
@@ -75,6 +83,48 @@ const rules: FormRules = {
   ],
 }
 
+function postLoginDestination(): string {
+  const fallback = getRoleHomePath(userStore.profile?.role)
+  const redirect = router.currentRoute.value.query.redirect
+  if (typeof redirect !== 'string' || !redirect.startsWith('/') || redirect.startsWith('//')
+    || Array.from(redirect).some(char => char === '\\' || char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) return fallback
+  try {
+    const target = router.resolve(redirect)
+    if (!target.matched.length || target.name === 'NotFound' || target.meta.public
+      || target.path === '/login' || target.path === '/register' || target.path === '/') return fallback
+    // The normal router guard still checks the current role and workspace on navigation.
+    return target.fullPath
+  } catch {
+    return fallback
+  }
+}
+
+async function navigateAfterLogin(destination: string): Promise<void> {
+  const home = getRoleHomePath(userStore.profile?.role)
+  const navigate = async (path: string): Promise<void> => {
+    const failure = await router.replace(path)
+    if (failure && authenticated.value && router.currentRoute.value.path === '/login') {
+      loginError.value = '已登录，但页面暂时无法打开，请重新进入。'
+      loginStatus.value = '账号已登录。'
+    }
+  }
+  try {
+    await navigate(destination)
+    return
+  } catch {
+    if (!authenticated.value) return
+    if (destination !== home) {
+      try {
+        await navigate(home)
+        return
+      } catch { /* Show a retry that does not submit credentials again. */ }
+    }
+  }
+  if (!authenticated.value) return
+  loginError.value = '已登录，但页面暂时无法打开，请重新进入。'
+  loginStatus.value = '账号已登录。'
+}
+
 /**
  * 校验登录表单并进入目标页面
  * @returns Promise<void>
@@ -86,6 +136,11 @@ async function handleLogin(): Promise<void> {
   loginError.value = ''
   loginStatus.value = '正在校验登录信息…'
   try {
+    if (authenticated.value) {
+      loginStatus.value = '正在进入工作台…'
+      await navigateAfterLogin(getRoleHomePath(userStore.profile?.role))
+      return
+    }
     const valid = await formRef.value.validate().catch(() => false)
     if (!valid) {
       loginStatus.value = '请检查账号与密码的填写提示。'
@@ -93,9 +148,14 @@ async function handleLogin(): Promise<void> {
     }
     loginStatus.value = '正在验证账号，请稍候…'
     await userStore.login({ username: form.username, password: form.password })
+    if (!authenticated.value) {
+      loginError.value = '登录状态已失效，请重新登录。'
+      loginStatus.value = '请重新登录。'
+      return
+    }
     loginStatus.value = '登录成功，正在进入工作台…'
     ElMessage.success('登录成功')
-    await router.replace(getRoleHomePath(userStore.profile?.role))
+    await navigateAfterLogin(postLoginDestination())
   } catch (error: unknown) {
     const failure = error as { code?: unknown; message?: unknown; retry_after_seconds?: unknown } | null
     loginError.value = typeof failure?.message === 'string' && failure.message.trim()
@@ -135,7 +195,7 @@ async function handleLogin(): Promise<void> {
           ref="formRef"
           :model="form"
           :rules="rules"
-          :disabled="loading"
+          :disabled="loading || authenticated"
           :aria-busy="loading"
           label-position="top"
           class="prism-form"
@@ -165,7 +225,7 @@ async function handleLogin(): Promise<void> {
               :disabled="loading || cooldownRemaining > 0"
               :aria-busy="loading"
             >
-              <span>{{ cooldownRemaining > 0 ? `等待 ${cooldownRemaining} 秒` : loading ? '正在登录…' : loginError ? '重新登录' : '进入棱镜' }}</span>
+              <span>{{ cooldownRemaining > 0 ? `等待 ${cooldownRemaining} 秒` : loading ? '正在登录…' : authenticated ? '重新进入' : loginError ? '重新登录' : '进入棱镜' }}</span>
               <span v-if="loading" class="login-dots" aria-hidden="true"><span></span><span></span><span></span></span>
             </button>
           </div>

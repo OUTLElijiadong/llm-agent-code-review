@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { currentPageContext } from '@/utils/pageContext'
 import { pageActionTargetHint, notifyCompletedPageAction, notifyVerifiedTeamPageActions, applyTeamResultToToolCalls } from '@/utils/agentPageActions'
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { adminAssistantUnreadKey } from '@/utils/assistantSurface'
+import AssistantSurfaceSwitch from '@/components/ai/AssistantSurfaceSwitch.vue'
 import { latestAssistantTarget, useChatAutoScroll } from '@/composables/useChatAutoScroll'
 import { Check, CircleCheck, CircleCloseFilled, Close, Connection, CopyDocument, Upload, WarningFilled } from '@element-plus/icons-vue'
 
@@ -37,6 +39,7 @@ import {
   renderAuthorizedAgentMarkdown,
 } from '@/utils/agentNavigation'
 import { requestXiaolingNavigation } from '@/utils/xiaolingNavigation'
+import { useXiaolingNavigationGuard } from '@/composables/useXiaolingNavigationGuard'
 import { mergeLocalNavigationMessages, type LocalNavigationAction } from '@/utils/agentLocalNavigation'
 import { useUserStore } from '@/stores/user'
 import type { AgentNavigateDirective } from '@/types/agentGuide'
@@ -173,10 +176,11 @@ const props = defineProps<{
   preferredSessionId?: string
   preferredSessionRequestId?: number
 }>()
-const emit = defineEmits<{ 'update:visible': [value: boolean]; 'consumed-prefill': [] }>()
+const emit = defineEmits<{ 'update:visible': [value: boolean]; 'consumed-prefill': []; 'switch-surface': [surface: 'user' | 'admin'] }>()
 
 const router = useRouter()
 const userStore = useUserStore()
+const adminUnread = inject(adminAssistantUnreadKey, ref(0))
 /** 全局「小菱工作中」活动信号:驱动彩框与虚拟鼠标。 */
 const activityStore = useAgentActivityStore()
 
@@ -212,9 +216,11 @@ const {
 const LEGACY_SESSION_KEY = 'prism-user-agent-session'
 const legacySessionKey = computed(() => `${LEGACY_SESSION_KEY}:${userStore.profile?.id ?? 'anonymous'}`)
 const sessionId = ref('')
+const captureNavigation = useXiaolingNavigationGuard(router, () => sessionId.value)
 const chatAccountEpoch = ref(0)
 const chatScope = useAgentChatScope(() => userStore.profile?.id, () => userStore.token, () => sessionId.value)
 let activeResponse: ResponsesStreamHandle | null = null
+const responseStreams = new Map<string, { sessionId: string; runId: string; handle: ResponsesStreamHandle }>()
 let sessionRestoreStarted = false
 let sessionPollFailures = 0
 let sessionPollTimer: number | undefined
@@ -514,7 +520,7 @@ function rememberCurrentDraft(): void {
 
 watch(inputText, (draft) => saveAgentChatDraft(sessionId.value, draft, chatStorageKey.value), { flush: 'sync' })
 
-/** 会话切换:中止本地流视图与轮询,清空后展示欢迎语并恢复目标会话。 */
+/** 会话切换:脱离旧流视图但保留生命周期监听，恢复目标会话。 */
 async function handleSessionSelect(nextSessionId: string): Promise<void> {
   // 切换器重挂载等场景会重复发出当前会话的 select:避免中断正在运行的流;
   // 但若没有活动流且未在恢复中,重新拉一次快照兜底。
@@ -533,7 +539,7 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   })
   if (hasRealContent || sessionRun.value?.status) persistSnapshot()
   rememberCurrentDraft()
-  activeResponse?.abort()
+  activityStore.suppressSessionTargets('user', sessionId.value)
   activeResponse = null
   agentTeamRefreshGeneration += 1
   sessionPollStopped = true
@@ -562,7 +568,7 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   loading.value = false
   showTyping.value = false
   lastActiveToolName.value = ''
-  activityStore.clear()
+  activityStore.clear('user', '')
   sessionRestoring.value = true
   messages.value = [welcomeMessage()]
   await nextTick()
@@ -1503,11 +1509,15 @@ async function cancelResponse(reason = ''): Promise<void> {
       rememberResponseStop(cancelledResponseRunIds, runId)
       if (requestedSessionId === sessionId.value) settlePendingCancelledRunReceipts(runId)
     }
+    for (const [owner, stream] of responseStreams) {
+      if (stream.sessionId !== requestedSessionId || stream.runId !== runId) continue
+      activityStore.clear('user', owner)
+      stream.handle.abort()
+    }
     if (!isCurrent()) return
     cancelUnconfirmedRunId.value = ''
     sessionRun.value = { ...sessionRun.value!, status: result.status, error: result.error || '', output_text: result.output_text }
-    activeResponse?.abort()
-    activityStore.clear()
+    activityStore.clear('user', '')
     loading.value = false
     showTyping.value = false
     syncBusy()
@@ -1655,6 +1665,10 @@ function createAgentResponseRunId(): string {
 
 async function runResponse(payload: Record<string, unknown>, onDeferred?: () => void): Promise<boolean> {
   const scopeCurrent = chatScope.capture()
+  const accountCurrent = chatScope.captureAccount()
+  const activitySessionId = sessionId.value
+  const activityOwner = crypto.randomUUID()
+  const isCurrentSubmission = () => scopeCurrent() && activeResponse === handle
   // start 的 run_id 由客户端先生成并提交，避免 response.created 到达前没有可取消目标。
   // 后端字段已兼容可选 run_id；续跑/审批仍沿用原 run_id。
   const action = typeof payload.action === 'string' ? payload.action : 'start'
@@ -1737,6 +1751,18 @@ async function runResponse(payload: Record<string, unknown>, onDeferred?: () => 
 
   let deferred = false
   let pendingMeshResponse: Record<string, unknown> | null = null
+  function observeActivity(event: ResponseStreamEvent): void {
+    if (event.type === 'response.tool.started' && typeof event.tool_name === 'string'
+      && isPageActionTool(event.tool_name) && pageActionTargetHint(event)) {
+      activityStore.begin(toolRunningPhrase(event.tool_name), event.call_id, isCurrentSubmission() ? pageActionTargetHint(event) : undefined, 'user', activityOwner, activitySessionId)
+    } else if ((event.type === 'response.tool.completed' || event.type === 'response.tool.failed' || event.type === 'response.tool.rejected')
+      && typeof event.call_id === 'string') {
+      if (event.type === 'response.tool.completed') activityStore.complete(event.call_id, undefined, 'user', activityOwner)
+      else activityStore.end(event.call_id, 'user', activityOwner)
+    } else if (['response.completed', 'response.incomplete', 'response.failed', 'response.cancelled', 'error', 'auth_expired'].includes(event.type)) {
+      activityStore.clear('user', activityOwner)
+    }
+  }
   const applyCreatedResponse = (response: Record<string, unknown>): void => {
     receivedResponseCreated = true
     const model = response.model
@@ -1752,7 +1778,25 @@ async function runResponse(payload: Record<string, unknown>, onDeferred?: () => 
 
   const handle = streamResponses(requestPayload, {
     onEvent(event) {
-      if (!scopeCurrent() || deferred) return
+      if (!accountCurrent() || deferred) return
+      if (event.type === 'response.created' && typeof event.response.id === 'string') {
+        const stream = responseStreams.get(activityOwner)
+        if (stream) stream.runId = event.response.id
+      }
+      if (!isCurrentSubmission()) {
+        if (isAgentMeshResponseDeferred(event, payload.mesh_message_id) && meshStart) {
+          deferred = true
+          activityStore.clear('user', activityOwner)
+          return
+        }
+        if (event.type === 'response.created' && typeof event.response.id === 'string') activeRunId = event.response.id
+        if (activeRunId && isResponseRunResumeBlocked(activeRunId)) {
+          activityStore.clear('user', activityOwner)
+          return
+        }
+        observeActivity(event)
+        return
+      }
       if (isAgentMeshResponseDeferred(event, payload.mesh_message_id) && meshStart) {
         deferred = true
         pendingMeshResponse = null
@@ -1792,21 +1836,11 @@ async function runResponse(payload: Record<string, unknown>, onDeferred?: () => 
         showTyping.value = false
         notifyRoundtableToolCompleted(event, userStore.profile?.id)
         notifyCompletedPageAction(event, userStore.profile?.id)
+        observeActivity(event)
         if (event.type === 'response.tool.started' && typeof event.tool_name === 'string' && event.tool_name) {
           lastActiveToolName.value = event.tool_name
           // 页面操作类工具:点亮全屏彩框 + 虚拟鼠标;targetHint 携带目标路由,
           // 虚拟光标会定位到页面上真实元素并在需要时真实点击跳转
-          if (isPageActionTool(event.tool_name) && pageActionTargetHint(event)) {
-            activityStore.begin(toolRunningPhrase(event.tool_name), event.call_id, pageActionTargetHint(event))
-          }
-        } else if (
-          (event.type === 'response.tool.completed'
-            || event.type === 'response.tool.failed'
-            || event.type === 'response.tool.rejected')
-          && typeof event.call_id === 'string'
-        ) {
-          if (event.type === 'response.tool.completed') activityStore.complete(event.call_id)
-          else activityStore.end(event.call_id)
         }
         if (!applyExistingTimelineToolEvent(event)) {
           applyResponseToolEvent(runToolCalls, event)
@@ -1857,7 +1891,7 @@ async function runResponse(payload: Record<string, unknown>, onDeferred?: () => 
           cancelUnconfirmedRunId.value = ''
         }
         // 流进入终态:兜底熄灭彩框/虚拟鼠标(单工具结束事件已按 call_id 精确清除)
-        activityStore.clear()
+        activityStore.clear('user', activityOwner)
         if (sessionRun.value) {
           sessionRun.value = {
             ...sessionRun.value,
@@ -1885,11 +1919,12 @@ async function runResponse(payload: Record<string, unknown>, onDeferred?: () => 
     },
   })
   activeResponse = handle
+  responseStreams.set(activityOwner, { sessionId: activitySessionId, runId: requestedRunId, handle })
   chatScope.track(handle)
 
   try {
     await handle.done
-    if (!scopeCurrent() || deferred) return false
+    if (!isCurrentSubmission() || deferred) return false
     if (protocolError) {
       ElMessage.error(protocolError)
       appendErrorCard(protocolError, true)
@@ -1897,8 +1932,8 @@ async function runResponse(payload: Record<string, unknown>, onDeferred?: () => 
     }
     return true
   } catch (error) {
-    if (!scopeCurrent() || deferred) return false
-    activityStore.clear()
+    activityStore.clear('user', activityOwner)
+    if (!isCurrentSubmission() || deferred) return false
     if (error instanceof Error && error.name === 'AbortError') {
       // 停止请求可能晚于真实完成；仅服务端确认cancelled才显示取消卡片。
       if (sessionRun.value?.status === 'completed') return true
@@ -1923,12 +1958,14 @@ async function runResponse(payload: Record<string, unknown>, onDeferred?: () => 
     if (isAgentResponseSessionActive(sessionRun.value?.status)) scheduleSessionPoll()
     return false
   } finally {
-    if (scopeCurrent()) {
-      if (activeResponse === handle) activeResponse = null
+    responseStreams.delete(activityOwner)
+    activityStore.clear('user', activityOwner)
+    if (isCurrentSubmission()) {
+      activeResponse = null
       loading.value = false
       showTyping.value = false
       await nextTick()
-      if (scopeCurrent()) {
+      if (scopeCurrent() && activeResponse === null) {
         scrollToBottom()
         scheduleSessionPoll(deferred || runStatusSyncPending.value)
       }
@@ -2263,10 +2300,14 @@ function planTotalMs(steps: PlanStep[]): number {
  */
 function followNavigation(directive: AgentNavigateDirective): void {
   if (!isNavigationPathAllowed(router, directive.route, userStore)) return
+  const canExecute = captureNavigation(directive.route)
+  if (!canExecute()) return
   requestXiaolingNavigation(
     directive.route,
     directive.label || '目标页面',
     () => router.push(directive.route),
+    undefined,
+    { canExecute, onSettled: () => undefined },
   )
 }
 
@@ -2508,8 +2549,8 @@ function close(): void {
   // 关闭前持久化运行状态,确保重开后能识别未完成会话(运行中/等待审批/等待输入)并跳回
   saveActiveAgentChatSession(chatStorageKey.value, sessionId.value)
   persistSnapshot()
-  activityStore.clear()
   emit('update:visible', false)
+  void nextTick(() => document.querySelector<HTMLButtonElement>('.agent-trigger, .copilot-trigger')?.focus())
 }
 
 watch(() => props.visible, async (val) => {
@@ -2615,7 +2656,7 @@ watch([() => userStore.profile?.id, () => userStore.token], () => {
   dragActive.value = false
   cancelPromptVisible.value = false
   lastActiveToolName.value = ''
-  activityStore.clear()
+  activityStore.clear('user')
   sessionRestoreStarted = false
   cachedAgentTeams.value = []
   teamWindowVisible.value = false
@@ -2642,7 +2683,7 @@ onBeforeUnmount(() => {
   // 只有用户点击“停止”才走 cancelResponse() 并取消服务端运行。
   activeResponse?.abort()
   activeResponse = null
-  activityStore.clear()
+  activityStore.clear('user')
   window.clearTimeout(projectSearchTimer)
   window.clearTimeout(copiedResetTimer)
   if (reconnectHintTimer !== undefined) window.clearTimeout(reconnectHintTimer)
@@ -2689,6 +2730,7 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
         <div
           ref="panelRef"
           class="chat-drawer"
+          data-assistant-panel="user"
           :class="{ 'is-dragging': dragging, 'is-resizing': resizing, 'drag-over': dragActive }"
           :style="panelStyle"
           @pointermove="moveDrag"
@@ -2744,6 +2786,7 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
               </div>
             </div>
             <div class="chat-header-actions">
+              <AssistantSurfaceSwitch v-if="userStore.isAdmin()" current="user" :admin-unread="adminUnread" @select="emit('switch-surface', $event)" />
               <div id="roundtable-user-assistant-slot" class="roundtable-assistant-slot"></div>
               <button
                 class="close-btn"
@@ -2962,6 +3005,7 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
                     :href="nav.route"
                     :label="nav.label || '前往对应页面'"
                     :hint="nav.hint"
+                    :session-id="sessionId"
                     prominent
                   />
                 </div>

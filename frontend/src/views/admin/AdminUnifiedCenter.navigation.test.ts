@@ -15,8 +15,28 @@ vi.mock('vue-router', async (importOriginal) => ({
 vi.mock('@/stores/user', () => ({ useUserStore: () => ({ isSuperAdmin: () => navigation.superAdmin }) }))
 
 import AdminUnifiedCenter from './AdminUnifiedCenter.vue'
+import { ADMIN_CENTER_SECTIONS, type AdminCenterDomain } from '@/utils/adminUnifiedNavigation'
 
 describe('Agent 治理中心页签导航', () => {
+  it.each(['agents', 'operations', 'access', 'platform'] as AdminCenterDomain[])(
+    '%s 页面显示的全部分区与导航确认使用同一清单', async (domain) => {
+      navigation.superAdmin = true
+      navigation.route.meta.unifiedDomain = domain
+      navigation.route.query.section = ''
+      const wrapper = shallowMount(AdminUnifiedCenter, { global: { stubs: {
+        'el-tabs': { name: 'ElTabs', template: '<div><slot /></div>' },
+        'el-tab-pane': { name: 'ElTabPane', props: ['name', 'label'], template: '<span>{{ label }}</span>' },
+        'el-empty': { name: 'ElEmpty', template: '<div />' },
+      } } })
+      expect(wrapper.findAllComponents({ name: 'ElTabPane' }).map(tab => tab.props('name')))
+        .toEqual(ADMIN_CENTER_SECTIONS[domain])
+      await flushPromises()
+      await vi.dynamicImportSettled()
+      wrapper.unmount()
+      navigation.route.meta.unifiedDomain = 'agents'
+      navigation.route.query.section = 'agents'
+    },
+  )
   it('点击发布审批时留在治理中心路由，并切换到 releases', async () => {
     navigation.replace.mockClear()
     const wrapper = shallowMount(AdminUnifiedCenter, {

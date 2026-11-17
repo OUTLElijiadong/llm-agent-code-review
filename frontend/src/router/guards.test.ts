@@ -1,4 +1,4 @@
-import type { RouteLocationNormalized, Router } from 'vue-router'
+import { createMemoryHistory, createRouter, type RouteLocationNormalized, type Router } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const auth = vi.hoisted(() => ({
@@ -44,6 +44,8 @@ function installHarness(): { before: BeforeGuard; after: AfterGuard } {
   let before: BeforeGuard | undefined
   let after: AfterGuard | undefined
   const router = {
+    push: vi.fn(),
+    replace: vi.fn(),
     beforeEach: vi.fn((guard: BeforeGuard) => {
       before = guard
     }),
@@ -232,7 +234,7 @@ describe('router guards', () => {
 
     expect(await before(route('/forum', { workspace: 'personal', personalAccountOnly: true }), route('/dashboard')))
       .toEqual({ path: '/enterprise', replace: true })
-    expect(workspace.refreshEnterpriseMembership).toHaveBeenCalledOnce()
+    expect(workspace.refreshEnterpriseMembership).toHaveBeenCalledExactlyOnceWith(true)
   })
 
   it('无法确认账号类型时阻止打开公开论坛', async () => {
@@ -243,6 +245,44 @@ describe('router guards', () => {
 
     expect(await before(route('/forum', { workspace: 'personal', personalAccountOnly: true }), route('/dashboard')))
       .toEqual({ path: '/enterprise', replace: true })
+  })
+
+  it('较旧的论坛资格请求返回时不得重定向较新的导航', async () => {
+    const { before } = installHarness()
+    auth.user.token = 'token'
+    auth.user.profile = { id: 9, role: 'user' }
+    let finishOld!: (value: boolean | null) => void
+    workspace.refreshEnterpriseMembership
+      .mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
+      .mockResolvedValueOnce(false)
+    const oldNavigation = before(route('/forum', { personalAccountOnly: true }), route('/dashboard'))
+    const newNavigation = before(route('/forum/7', { personalAccountOnly: true }), route('/dashboard'))
+    expect(await newNavigation).toBe(true)
+    finishOld(null)
+    expect(await oldNavigation).toBe(false)
+  })
+
+  it('用户重复选择当前页面时，等待中的旧论坛导航不得覆盖该意图', async () => {
+    auth.user.token = 'token'
+    auth.user.profile = { id: 9, role: 'user' }
+    let finishOld!: (value: boolean | null) => void
+    workspace.refreshEnterpriseMembership.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/dashboard', component: {} },
+        { path: '/forum', component: {}, meta: { personalAccountOnly: true } },
+        { path: '/enterprise', component: {} },
+      ],
+    })
+    setupGuards(router)
+    await router.push('/dashboard')
+    const oldNavigation = router.push('/forum')
+    await vi.waitFor(() => expect(workspace.refreshEnterpriseMembership).toHaveBeenCalledOnce())
+    await router.push('/dashboard')
+    finishOld(true)
+    await oldNavigation
+    expect(router.currentRoute.value.path).toBe('/dashboard')
   })
 
   it('updates the document title after navigation', () => {
