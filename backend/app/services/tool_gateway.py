@@ -11,7 +11,12 @@ from sqlalchemy.orm import Session
 
 from app.models.agent_governance import AgentProfile, AgentToolPermission, PolicyDecisionLog, ToolCallLog
 from app.models.user import User
-from app.services import approval_service, observability_service, policy_engine
+from app.services import (
+    approval_service,
+    copilot_security_service,
+    observability_service,
+    policy_engine,
+)
 
 
 @dataclass
@@ -80,6 +85,19 @@ def execute(
         decision=decision,
         context=policy_context,
     )
+    # 小菱安全中心：最后一道收紧口，只允许更严，不允许放宽。
+    security_policy = copilot_security_service.load_policy(db)
+    decision = copilot_security_service.tighten_tool_decision(
+        db,
+        decision=decision,
+        agent_code=agent_code,
+        tool_code=tool_code,
+        action=action,
+        resource=resource or "",
+        actor=actor,
+        context=policy_context,
+        policy=security_policy,
+    )
 
     approval_id = None
     if decision.decision == policy_engine.ESCALATE:
@@ -112,6 +130,7 @@ def execute(
             error="",
             duration_ms=_elapsed_ms(t0),
             policy_decision_id=decision.log_id,
+            security_policy=security_policy,
             approval_id=approval_id,
         )
         observability_service.create_alert(
@@ -147,6 +166,7 @@ def execute(
             error=decision.reason,
             duration_ms=_elapsed_ms(t0),
             policy_decision_id=decision.log_id,
+            security_policy=security_policy,
             approval_id=None,
         )
         observability_service.create_alert(
@@ -182,6 +202,7 @@ def execute(
             error="",
             duration_ms=_elapsed_ms(t0),
             policy_decision_id=decision.log_id,
+            security_policy=security_policy,
             approval_id=None,
         )
         return ToolGatewayResult(
@@ -208,6 +229,7 @@ def execute(
             error=str(exc),
             duration_ms=_elapsed_ms(t0),
             policy_decision_id=decision.log_id,
+            security_policy=security_policy,
             approval_id=None,
         )
         observability_service.create_alert(
@@ -251,7 +273,7 @@ def authorize(
         resource=resource or "*",
         context=policy_context,
     )
-    return _apply_tool_permission(
+    decision = _apply_tool_permission(
         db,
         agent_code=agent_code,
         tool_code=tool_code,
@@ -259,6 +281,15 @@ def authorize(
         resource=resource or "*",
         subject=subject,
         decision=decision,
+        context=policy_context,
+    )
+    return copilot_security_service.tighten_tool_decision(
+        db,
+        decision=decision,
+        agent_code=agent_code,
+        tool_code=tool_code,
+        action=action,
+        resource=resource or "",
         context=policy_context,
     )
 
@@ -524,6 +555,13 @@ def _restrict_decision(
     return decision
 
 
+def _redact(value: str, security_policy: Optional[dict]) -> Optional[str]:
+    """落库前按小菱安全策略脱敏并截断。"""
+    if not value:
+        return None
+    return copilot_security_service.redact_for_audit(value, policy=security_policy)[:4000]
+
+
 def _write_log(
     db: Session,
     *,
@@ -541,6 +579,7 @@ def _write_log(
     duration_ms: int,
     policy_decision_id: Optional[int],
     approval_id: Optional[int],
+    security_policy: Optional[dict] = None,
 ) -> ToolCallLog:
     """写入工具调用日志。
 
@@ -571,9 +610,9 @@ def _write_log(
         status=status,
         risk_level=risk_level,
         decision=decision,
-        input_summary=input_summary[:4000] if input_summary else None,
-        output_summary=output_summary[:4000] if output_summary else None,
-        error=error[:4000] if error else None,
+        input_summary=_redact(input_summary, security_policy),
+        output_summary=_redact(output_summary, security_policy),
+        error=_redact(error, security_policy),
         duration_ms=duration_ms,
         policy_decision_id=policy_decision_id,
         approval_id=approval_id,

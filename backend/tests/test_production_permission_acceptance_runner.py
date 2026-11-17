@@ -55,8 +55,8 @@ def test_plan_matches_actual_routes_and_rejects_changed_source(tmp_path):
     plan = runner_module.build_plan()
     runner_module.validate_plan(plan, PATH.parents[1])
     # 118 adds three authenticated clarification routes whose room authority is checked in service tests.
-    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 522
-    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 322
+    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 531
+    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 331
     recover = [row for row in plan["routes"] if row["method"] == "POST" and
                row["path"] == "/api/billing/admin/reservations/{reservation_id}/reconciliation/recover-stale"]
     assert len(recover) == 1

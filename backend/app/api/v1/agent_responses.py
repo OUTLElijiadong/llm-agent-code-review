@@ -12,7 +12,7 @@ from contextlib import nullcontext
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, List, Literal, Mapping, Optional, Sequence
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import Field, field_validator, model_validator
@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, optional_request
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
 from app.core.permission_codes import PermissionCode
 from app.core.rbac_dependency import require_permission
@@ -33,7 +33,13 @@ from app.models.agent_response_run import (
 )
 from app.models.user import User
 from app.schemas.common import Resp, StrictInputModel
-from app.services import agent_mesh_service, agent_run_salvage, page_guide_service, rbac_service
+from app.services import (
+    agent_mesh_service,
+    agent_run_salvage,
+    copilot_security_service,
+    page_guide_service,
+    rbac_service,
+)
 from app.services.agent_responses_service import (
     AgentResponsesService,
     DatabaseCheckpointStore,
@@ -313,6 +319,49 @@ class AgentResponsesRequest(StrictInputModel):
         if self.action == "answer" and not self.answer.strip():
             raise ValueError("回答模型追问时 answer 不能为空")
         return self
+
+
+# ▎小菱安全中心入站守卫：命中任一硬闸门直接抛 403，不进入工具循环。
+def _guard_copilot_request(
+    db: Session,
+    *,
+    payload: "AgentResponsesRequest",
+    user: User,
+    request: Optional[Request],
+) -> dict:
+    """对一次 Responses 请求执行小菱安全中心的入站守卫。
+
+    Args:
+        db: 数据库会话。
+        payload: 请求体。
+        user: 当前用户。
+        request: 原始请求（可选；直接调用时为 None），用于取来源 IP / UA。
+
+    Returns:
+        dict: 守卫结果（放行时含注入评分与告警）。
+    """
+    policy = copilot_security_service.load_policy(db)
+    user_texts = [
+        item.content
+        for item in payload.messages
+        if item.role == "user" and item.content.strip()
+    ][-1:]
+    user_agent = ""
+    if request is not None:
+        try:
+            user_agent = str(request.headers.get("user-agent") or "")
+        except (AttributeError, TypeError):
+            user_agent = ""
+    return copilot_security_service.guard_request(
+        db,
+        actor=user,
+        surface=payload.surface,
+        session_id=payload.session_id,
+        texts=user_texts,
+        client_ip=copilot_security_service.resolve_client_ip(request, policy=policy),
+        user_agent=user_agent,
+        policy=policy,
+    )
 
 
 @router.get(
@@ -1559,11 +1608,14 @@ async def stream_agent_response(
     payload: AgentResponsesRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
+    request: Optional[Request] = Depends(optional_request),
 ) -> StreamingResponse:
     """启动或恢复工具循环，并以 Responses 语义事件持续输出。"""
 
     if payload.surface == "admin" and not _is_admin_actor(db, user):
         raise ForbiddenError("仅管理员可使用管理员 Agent", code=40300)
+    # 小菱安全中心：进会话前的硬闸门（停机/IP 白名单/会话绑定/超时/消息长度/提示注入）。
+    _guard_copilot_request(db, payload=payload, user=user, request=request)
     if payload.action == "start" and hasattr(db, "get_bind"):
         first_text = next(
             (

@@ -27,6 +27,8 @@ from app.api.v1 import (
     beta_invites,
     billing,
     code_files,
+    copilot_security,
+    copilot_security_analytics,
     dashboard,
     enterprise_agent_teams,
     enterprise_assets,
@@ -107,6 +109,8 @@ api_router.include_router(llm_config.router, prefix="/admin/llm", tags=["大模�
 api_router.include_router(mcp_governance.router, prefix="/admin/mcp", tags=["MCP 治理"])
 api_router.include_router(agent_governance.router, prefix="/admin", tags=["Agent治理"])
 api_router.include_router(admin_copilot.router, prefix="/admin/copilot", tags=["管理员副驾驶"])
+api_router.include_router(copilot_security.router, prefix="/admin/copilot-security", tags=["小菱安全中心"])
+api_router.include_router(copilot_security_analytics.router, prefix="/admin/copilot-security", tags=["小菱安全中心"])
 api_router.include_router(admin_overview.router, prefix="/admin", tags=["管理员总览"])
 api_router.include_router(admin_security_center.router, prefix="/admin/security-center", tags=["管理员安全中心"])
 api_router.include_router(agent_studio.router, prefix="/agent-studio", tags=["Agent 工坊"])

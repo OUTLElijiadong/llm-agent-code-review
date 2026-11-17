@@ -4,7 +4,7 @@ FastAPI依赖注入模块: 用户认证与权限校验
 
 from typing import Optional
 
-from fastapi import Depends, Header
+from fastapi import Depends, Header, Request
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -93,6 +93,16 @@ def require_super_admin(
     if not is_super_admin_user(db, user.id):
         raise ForbiddenError("仅超级管理员 admin 可执行此操作", code=40322)
     return user
+
+
+def optional_request(request: Request) -> Request:
+    """把当前请求对象暴露成可选依赖。
+
+    路由声明成 ``http_request: Optional[Request] = Depends(optional_request)``：
+    HTTP 请求里 FastAPI 注入真实对象；单元测试或内部直接调用该函数时参数走默认值 None，
+    于是新增的安全守卫不会破坏既有调用签名。
+    """
+    return request
 
 
 def get_optional_user(

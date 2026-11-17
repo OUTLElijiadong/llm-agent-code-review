@@ -11,6 +11,7 @@ const ApprovalHub = defineAsyncComponent(() => import('./ApprovalHub.vue'))
 const EvolutionCenter = defineAsyncComponent(() => import('./EvolutionCenter.vue'))
 const KnowledgeGovernance = defineAsyncComponent(() => import('./KnowledgeGovernance.vue'))
 const SkillManager = defineAsyncComponent(() => import('./SkillManager.vue'))
+const CopilotSecurityCenter = defineAsyncComponent(() => import('./CopilotSecurityCenter.vue'))
 const PolicyCenter = defineAsyncComponent(() => import('./PolicyCenter.vue'))
 const ToolGovernance = defineAsyncComponent(() => import('./ToolGovernance.vue'))
 const JobCenter = defineAsyncComponent(() => import('./JobCenter.vue'))
@@ -50,6 +51,7 @@ const tabs: Record<AdminCenterDomain, Tab[]> = {
   operations: [
     { name: 'overview', label: '运行总览', component: AdminOverview },
     { name: 'policies', label: '策略', component: PolicyCenter },
+    { name: 'copilot-security', label: '小菱安全', component: CopilotSecurityCenter },
     { name: 'tools', label: '工具权限', component: ToolGovernance },
     { name: 'jobs', label: '任务调度', component: JobCenter },
     { name: 'observability', label: '监控告警', component: ObservabilityCenter },

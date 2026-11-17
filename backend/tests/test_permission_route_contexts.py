@@ -22,8 +22,9 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
 
     monkeypatch.setattr(app, "openapi", lambda: pytest.fail("OpenAPI cannot prove authorization"))
     plan = m.build_plan()
-    assert len(plan["routes"]) == 538  # 含企业澄清的读取、决策和续跑接口
-    assert len({row["endpoint"] for row in plan["routes"]}) == 58
+    # 小菱安全中心新增 10 条（策略/预设/停机/态势/演练/事件/导出/趋势）
+    assert len(plan["routes"]) == 548
+    assert len({row["endpoint"] for row in plan["routes"]}) == 60
     paths = {(row["method"], row["path"]) for row in plan["routes"]}
     assert {
         ("GET", "/api/enterprises/{enterprise_id}/conversations/proactive-settings"),
@@ -180,8 +181,8 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
     assert recovery[0]["anonymous"] == recovery[0]["no_permission"] == "ready"
     assert "app.core.dependencies.get_current_user" in recovery[0]["dependency_order"]
     assert not recovery[0]["unknown_dependencies"]
-    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 522
-    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 322
+    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 531
+    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 331
     public_forum = [row for row in plan["routes"] if row["endpoint"] == "app/api/v1/forum.py"]
     assert len(public_forum) == 10
     assert all(

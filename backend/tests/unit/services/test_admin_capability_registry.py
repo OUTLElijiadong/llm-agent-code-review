@@ -24,6 +24,13 @@ from app.services.page_guide_service import ADMIN_SHELL_SHORTCUT_ROUTES
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
 FRONTEND_API_CAPABILITY = {
+    # 小菱安全中心：页面调用的 6 个接口（读走 security:view，写/停机走 super_admin）
+    "copilotSecurity:getCopilotSecurityCenter": "copilot_security.center.get",
+    "copilotSecurity:updateCopilotSecurityPolicy": "copilot_security.policy.update",
+    "copilotSecurity:applyCopilotSecurityPreset": "copilot_security.preset.apply",
+    "copilotSecurity:toggleCopilotSecurityKillSwitch": "copilot_security.kill_switch.set",
+    "copilotSecurity:scanCopilotSecurityText": "copilot_security.scan",
+    "copilotSecurity:listCopilotSecurityEvents": "copilot_security.events.list",
     "pentestEvidence:inspectPentestEvidence": "pentest_evidence.inspect",
     "pentestEvidence:listPentestActivities": "pentest_evidence.activities",
     "adminOverview:getSystemStatus": "overview.system",
@@ -216,7 +223,8 @@ def test_report_template_capabilities_remain_admin_only() -> None:
 def test_all_registered_capabilities_bind_existing_openapi_operations() -> None:
     openapi = app.openapi()
     # 固定角色模型移除新建角色与页面未使用的逐用户角色查询能力。
-    assert len(ADMIN_CAPABILITIES) == 145
+    # 小菱安全中心新增 10 条（读 7 + 写/停机 3），基线 145 → 155。
+    assert len(ADMIN_CAPABILITIES) == 155
     assert len(CAPABILITY_BY_CODE) == len(ADMIN_CAPABILITIES)
     for spec in ADMIN_CAPABILITIES:
         contract = operation_contract(spec, openapi)
