@@ -1,4 +1,6 @@
 """全局异常处理器注册模块。"""
+import re
+
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -13,6 +15,22 @@ from app.core.observability import get_request_id
 def _is_prod() -> bool:
     """判断是否为生产环境(用于收敛对外的调试细节)。"""
     return settings.app_env.lower() not in ("dev", "test")
+
+
+def _safe_error_locations(exc: BaseException) -> str:
+    """Return at most five trusted application frames, never values or messages."""
+    locations: list[str] = []
+    trace = exc.__traceback__
+    while trace is not None:
+        module = trace.tb_frame.f_globals.get("__name__", "")
+        function = trace.tb_frame.f_code.co_name
+        if (isinstance(module, str) and len(module) <= 160
+                and re.fullmatch(r"app(?:\.[A-Za-z_][A-Za-z0-9_]*)+", module)
+                and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", function)):
+            locations.append(f"{module}:{function}:{trace.tb_lineno}")
+            locations = locations[-5:]
+        trace = trace.tb_next
+    return " -> ".join(locations) if locations else "unknown"
 
 
 def register_handlers(app: FastAPI) -> None:
@@ -81,8 +99,15 @@ def register_handlers(app: FastAPI) -> None:
     @app.exception_handler(Exception)
     async def unhandled_handler(req: Request, exc: Exception) -> JSONResponse:
         """处理所有未捕获异常并返回不泄露内部细节的响应。"""
-        logger.exception(exc)
         request_id = get_request_id(req)
+        # Exception messages, traceback locals and chained exceptions may all
+        # contain request bodies or credentials. Preserve only code location.
+        error_type = type(exc).__name__
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", error_type):
+            error_type = "Exception"
+        logger.bind(request_id=request_id).error(
+            "Unhandled request error type={} locations={}", error_type, _safe_error_locations(exc),
+        )
         content: dict = {
             "code": 50000,
             "message": "服务器内部错误",

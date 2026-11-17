@@ -30,6 +30,7 @@ from app.core.request_size_limit import (
     UploadRequestSizeLimitMiddleware,
 )
 from app.core.site_request_context import SiteRequestContextMiddleware
+from app.core.uvicorn_log_filter import install_uvicorn_asgi_error_filter
 
 
 def _ensure_schema() -> None:
@@ -316,6 +317,8 @@ async def lifespan(app: FastAPI):
         stop_terminal_receipt_recovery_scheduler()
         await asyncio.to_thread(stop_project_denial_audit, timeout=2.0)
 
+
+install_uvicorn_asgi_error_filter()
 
 app = FastAPI(
     title="棱镜 Prism · 智能代码审查平台",
