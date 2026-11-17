@@ -53,6 +53,7 @@ SENSOR_ACTIONS: tuple[str, ...] = (
     "nginx_attack_events",
     "flytrap_attack_events",
     "db_threat_signals",
+    "security_traffic_summary",
     "security_block_status",
     "security_block_candidates",
     "security_surface_audit",
@@ -157,17 +158,81 @@ def _run(db: Session, actor: Optional[User], action: str, params: Optional[dict]
         return {"error": str(exc)[:300], "action": action, "degraded": True}
 
 
-def _pick_items(result: dict) -> list[dict]:
-    """从执行器返回里挑出事件列表（不同动作字段名不一致，做一次归一）。"""
-    for key in ("items", "events", "entries", "records", "data", "result"):
-        value = result.get(key)
-        if isinstance(value, list):
-            return [item for item in value if isinstance(item, dict)]
-        if isinstance(value, dict):
-            nested = _pick_items(value)
-            if nested:
-                return nested
-    return []
+def _unwrap_payload(result: Any) -> dict:
+    """剥掉执行器的两层信封，拿到真正的结果体。"""
+    payload = result
+    for _ in range(4):
+        if not isinstance(payload, dict):
+            return {}
+        inner = payload.get("result")
+        if isinstance(inner, dict) and "ok" in inner or (isinstance(inner, dict) and inner):
+            payload = inner
+            continue
+        return payload
+    return payload if isinstance(payload, dict) else {}
+
+
+def _pairs_to_events(rows: Any, *, kind: str) -> list[dict]:
+    """把 ``[{value, count}]`` 形态的聚合行转成事件条目。"""
+    events: list[dict] = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        ip = row.get("value") or row.get("ip") or row.get("key")
+        if not isinstance(ip, str) or not ip.strip():
+            continue
+        count = row.get("count") or row.get("hits") or row.get("total") or 1
+        try:
+            hits = max(1, int(count))
+        except (TypeError, ValueError):
+            hits = 1
+        events.append({"ip": ip.strip(), "hits": hits, "type": row.get("detail") or kind})
+    return events
+
+
+def _extract_events(action: str, result: dict) -> list[dict]:
+    """从执行器返回里抽出"来源 IP + 命中次数"。
+
+    真实传感器返回的是**聚合形态**（``by_ip`` / ``failed_by_ip`` / ``peers``），
+    不是逐条事件列表；只按 ``events`` 找会让研判永远读到 0——这一条是在生产上核对过的。
+    """
+    payload = _unwrap_payload(result)
+    if not payload:
+        return []
+    # 优先：逐条事件列表
+    for key in ("events", "items", "records", "recent", "entries"):
+        rows = payload.get(key)
+        if isinstance(rows, list) and rows:
+            items = [row for row in rows if isinstance(row, dict)]
+            if items:
+                return items
+    # 其次：各传感器的聚合形态
+    events: list[dict] = []
+    if action == "ssh_login_events":
+        events += _pairs_to_events(payload.get("failed_by_ip"), kind="ssh_failed")
+        events += _pairs_to_events(payload.get("accepted_by_ip"), kind="ssh_accepted")
+    elif action == "nginx_attack_events":
+        events += _pairs_to_events(payload.get("by_ip"), kind="web_attack")
+        events += _pairs_to_events(payload.get("http_failures_by_ip"), kind="http_failure")
+    elif action == "flytrap_attack_events":
+        for key in ("by_ip", "attackers", "hits", "by_source"):
+            events += _pairs_to_events(payload.get(key), kind="honeypot")
+    elif action == "db_threat_signals":
+        for key in ("by_ip", "signals", "by_source", "threats"):
+            events += _pairs_to_events(payload.get(key), kind="db_threat")
+    elif action == "security_traffic_summary":
+        for peer in payload.get("peers") or []:
+            if not isinstance(peer, dict):
+                continue
+            ip = peer.get("ip")
+            failed = peer.get("ssh_failed_count") or 0
+            try:
+                hits = int(failed)
+            except (TypeError, ValueError):
+                hits = 0
+            if isinstance(ip, str) and hits > 0:
+                events.append({"ip": ip.strip(), "hits": hits, "type": "ssh_failed"})
+    return events
 
 
 # ── 感知与研判 ─────────────────────────────────────────────────────────────
@@ -213,6 +278,7 @@ def threat_digest(
         "nginx_attack_events": {"since_hours": window, "limit": limit},
         "flytrap_attack_events": {"since_hours": window, "limit": limit},
         "db_threat_signals": {"since_hours": window, "limit": limit},
+        "security_traffic_summary": {"since_hours": window},
     }
     raw: dict[str, dict] = {}
     sensors: list[dict] = []
@@ -222,13 +288,13 @@ def threat_digest(
         sensors.append({
             "action": action,
             "ok": not result.get("error"),
-            "events": len(_pick_items(result)),
+            "events": len(_extract_events(action, result)),
             "error": result.get("error"),
         })
 
     profile: dict[str, dict] = {}
     for action, result in raw.items():
-        for item in _pick_items(result)[:_MAX_SOURCES * 4]:
+        for item in _extract_events(action, result)[:_MAX_SOURCES * 4]:
             ip = _source_ip(item)
             if not ip:
                 continue
@@ -239,7 +305,10 @@ def threat_digest(
             entry = profile.setdefault(ip, {
                 "ip": ip, "hits": 0, "sensors": set(), "kinds": set(), "last_seen": None,
             })
-            entry["hits"] += 1
+            try:
+                entry["hits"] += max(1, int(item.get("hits") or item.get("count") or 1))
+            except (TypeError, ValueError):
+                entry["hits"] += 1
             entry["sensors"].add(action)
             entry["kinds"].add(_source_kind(item))
             seen = item.get("time") or item.get("create_time") or item.get("timestamp") or item.get("ts")
@@ -310,7 +379,8 @@ def surface_audit(db: Session, actor: Optional[User] = None) -> dict:
 def block_candidates(db: Session, actor: Optional[User] = None) -> dict:
     """自动封禁候选名单（执行器按阈值算好，本函数只做展示与审计）。"""
     result = _run(db, actor, "security_block_candidates")
-    candidates = _pick_items(result)
+    payload = _unwrap_payload(result)
+    candidates = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
     _audit(db, kind="block_candidates", actor=actor, detail={"candidates": len(candidates)})
     return {
         "available": not result.get("error"),

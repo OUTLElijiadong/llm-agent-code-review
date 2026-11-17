@@ -31,23 +31,28 @@ def ops_stub(monkeypatch):
 
     def fake_execute(db, actor, *, action, params=None, request_id="", session_db_id=None, source="admin_copilot"):
         calls.append({"action": action, "params": params or {}, "source": source})
+        # 真实执行器返回两层信封 + 聚合形态（生产上核对过的形状）
         if action == "nginx_attack_events":
-            return {"events": [
-                {"ip": "45.135.228.155", "type": "sql_injection"},
-                {"ip": "45.135.228.155", "type": "path_traversal"},
-                {"ip": "203.0.113.9", "type": "xss"},
-            ]}
+            return {"ok": True, "result": {"ok": True, "by_ip": [
+                {"value": "45.135.228.155", "count": 2},
+                {"value": "203.0.113.9", "count": 1},
+            ], "by_detail": [], "recent": []}}
         if action == "ssh_login_events":
-            return {"events": [
-                {"ip": "45.135.228.155", "type": "failed_password"},
-                {"ip": "203.0.113.9", "type": "failed_password"},
-            ]}
+            return {"ok": True, "result": {"ok": True, "failed_by_ip": [
+                {"value": "45.135.228.155", "count": 3},
+                {"value": "203.0.113.9", "count": 1},
+            ], "accepted_by_ip": [{"value": "183.6.24.50", "count": 7}]}}
         if action == "flytrap_attack_events":
-            return {"events": [{"ip": "45.135.228.155", "type": "honeypot_probe"}]}
+            return {"ok": True, "result": {"ok": True, "by_ip": [{"value": "45.135.228.155", "count": 1}]}}
         if action == "db_threat_signals":
-            return {"events": []}
+            return {"ok": True, "result": {"ok": True, "by_ip": []}}
+        if action == "security_traffic_summary":
+            return {"ok": True, "result": {"ok": True, "peers": [
+                {"ip": "149.56.217.226", "ssh_failed_count": 29},
+                {"ip": "45.135.228.155", "ssh_failed_count": 4},
+            ]}}
         if action == "security_block_candidates":
-            return {"candidates": [{"ip": "45.135.228.155", "hits": 4}]}
+            return {"ok": True, "result": {"candidates": [{"ip": "45.135.228.155", "hits": 4}]}}
         if action == "certificate_status":
             return {"data": {"not_after": "2027-01-01"}}
         if action == "security_surface_audit":
@@ -65,14 +70,21 @@ class TestThreatDigest:
         digest = secops_service.threat_digest(db, None, hours=24)
         assert digest["window_hours"] == 24
         top = digest["sources"][0]
-        assert top["ip"] == "45.135.228.155"
-        assert top["hits"] == 4
-        assert set(top["sensors"]) >= {"nginx_attack_events", "ssh_login_events", "flytrap_attack_events"}
-        assert top["severity"] == "critical"
-        assert top["recommended"] == "block"
-        # 单源命中不会因为条数多就被判 critical
-        weak = [row for row in digest["sources"] if row["ip"] == "203.0.113.9"][0]
-        assert weak["severity"] in {"low", "medium"}
+        assert top["ip"] in {"45.135.228.155", "149.56.217.226"}
+        by_ip = {row["ip"]: row for row in digest["sources"]}
+        attacker = by_ip["45.135.228.155"]
+        # 三个传感器 + traffic summary，命中次数按聚合 count 累加
+        assert attacker["hits"] == 2 + 3 + 1 + 4
+        assert set(attacker["sensors"]) >= {
+            "nginx_attack_events", "ssh_login_events", "flytrap_attack_events", "security_traffic_summary",
+        }
+        assert attacker["severity"] == "critical"
+        assert attacker["recommended"] == "block"
+        # 只有 SSH 失败次数的境外地址同样应当被抓成高危并建议封禁
+        assert by_ip["149.56.217.226"]["hits"] == 29
+        assert by_ip["149.56.217.226"]["recommended"] == "block"
+        # 低量噪音不判 critical
+        assert by_ip["203.0.113.9"]["severity"] in {"low", "medium"}
 
     def test_scheduler_identity_uses_scheduler_source(self, db, ops_stub):
         """无人值守巡检必须用 scheduler 来源，否则执行器会拒掉安全动作。"""
