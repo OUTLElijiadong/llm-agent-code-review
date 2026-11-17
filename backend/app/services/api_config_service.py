@@ -10,7 +10,9 @@ from typing import Optional
 
 import httpx
 from loguru import logger
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
+from sqlalchemy.pool import SingletonThreadPool, StaticPool
 
 from app.core.config import settings
 from app.core.exceptions import ValidationError
@@ -33,6 +35,10 @@ from app.utils.public_http import pin_public_http_url
 
 _TRANSIENT_STATUS_CODES = {408, 429, 500, 502, 503, 504}
 _UNSUPPORTED_MODELS_STATUS_CODES = {404, 405, 501}
+
+# Isolated test integration only. Existing readers/writers, migration and the
+# provider-send authorization are not yet fenced; never enable in production.
+_CREDENTIAL_POLICY_SAVE_EXPERIMENT = False
 
 
 @dataclass(frozen=True)
@@ -119,6 +125,42 @@ def save_config(db: Session, user_id: int, payload: ApiConfigSaveIn) -> ApiConfi
         allow_private=False,
     )
     encrypted = encrypt_api_key(payload.api_key)
+
+    if _CREDENTIAL_POLICY_SAVE_EXPERIMENT:
+        from app.services import credential_policy_prototype as policy
+
+        # A second session cannot safely write while the caller holds a stale
+        # snapshot or a lock, nor while it retains an old config object that
+        # can be flushed later. This deliberately blocks today's authenticated
+        # request session until its lifecycle is redesigned and tested.
+        if db.in_transaction() or db.in_nested_transaction():
+            raise policy.PolicyError("凭据策略实验拒绝：调用者仍有活动事务")
+        if any(isinstance(obj, UserApiConfig) for obj in db.identity_map.values()):
+            raise policy.PolicyError("凭据策略实验拒绝：调用者仍持有配置对象")
+        bind = db.get_bind()
+        if not isinstance(bind, Engine) or isinstance(bind.pool, (SingletonThreadPool, StaticPool)):
+            raise policy.PolicyError("凭据策略实验需要独立数据库引擎连接")
+        # A separate session prevents this path from flushing or committing the
+        # request session's pending state. It must use an independent pool
+        # connection; tests may not use connection-bound or singleton sessions.
+        with Session(bind=bind, autoflush=False, expire_on_commit=False) as policy_db:
+            with policy_db.begin():
+                _, row = policy.save_current_user_configuration(
+                    policy_db, owner_id=user_id, ciphertext=encrypted, provider=payload.provider,
+                    base_url=safe_base_url, model=payload.model,
+                )
+                policy_db.refresh(row)
+                result = ApiConfigOut(
+                    provider=row.provider,
+                    api_key_masked=mask_api_key(payload.api_key),
+                    base_url=row.base_url,
+                    model=row.model,
+                    is_active=row.is_active,
+                    is_custom=True,
+                    created_at=row.created_at,
+                    updated_at=row.updated_at,
+                )
+        return result
 
     row = db.query(UserApiConfig).filter(UserApiConfig.user_id == user_id).first()
 

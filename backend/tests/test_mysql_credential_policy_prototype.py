@@ -13,8 +13,9 @@ from app.models.api_config import UserApiConfig
 from app.models.credential_policy_prototype import CredentialPolicyBase, CredentialPolicyPrototype
 from app.models.system_config import SystemConfig
 from app.models.user import User
+from app.schemas.api_config import ApiConfigSaveIn
+from app.services import api_config_service, system_config_service
 from app.services import credential_policy_prototype as policy
-from app.services import system_config_service
 
 
 @pytest.fixture(name="mysql_factory")
@@ -148,6 +149,119 @@ def test_old_failure_commit_wins_before_waiting_new_save(mysql_factory, monkeypa
     with mysql_factory.begin() as db:
         saved = policy.replace_key(db, failed, ciphertext="new")
     assert saved.state == "active"
+
+
+def test_real_save_config_fences_stale_failure_and_rejects_caller_dirty(mysql_factory, monkeypatch):
+    owner_id, initial = _setup(mysql_factory, monkeypatch, "user")
+    monkeypatch.setattr(api_config_service, "_CREDENTIAL_POLICY_SAVE_EXPERIMENT", True)
+    monkeypatch.setattr(api_config_service, "normalize_ai_base_url", lambda value, **_: value)
+    monkeypatch.setattr(api_config_service, "encrypt_api_key", lambda value: f"enc:{value}")
+    with mysql_factory() as caller:
+        user = caller.query(User).filter_by(id=owner_id).one()
+        original_username = user.username
+        user.username = "uncommitted-caller-name"
+        with pytest.raises(policy.PolicyError, match="调用者仍有活动事务"):
+            api_config_service.save_config(caller, owner_id, ApiConfigSaveIn(
+                provider="openai", base_url="https://api.example.com", model="saved-model", api_key="saved-key",
+            ))
+        assert user in caller.dirty and user.username == "uncommitted-caller-name"
+        caller.rollback()
+    with mysql_factory() as caller:
+        result = api_config_service.save_config(caller, owner_id, ApiConfigSaveIn(
+            provider="openai", base_url="https://api.example.com", model="saved-model", api_key="saved-key",
+        ))
+        assert result.model == "saved-model" and "saved-key" not in result.api_key_masked
+    with mysql_factory.begin() as db:
+        with pytest.raises(policy.PolicyConflict):
+            policy.mark_failed(db, initial)
+    with mysql_factory() as db:
+        row = db.query(UserApiConfig).filter_by(user_id=owner_id).one()
+        assert (row.provider, row.base_url, row.model, row.api_key_enc, row.is_active) == (
+            "openai", "https://api.example.com", "saved-model", "enc:saved-key", True,
+        )
+        assert db.query(User).filter_by(id=owner_id).one().username == original_username
+        assert policy.read(db, kind="user", owner_id=owner_id).revision == initial.revision + 1
+
+
+def test_real_save_rejects_preflushed_config_without_waiting_on_own_lock(mysql_factory, monkeypatch):
+    owner_id, initial = _setup(mysql_factory, monkeypatch, "user")
+    monkeypatch.setattr(api_config_service, "_CREDENTIAL_POLICY_SAVE_EXPERIMENT", True)
+    monkeypatch.setattr(api_config_service, "normalize_ai_base_url", lambda value, **_: value)
+    monkeypatch.setattr(api_config_service, "encrypt_api_key", lambda value: f"enc:{value}")
+    with mysql_factory() as caller:
+        row = caller.query(UserApiConfig).filter_by(user_id=owner_id).one()
+        row.model = "caller-pending"
+        caller.flush()
+        with pytest.raises(policy.PolicyError, match="调用者仍有活动事务"):
+            api_config_service.save_config(caller, owner_id, ApiConfigSaveIn(
+                provider="openai", base_url="https://api.example.com", model="saved-model", api_key="saved-key",
+            ))
+        assert row.model == "caller-pending"
+        caller.rollback()
+    with mysql_factory() as db:
+        assert db.query(UserApiConfig).filter_by(user_id=owner_id).one().api_key_enc == "original"
+        assert policy.read(db, kind="user", owner_id=owner_id) == initial
+
+
+def test_real_save_waits_for_prior_failure_then_preserves_user_choice(mysql_factory, monkeypatch):
+    owner_id, initial = _setup(mysql_factory, monkeypatch, "user")
+    monkeypatch.setattr(api_config_service, "_CREDENTIAL_POLICY_SAVE_EXPERIMENT", True)
+    monkeypatch.setattr(api_config_service, "normalize_ai_base_url", lambda value, **_: value)
+    monkeypatch.setattr(api_config_service, "encrypt_api_key", lambda value: f"enc:{value}")
+    locked, release, waiting = Event(), Event(), Event()
+
+    def old_failure():
+        with mysql_factory.begin() as db:
+            policy.mark_failed(db, initial)
+            locked.set()
+            if not release.wait(10):
+                raise RuntimeError("new save did not start")
+
+    def real_save():
+        with mysql_factory() as db:
+            waiting.set()
+            return api_config_service.save_config(db, owner_id, ApiConfigSaveIn(
+                provider="custom", base_url="https://next.example.com", model="next-model", api_key="next-key",
+            ))
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        old = executor.submit(old_failure)
+        try:
+            assert locked.wait(10)
+            new = executor.submit(real_save)
+            assert waiting.wait(10)
+            with pytest.raises(TimeoutError):
+                new.result(timeout=0.2)
+        finally:
+            release.set()
+        old.result(timeout=10)
+        assert new.result(timeout=10).model == "next-model"
+    with mysql_factory() as db:
+        row = db.query(UserApiConfig).filter_by(user_id=owner_id).one()
+        assert row.is_active and row.api_key_enc == "enc:next-key" and row.provider == "custom"
+        assert policy.read(db, kind="user", owner_id=owner_id).revision == initial.revision + 2
+
+
+def test_real_save_failure_rolls_back_config_and_version(mysql_factory, monkeypatch):
+    owner_id, initial = _setup(mysql_factory, monkeypatch, "user")
+    monkeypatch.setattr(api_config_service, "_CREDENTIAL_POLICY_SAVE_EXPERIMENT", True)
+    monkeypatch.setattr(api_config_service, "normalize_ai_base_url", lambda value, **_: value)
+    monkeypatch.setattr(api_config_service, "encrypt_api_key", lambda value: f"enc:{value}")
+    original_save = policy.save_current_user_configuration
+
+    def fail_after_flush(*args, **kwargs):
+        original_save(*args, **kwargs)
+        raise RuntimeError("failure after both writes")
+
+    monkeypatch.setattr(policy, "save_current_user_configuration", fail_after_flush)
+    with mysql_factory() as db, pytest.raises(RuntimeError, match="failure after both writes"):
+        api_config_service.save_config(db, owner_id, ApiConfigSaveIn(
+            provider="custom", base_url="https://next.example.com", model="next-model", api_key="next-key",
+        ))
+    with mysql_factory() as db:
+        row = db.query(UserApiConfig).filter_by(user_id=owner_id).one()
+        assert row.api_key_enc == "original" and row.is_active
+        assert policy.read(db, kind="user", owner_id=owner_id) == initial
 
 
 def test_real_config_and_policy_share_rollback_with_caller_write(mysql_factory, monkeypatch):

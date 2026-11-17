@@ -216,6 +216,40 @@ def replace_key(db: Session, expected: Snapshot, *, ciphertext: str, user_config
     return _apply(db, expected, "replace", ciphertext=ciphertext, user_config=user_config)
 
 
+def save_current_user_configuration(
+    db: Session, *, owner_id: int, ciphertext: str, provider: str, base_url: str, model: str,
+):
+    """Save the real user row and version together; caller owns the transaction.
+
+    The caller must validate URL and encrypt the key before entering this short
+    transaction. This experiment is not a complete writer or send fence.
+    """
+    _ready(db, "user", owner_id)
+    fields = ((ciphertext, 512), (provider, 32), (base_url, 512), (model, 128))
+    if any(not isinstance(value, str) or not value or len(value) > limit for value, limit in fields):
+        raise PolicyError("用户配置无效")
+    with db.no_autoflush:
+        record, config = _current(db, "user", owner_id)
+        if record.revision >= _MAX_REVISION:
+            raise PolicyConflict("凭据版本已耗尽")
+        with db.begin_nested():
+            if config is None:
+                config = UserApiConfig(user_id=owner_id)
+                db.add(config)
+                record.incarnation = secrets.token_bytes(16)
+            config.provider = provider
+            config.base_url = base_url
+            config.model = model
+            config.api_key_enc = ciphertext
+            config.is_active = True
+            record.state = "active"
+            db.flush()
+            record.config_digest = _digest("user", config)
+            record.revision += 1
+            db.flush()
+        return _snapshot(record), config
+
+
 def choose_system(db: Session, expected: Snapshot) -> Snapshot:
     return _apply(db, expected, "system")
 
