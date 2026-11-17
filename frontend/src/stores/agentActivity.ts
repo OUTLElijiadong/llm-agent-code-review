@@ -23,6 +23,11 @@ export interface AgentActivityItem {
   label: string
   /** 可选的操作目标语义(用于虚拟鼠标定位提示,如页面区域) */
   targetHint?: string
+  /** 隔离用户与管理会话的工具生命周期。 */
+  scope?: 'user' | 'admin'
+  /** 同一 surface 中将实时流与会话隔离；不传时保持原有行为。 */
+  owner?: string
+  sessionId?: string
 }
 
 let sequence = 0
@@ -48,10 +53,19 @@ export const useAgentActivityStore = defineStore('agentActivity', () => {
    * @param targetHint 可选目标区域语义
    * @returns 实际使用的 key(end 时回传)
    */
-  function begin(label: string, key?: string, targetHint?: string): string {
+  function storageKey(key: string, scope?: 'user' | 'admin', owner?: string): string {
+    if (owner !== undefined) return `\u0000stream\u0000${JSON.stringify([scope, owner, key])}`
+    return scope ? `\u0000${scope}\u0000${key}` : key.startsWith('\u0000') ? `\u0000legacy\u0000${key}` : key
+  }
+
+  function begin(label: string, key?: string, targetHint?: string, scope?: 'user' | 'admin', owner?: string, sessionId?: string): string {
     const id = key?.trim() || `act-${++sequence}`
+    const storedId = storageKey(id, scope, owner)
+    window.clearTimeout(completionTimers.get(storedId))
+    completionTimers.delete(storedId)
     const next = new Map(active.value)
-    next.set(id, { key: id, label, targetHint })
+    next.delete(storedId)
+    next.set(storedId, { key: storedId, label, targetHint, scope, owner, sessionId })
     active.value = next
     return id
   }
@@ -60,36 +74,70 @@ export const useAgentActivityStore = defineStore('agentActivity', () => {
    * 标记一个页面操作结束。
    * @param key begin 返回的 key;缺省清空最新一个
    */
-  function end(key?: string): void {
+  function end(key?: string, scope?: 'user' | 'admin', owner?: string): void {
     if (!active.value.size) return
     const next = new Map(active.value)
-    if (key && next.has(key)) {
-      window.clearTimeout(completionTimers.get(key))
-      completionTimers.delete(key)
-      next.delete(key)
+    if (key !== undefined) {
+      const normalized = key.trim()
+      if (!normalized) return
+      const storedId = storageKey(normalized, scope, owner)
+      if (!next.has(storedId)) return
+      window.clearTimeout(completionTimers.get(storedId))
+      completionTimers.delete(storedId)
+      next.delete(storedId)
     } else {
-      const lastKey = [...next.keys()].pop()
-      if (lastKey !== undefined) next.delete(lastKey)
+      const lastKey = [...next.entries()].filter(([, item]) => item.scope === scope && item.owner === owner).pop()?.[0]
+      if (lastKey !== undefined) {
+        window.clearTimeout(completionTimers.get(lastKey))
+        completionTimers.delete(lastKey)
+        next.delete(lastKey)
+      }
     }
     active.value = next
   }
 
   /** 成功完成后延迟收起，让虚拟鼠标有时间抵达目标并显示点击反馈。 */
-  function complete(key: string, delayMs = 1650): void {
-    if (!active.value.has(key)) return
-    window.clearTimeout(completionTimers.get(key))
-    completionTimers.set(key, window.setTimeout(() => {
-      completionTimers.delete(key)
-      end(key)
+  function complete(key: string, delayMs = 1650, scope?: 'user' | 'admin', owner?: string): void {
+    const normalized = key.trim()
+    if (!normalized) return
+    const storedId = storageKey(normalized, scope, owner)
+    if (!active.value.has(storedId)) return
+    window.clearTimeout(completionTimers.get(storedId))
+    completionTimers.set(storedId, window.setTimeout(() => {
+      completionTimers.delete(storedId)
+      end(normalized, scope, owner)
     }, Math.max(0, delayMs)))
   }
 
   /** 清空全部活动(会话切换/登出时兜底)。 */
-  function clear(): void {
-    for (const timer of completionTimers.values()) window.clearTimeout(timer)
-    completionTimers.clear()
-    active.value = new Map()
+  function clear(scope?: 'user' | 'admin', owner?: string): void {
+    if (!scope) {
+      for (const timer of completionTimers.values()) window.clearTimeout(timer)
+      completionTimers.clear()
+      active.value = new Map()
+      return
+    }
+    const next = new Map(active.value)
+    for (const [key, item] of next) {
+      if (item.scope !== scope || (owner !== undefined && (item.owner ?? '') !== owner)) continue
+      window.clearTimeout(completionTimers.get(key))
+      completionTimers.delete(key)
+      next.delete(key)
+    }
+    active.value = next
   }
 
-  return { active, phase, isActing, current, count, begin, end, complete, clear }
+  /** 切离会话后仅保留真实活动提示，不再让旧会话的目标触发页面导航。 */
+  function suppressSessionTargets(scope: 'user' | 'admin', sessionId: string): void {
+    const next = new Map(active.value)
+    let changed = false
+    for (const [key, item] of next) {
+      if (item.scope !== scope || item.sessionId !== sessionId || !item.targetHint) continue
+      next.set(key, { ...item, targetHint: undefined })
+      changed = true
+    }
+    if (changed) active.value = next
+  }
+
+  return { active, phase, isActing, current, count, begin, end, complete, clear, suppressSessionTargets }
 })

@@ -10,6 +10,7 @@ import type { UserRole } from '@/utils/roleHome'
 import { isNavigationPathAllowed } from '@/utils/agentNavigation'
 import UserAvatar from '@/components/common/UserAvatar.vue'
 import PrismMascot from '@/components/ai/PrismMascot.vue'
+import { adminAssistantUnreadKey } from '@/utils/assistantSurface'
 
 const route = useRoute()
 const router = useRouter()
@@ -32,6 +33,7 @@ interface SearchItem {
 const searchVisible = ref(false)
 const searchKeyword = ref('')
 const openAgentChat = inject<() => void>('openAgentChat', () => {})
+const adminUnread = inject(adminAssistantUnreadKey, ref(0))
 
 const crumbs = computed(() => {
   const titles: string[] = []
@@ -258,6 +260,7 @@ onBeforeUnmount(() => {
       <button v-if="canUseAgent" class="agent-trigger" type="button" aria-label="打开小菱助手" title="打开小菱助手" @click="openAgent">
         <PrismMascot class="agent-mascot" :size="26" />
         <span>小菱助手</span>
+        <i v-if="isAdmin && adminUnread" class="assistant-unread" aria-label="有未读异常"></i>
       </button>
 
       <el-dropdown trigger="click">
@@ -498,6 +501,7 @@ onBeforeUnmount(() => {
 }
 
 .agent-trigger {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -518,6 +522,8 @@ onBeforeUnmount(() => {
     box-shadow: 0 6px 16px -10px rgba(91, 88, 232, 0.52);
   }
 }
+
+.assistant-unread { position: absolute; top: 2px; right: 2px; width: 8px; height: 8px; border-radius: 50%; background: var(--agent-danger, #e64a62); }
 
 /* 用户区 ------------------------------ */
 .user-info {

@@ -30,6 +30,26 @@ describe('VirtualCursor real navigation click', () => {
     window.history.replaceState({}, '', '/')
   })
 
+  it('切离会话后取消旧目标尚未触发的导航，同时保留后台活动提示', async () => {
+    const navigate = vi.fn()
+    target = document.createElement('button')
+    target.dataset.route = '/reports'
+    target.getBoundingClientRect = () => ({ left: 20, top: 30, right: 140, bottom: 70, width: 120, height: 40 } as DOMRect)
+    target.addEventListener('click', navigate)
+    document.body.appendChild(target)
+    wrapper = mount(VirtualCursor, { global: { stubs: { Transition: false } } })
+    const store = useAgentActivityStore()
+    store.begin('旧会话任务', 'old-call', '/reports', 'user', 'old-stream', 'old-session')
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(700)
+    store.suppressSessionTargets('user', 'old-session')
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(navigate).not.toHaveBeenCalled()
+    expect(store.isActing).toBe(true)
+    expect(store.current?.targetHint).toBeUndefined()
+  })
+
   it.each(['success', 'redirect', 'account'] as const)('本地导航真实菜单回执：%s，仅真实到达且账号有效才结算成功', async outcome => {
     const history = createWebHistory()
     const router = createRouter({ history, routes: [

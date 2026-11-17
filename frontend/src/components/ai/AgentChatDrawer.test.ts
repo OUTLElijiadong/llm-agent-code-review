@@ -57,6 +57,7 @@ import {
   saveAgentChatSnapshot,
 } from '@/utils/agentChatSessions'
 import type { AgentTeamDetail, AgentTeamStatus } from '@/api/agentTeams'
+import type { XiaolingNavigationRequest } from '@/utils/xiaolingNavigation'
 
 function mountDrawer(prefill?: string, extraPlugins: Plugin[] = [], autoSendPrefill = false, host: Component = AgentChatDrawer): VueWrapper {
   return mount(host, {
@@ -121,6 +122,140 @@ function deferred<T>() {
   const promise = new Promise<T>((done) => { resolve = done })
   return { promise, resolve }
 }
+
+it.each(['account', 'session'] as const)('聊天正文链接的延迟导航不能在%s切换后执行', async change => {
+  const { createRouter, createMemoryHistory } = await import('vue-router')
+  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: {} }, { path: '/reports', component: {} }] })
+  await router.push('/')
+  const push = vi.spyOn(router, 'push')
+  const user = useUserStore()
+  user.token = 'user-a-token'
+  user.profile = { id: 1, username: 'a', role: 'user', status: 1 }
+  const wrapper = await mountReadyDrawer(undefined, [router])
+  let request: XiaolingNavigationRequest | undefined
+  const listener = (event: Event) => { request = (event as CustomEvent<XiaolingNavigationRequest>).detail; request.handled = true }
+  window.addEventListener('prism:xiaoling-navigate', listener)
+  try {
+    ;(wrapper.vm as any).followNavigation({ route: '/reports', label: '报告' })
+    expect(request).toBeDefined()
+    if (change === 'account') user.profile = { id: 2, username: 'b', role: 'user', status: 1 }
+    else {
+      const vm = wrapper.vm as any
+      const original = vm.sessionId
+      vm.sessionId = 'another-session'
+      vm.sessionId = original
+    }
+    request!.execute()
+    await flushPromises()
+    expect(push).not.toHaveBeenCalled()
+  } finally { window.removeEventListener('prism:xiaoling-navigate', listener); wrapper.unmount() }
+})
+
+it('切换同一 surface 的会话后仍跟踪旧流中的页面操作，失败后移除提示', async () => {
+  sessionApi.get.mockImplementation(async (surface: string, session_id: string) => ({ surface, session_id, run: null, messages: [], pending: null }))
+  const wrapper = await mountReadyDrawer()
+  try {
+    await wrapper.find('.chat-input').setValue('查看项目')
+    void wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+    emit(0, { type: 'response.created', response: { id: 'old-run', model: 'fixture' } })
+    emit(0, { type: 'response.tool.started', call_id: 'old-call', tool_name: 'user_execute_capability',
+      arguments: {}, page_action: { page: '/projects', capability: 'projects.list', phase: 'started', mutation: false } })
+    const activity = useAgentActivityStore()
+    expect(activity.count).toBe(1)
+    await (wrapper.vm as any).handleSessionSelect('second-session')
+    await flushPromises()
+    expect(streams.records[0].aborted).toBe(false)
+    expect(activity.count).toBe(1)
+    expect(activity.current?.targetHint).toBeUndefined()
+    emit(0, { type: 'response.tool.failed', call_id: 'old-call', tool_name: 'user_execute_capability', error: 'failed' })
+    expect(activity.count).toBe(0)
+    emit(0, { type: 'response.tool.started', call_id: 'background-call', tool_name: 'user_execute_capability',
+      arguments: {}, page_action: { page: '/reports', capability: 'reports.list', phase: 'started', mutation: false } })
+    expect(activity.count).toBe(1)
+    expect(activity.current?.targetHint).toBeUndefined()
+    emit(0, { type: 'response.completed', response: { id: 'old-run' } })
+    expect(activity.count).toBe(0)
+    expect((wrapper.vm as any).sessionId).toBe('second-session')
+  } finally { wrapper.unmount() }
+})
+
+it('切换账号时断开旧后台流，迟到活动事件不能影响新账号', async () => {
+  sessionApi.get.mockImplementation(async (surface: string, session_id: string) => ({ surface, session_id, run: null, messages: [], pending: null }))
+  const user = useUserStore()
+  user.profile = { id: 101, username: 'alice', role: 'user', status: 1 }
+  const wrapper = await mountReadyDrawer()
+  try {
+    await wrapper.find('.chat-input').setValue('查看项目')
+    void wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+    await (wrapper.vm as any).handleSessionSelect('second-session')
+    await flushPromises()
+    user.profile = { id: 202, username: 'bob', role: 'user', status: 1 }
+    await flushPromises()
+    expect(streams.records[0].aborted).toBe(true)
+    emit(0, { type: 'response.tool.started', call_id: 'late', tool_name: 'user_execute_capability', arguments: {},
+      page_action: { page: '/projects', capability: 'projects.list', phase: 'started', mutation: false } })
+    expect(useAgentActivityStore().count).toBe(0)
+  } finally { wrapper.unmount() }
+})
+
+it('停止回执在切换会话后到达时只关闭原会话流', async () => {
+  sessionApi.get.mockImplementation(async (surface: string, session_id: string) => ({ surface, session_id, run: null, messages: [], pending: null }))
+  const cancel = deferred<any>()
+  responseApi.cancel.mockReturnValueOnce(cancel.promise)
+  const wrapper = await mountReadyDrawer()
+  try {
+    const vm = wrapper.vm as any
+    await wrapper.find('.chat-input').setValue('旧任务')
+    void wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+    const oldRun = streams.records[0].body.run_id
+    emit(0, { type: 'response.created', response: { id: oldRun, model: 'fixture' } })
+    const stopping = vm.cancelResponse()
+    await vm.handleSessionSelect('second-session')
+    await flushPromises()
+    await wrapper.find('.chat-input').setValue('新任务')
+    void wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+    expect(streams.records).toHaveLength(2)
+    cancel.resolve({ run_id: oldRun, status: 'cancelled', output_text: '', error: '' })
+    await stopping
+    await flushPromises()
+    expect(streams.records[0].aborted).toBe(true)
+    expect(streams.records[1].aborted).toBe(false)
+    expect(vm.sessionId).toBe('second-session')
+  } finally { wrapper.unmount() }
+})
+
+it('旧运行的停止回执不会中断同一会话中更新的运行', async () => {
+  sessionApi.get.mockImplementation(async (surface: string, session_id: string) => ({ surface, session_id, run: null, messages: [], pending: null }))
+  const cancel = deferred<any>()
+  responseApi.cancel.mockReturnValueOnce(cancel.promise)
+  const wrapper = await mountReadyDrawer()
+  try {
+    const vm = wrapper.vm as any
+    await wrapper.find('.chat-input').setValue('旧任务')
+    void wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+    const oldRun = streams.records[0].body.run_id
+    emit(0, { type: 'response.created', response: { id: oldRun, model: 'fixture' } })
+    const stopping = vm.cancelResponse()
+    void vm.runResponse({ action: 'start', surface: 'user', session_id: vm.sessionId, run_id: 'new-run', messages: [] })
+    await flushPromises()
+    expect(streams.records).toHaveLength(2)
+    emit(0, { type: 'response.output_text.delta', delta: '旧运行的迟到内容' })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('旧运行的迟到内容')
+    cancel.resolve({ run_id: oldRun, status: 'cancelled', output_text: '', error: '' })
+    await stopping
+    await flushPromises()
+    expect(streams.records[0].aborted).toBe(true)
+    expect(streams.records[1].aborted).toBe(false)
+    expect(vm.sessionRun.run_id).toBe('new-run')
+    expect(vm.loading).toBe(true)
+  } finally { wrapper.unmount() }
+})
 
 beforeEach(() => {
   window.localStorage.clear()

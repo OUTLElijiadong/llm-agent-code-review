@@ -23,6 +23,7 @@ vi.mock('vue-router', () => ({
 vi.mock('@/stores/user', () => ({
   useUserStore: () => ({
     token: 'token',
+    profile: { id: 1, role: 'user', status: 1 },
     isAdmin: () => false,
     isSuperAdmin: () => false,
     hasRole: () => true,
