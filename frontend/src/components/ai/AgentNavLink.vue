@@ -14,17 +14,20 @@ import { TopRight } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { isNavigationPathAllowed } from '@/utils/agentNavigation'
 import { requestXiaolingNavigation } from '@/utils/xiaolingNavigation'
+import { useXiaolingNavigationGuard } from '@/composables/useXiaolingNavigationGuard'
 
 const props = defineProps<{
   href: string
   label: string
   hint?: string
+  sessionId?: string
   /** 显式指令导航(模型发出的"带我去"按钮)时加粗展示 */
   prominent?: boolean
 }>()
 
 const router = useRouter()
 const userStore = useUserStore()
+const captureNavigation = useXiaolingNavigationGuard(router, () => props.sessionId || '')
 
 const resolved = computed(() => {
   if (!props.href.startsWith('/') || props.href.startsWith('//')) return null
@@ -44,11 +47,14 @@ const allowed = computed(() => {
 function navigate(event: MouseEvent): void {
   if (!allowed.value || !resolved.value) return
   const fullPath = resolved.value.fullPath
+  const canExecute = captureNavigation(fullPath)
+  if (!canExecute()) return
   requestXiaolingNavigation(
     fullPath,
     props.label,
     () => router.push(fullPath),
     event.currentTarget as HTMLElement | null,
+    { canExecute, onSettled: () => undefined },
   )
 }
 </script>

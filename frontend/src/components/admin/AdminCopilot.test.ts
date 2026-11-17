@@ -52,6 +52,92 @@ import AdminLayout from './AdminLayout.vue'
 import { useAgentActivityStore } from '@/stores/agentActivity'
 import { useUserStore } from '@/stores/user'
 import { loadAgentChatSnapshot, saveAgentChatSnapshot } from '@/utils/agentChatSessions'
+import type { XiaolingNavigationRequest } from '@/utils/xiaolingNavigation'
+
+it.each(['role', 'session'] as const)('管理正文链接的延迟导航在%s变化后不可执行', async change => {
+  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: {} }, { path: '/admin/platform', component: {}, meta: { role: 'admin' } }] })
+  await router.push('/')
+  const push = vi.spyOn(router, 'push')
+  const wrapper = mountCopilot([router])
+  const user = useUserStore()
+  user.token = 'admin-a-token'
+  user.profile = { id: 1, username: 'a', role: 'admin', status: 1 }
+  let request: XiaolingNavigationRequest | undefined
+  const listener = (event: Event) => { request = (event as CustomEvent<XiaolingNavigationRequest>).detail; request.handled = true }
+  window.addEventListener('prism:xiaoling-navigate', listener)
+  try {
+    await openCopilot(wrapper)
+    await flushSessionRestore()
+    ;(wrapper.vm as any).followNavigation({ route: '/admin/platform', label: '平台配置' })
+    expect(request).toBeDefined()
+    if (change === 'role') user.profile = { id: 1, username: 'a', role: 'user', status: 1 }
+    else {
+      const vm = wrapper.vm as any
+      const original = vm.sessionId
+      vm.sessionId = 'another-session'
+      vm.sessionId = original
+    }
+    request!.execute()
+    await flushPromises()
+    expect(push).not.toHaveBeenCalled()
+  } finally { window.removeEventListener('prism:xiaoling-navigate', listener); wrapper.unmount() }
+})
+
+it('管理端切换会话后持续跟踪原流，并在断线时只清除原流的活动', async () => {
+  sessionApi.get.mockImplementation(async (surface: string, session_id: string) => ({ surface, session_id, run: null, messages: [], pending: null }))
+  const wrapper = mountCopilot()
+  try {
+    await openCopilot(wrapper)
+    await flushSessionRestore()
+    await wrapper.get('textarea').setValue('查看平台')
+    void wrapper.get('.send-button').trigger('click')
+    await flushPromises()
+    emit(0, { type: 'response.created', response: { id: 'admin-old-run', model: 'fixture' } })
+    emit(0, { type: 'response.tool.started', call_id: 'same-call', tool_name: 'admin_execute_capability',
+      arguments: {}, page_action: { page: '/admin/platform', capability: 'platform.list', phase: 'started', mutation: false } })
+    const activity = useAgentActivityStore()
+    expect(activity.count).toBe(1)
+    await (wrapper.vm as any).handleSessionSelect('admin-second-session')
+    await flushPromises()
+    expect(streams.records[0].aborted).toBe(false)
+    expect(activity.count).toBe(1)
+    activity.begin('另一会话操作', 'same-call', undefined, 'admin', 'other', 'admin-second-session')
+    streams.records[0].reject(new Error('断线'))
+    await flushPromises()
+    expect(activity.count).toBe(1)
+    expect(activity.current?.label).toBe('另一会话操作')
+    expect((wrapper.vm as any).sessionId).toBe('admin-second-session')
+  } finally { wrapper.unmount() }
+})
+
+it('管理停止回执在切换会话后到达时只关闭原会话流', async () => {
+  sessionApi.get.mockImplementation(async (surface: string, session_id: string) => ({ surface, session_id, run: null, messages: [], pending: null }))
+  const cancel = deferred<any>()
+  sessionApi.cancel.mockReturnValueOnce(cancel.promise)
+  const wrapper = mountCopilot()
+  try {
+    await openCopilot(wrapper)
+    await flushSessionRestore()
+    const vm = wrapper.vm as any
+    await wrapper.get('textarea').setValue('旧任务')
+    void wrapper.get('.send-button').trigger('click')
+    await flushPromises()
+    emit(0, { type: 'response.created', response: { id: 'admin-old-run', model: 'fixture' } })
+    const stopping = vm.cancelResponse()
+    await vm.handleSessionSelect('admin-second-session')
+    await flushSessionRestore()
+    await wrapper.get('textarea').setValue('新任务')
+    void wrapper.get('.send-button').trigger('click')
+    await flushPromises()
+    expect(streams.records).toHaveLength(2)
+    cancel.resolve({ run_id: 'admin-old-run', status: 'cancelled', output_text: '', error: '' })
+    await stopping
+    await flushPromises()
+    expect(streams.records[0].aborted).toBe(true)
+    expect(streams.records[1].aborted).toBe(false)
+    expect(vm.sessionId).toBe('admin-second-session')
+  } finally { wrapper.unmount() }
+})
 
 it.each(['打开用户与权限', '打开管理员的用户与权限'])('管理端页面请求“%s”发送给团队，不直接跳转', async prompt => {
   const router = createRouter({ history: createMemoryHistory(), routes: [
@@ -199,8 +285,8 @@ it('新建对话立即清空旧运行计时、沙箱进度和会话详情状态'
     vm.toggleTable('old-table')
     vm.thinkingCityOpen = true
     const activity = useAgentActivityStore()
-    activity.begin('旧会话页面操作', 'old-page-action')
-    activity.complete('old-page-action')
+    activity.begin('旧会话页面操作', 'old-page-action', undefined, 'admin')
+    activity.complete('old-page-action', undefined, 'admin')
     await nextTick()
     expect(wrapper.find('.xl-steps').exists()).toBe(true)
     expect(vm.runningSinceMs).toEqual(expect.any(Number))
@@ -226,7 +312,8 @@ it('新建对话立即清空旧运行计时、沙箱进度和会话详情状态'
     await finish(0)
     expect(wrapper.find('.xl-steps').exists()).toBe(false)
     expect(vm.sessionRun).toBeNull()
-    expect(streams.records[0].aborted).toBe(true)
+    // 切换时脱离旧流的对话视图，但保留生命周期监听；旧内容不得写入新会话。
+    expect(streams.records[0].aborted).toBe(false)
     expect(streams.start).toHaveBeenCalledTimes(1)
   } finally { wrapper.unmount() }
 })
@@ -268,9 +355,9 @@ it.each(['恢复快照', '流式事件'])('权威空恢复移除%s留下的旧�
     vm.sandboxProgress = '旧运行进度'
     vm.lastActiveToolName = 'users.list'
     const activity = useAgentActivityStore()
-    activity.begin('旧运行活动', 'old-empty-restore')
+    activity.begin('旧运行活动', 'old-empty-restore', undefined, 'admin')
     // 上述旧运行已 completed，其活动按正常完成流程结束；活跃活动保留由下方 P1 用例覆盖。
-    activity.complete('old-empty-restore', 0)
+    activity.complete('old-empty-restore', 0, 'admin')
     await flushSessionRestore()
     await vm.restoreSession()
     await flushSessionRestore()
@@ -852,6 +939,7 @@ describe('安全中心小菱页头入口', () => {
 
       const slot = fixture.layout.get('#admin-copilot-trigger-slot')
       expect(slot.find('.copilot-trigger.is-busy .unread-dot').exists()).toBe(true)
+      expect(fixture.copilot.emitted('unread-change')?.some(args => Number(args[0]) > 0)).toBe(true)
       await fixture.router.push('/admin/operations')
       await flushPromises()
       expect(slot.find('.copilot-trigger.is-busy .unread-dot').exists()).toBe(true)
@@ -865,6 +953,7 @@ describe('安全中心小菱页头入口', () => {
       await openCopilot(fixture.copilot)
       expect(fixture.copilot.text()).toContain('后台运行回复仍保留')
       expect(slot.find('.unread-dot').exists()).toBe(false)
+      expect(fixture.copilot.emitted('unread-change')?.at(-1)).toEqual([0])
       emit(0, { type: 'response.completed', response: { id: 'header-route-run' } })
       await finish(0)
     } finally {

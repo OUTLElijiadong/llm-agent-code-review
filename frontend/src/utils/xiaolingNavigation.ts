@@ -37,10 +37,17 @@ export function requestXiaolingNavigation(
   lifecycle: Pick<XiaolingNavigationRequest, 'canExecute' | 'confirmResult' | 'onSettled'> = {},
 ): boolean {
   if (!isSafeXiaolingRoute(route)) return false
+  const guardedExecute = () => {
+    if (lifecycle.canExecute && !lifecycle.canExecute()) {
+      lifecycle.onSettled?.(false)
+      return
+    }
+    return execute()
+  }
   const detail: XiaolingNavigationRequest = {
     route,
     label: label.trim() || '目标页面',
-    execute,
+    execute: guardedExecute,
     sourceElement,
     handled: false,
     ...lifecycle,
@@ -48,7 +55,7 @@ export function requestXiaolingNavigation(
   window.dispatchEvent(new CustomEvent<XiaolingNavigationRequest>(XIAOLING_NAVIGATION_EVENT, { detail }))
   if (!detail.handled) {
     // 无全局光标时也要吸收导航失败,不让路由 Promise 变成全局未处理异常。
-    void Promise.resolve(execute()).catch(() => undefined)
+    void Promise.resolve(guardedExecute()).catch(() => undefined)
   }
   return true
 }

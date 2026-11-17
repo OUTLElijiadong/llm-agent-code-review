@@ -1,5 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { nextTick, ref } from 'vue'
+import { adminAssistantUnreadKey } from '@/utils/assistantSurface'
 
 const harness = vi.hoisted(() => ({
   permission: true,
@@ -51,10 +53,10 @@ vi.mock('@/stores/workspace', () => ({
 
 import AppHeader from './AppHeader.vue'
 
-function mountHeader(openAgentChat = vi.fn()) {
+function mountHeader(openAgentChat = vi.fn(), adminUnread = ref(0)) {
   return mount(AppHeader, {
     global: {
-      provide: { openAgentChat },
+      provide: { openAgentChat, [adminAssistantUnreadKey as symbol]: adminUnread },
       stubs: {
         'el-icon': true,
         'el-dialog': { template: '<section><slot /></section>' },
@@ -68,6 +70,20 @@ function mountHeader(openAgentChat = vi.fn()) {
 }
 
 describe('AppHeader navigation visibility', () => {
+  it('管理员未读提醒跟随共享状态显示在唯一入口', async () => {
+    harness.role = 'admin'
+    const unread = ref(2)
+    const wrapper = mountHeader(vi.fn(), unread)
+    expect(wrapper.find('.agent-trigger .assistant-unread').exists()).toBe(true)
+    unread.value = 0
+    await nextTick()
+    expect(wrapper.find('.agent-trigger .assistant-unread').exists()).toBe(false)
+    wrapper.unmount()
+    harness.role = 'user'
+    const userHeader = mountHeader(vi.fn(), ref(2))
+    expect(userHeader.find('.agent-trigger .assistant-unread').exists()).toBe(false)
+    userHeader.unmount()
+  })
   beforeEach(() => {
     harness.permission = true
     harness.agentPermission = true

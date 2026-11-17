@@ -24,6 +24,7 @@ import {
 import { isAgentMeshResponseDeferred, cancelAgentResponseRun, getAgentResponseSession, getAgentResponseSessionMessages, type AgentResponseSession, type AgentResponseImageAsset } from '@/api/agentResponses'
 import { AgentSessionHistoryWindow } from '@/utils/agentSessionHistory'
 import { isAdminSharedRoute } from '@/utils/adminSharedLayout'
+import AssistantSurfaceSwitch from '@/components/ai/AssistantSurfaceSwitch.vue'
 import {
   acknowledgeAgentMeshMessage,
   archiveAgentMeshSession,
@@ -55,6 +56,7 @@ import {
   renderAuthorizedAgentMarkdown,
 } from '@/utils/agentNavigation'
 import { requestXiaolingNavigation } from '@/utils/xiaolingNavigation'
+import { useXiaolingNavigationGuard } from '@/composables/useXiaolingNavigationGuard'
 import { mergeLocalNavigationMessages, type LocalNavigationAction } from '@/utils/agentLocalNavigation'
 import { useUserStore } from '@/stores/user'
 import type { AgentNavigateDirective } from '@/types/agentGuide'
@@ -203,6 +205,9 @@ const uploadPercent = computed(() => {
 const dragActive = ref(false)
 const imageInput = ref<HTMLInputElement>()
 const unreadAlerts = ref(0)
+const props = withDefaults(defineProps<{ showLauncher?: boolean }>(), { showLauncher: true })
+const emit = defineEmits<{ 'unread-change': [count: number]; 'switch-surface': [surface: 'user' | 'admin'] }>()
+watch(unreadAlerts, count => emit('unread-change', count), { immediate: true })
 const messageArea = ref<HTMLElement | null>(null)
 const {
   panelRef, style: panelStyle, dragging, resizing, restoreOrAnchor,
@@ -329,6 +334,7 @@ const chatStorageKey = computed(() => agentChatStorageKey('admin', userStore.pro
 const activityStore = useAgentActivityStore()
 
 const sessionId = ref('')
+const captureNavigation = useXiaolingNavigationGuard(router, () => sessionId.value)
 const siteBrowser = useSiteBrowserBridge({ surface: 'admin', sessionId: () => sessionId.value,
   runId: () => sessionRun.value?.run_id || '', status: () => sessionRun.value?.status || '',
   isStopped: () => {
@@ -354,6 +360,7 @@ const runningElapsedLabel = computed(() => {
 })
 
 let activeResponse: ResponsesStreamHandle | null = null
+const responseStreams = new Map<string, { sessionId: string; runId: string; handle: ResponsesStreamHandle }>()
 let restoreGeneration = 0
 let sessionPollTimer: number | undefined
 let sessionPollStopped = false
@@ -514,7 +521,7 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   if (hasRealContent || sessionRun.value?.status) persistSnapshot()
   rememberCurrentDraft()
   if (wasBusy) switcherRef.value?.setBusy(sessionId.value, true)
-  activeResponse?.abort()
+  activityStore.suppressSessionTargets('admin', sessionId.value)
   activeResponse = null
   agentTeamRefreshGeneration += 1
   sessionPollStopped = true
@@ -537,7 +544,7 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   agentTeamLoading.value = false
   agentTeamError.value = ''
   resetSessionRuntime()
-  activityStore.clear()
+  activityStore.clear('admin', '')
   sessionRestoring.value = true
   messages.value = [welcomeEntry()]
   await forceScrollToBottom()
@@ -1242,10 +1249,14 @@ async function forceScrollToBottom(): Promise<void> {
  */
 function followNavigation(directive: AgentNavigateDirective): void {
   if (!isNavigationPathAllowed(router, directive.route, userStore)) return
+  const canExecute = captureNavigation(directive.route)
+  if (!canExecute()) return
   requestXiaolingNavigation(
     directive.route,
     directive.label || '目标管理页',
     () => router.push(directive.route),
+    undefined,
+    { canExecute, onSettled: () => undefined },
   )
 }
 
@@ -1416,14 +1427,15 @@ async function openPanel(): Promise<void> {
   await forceScrollToBottom()
 }
 
-function closePanel(): void {
+function closePanel(restoreFocus = true): void {
   // 关闭前持久化运行状态,确保重开后能识别未完成会话(运行中/等待审批/等待输入)并跳回
   persistSnapshot()
   visible.value = false
+  if (restoreFocus) void nextTick(() => document.querySelector<HTMLButtonElement>('.agent-trigger, .copilot-trigger')?.focus())
 }
 
 function handleExternalClose(): void {
-  if (visible.value) closePanel()
+  if (visible.value) closePanel(false)
 }
 
 function setTimelineCallStatus(
@@ -1507,9 +1519,12 @@ async function retryRun(): Promise<void> {
 
 async function runResponse(payload: Record<string, unknown>, onDeferred?: () => void): Promise<boolean> {
   const scopeCurrent = chatScope.capture()
+  const accountCurrent = chatScope.captureAccount()
   const generation = submissionGeneration
   const requestedSessionId = sessionId.value
-  const isCurrentSubmission = () => scopeCurrent() && generation === submissionGeneration && requestedSessionId === sessionId.value
+  const activityOwner = crypto.randomUUID()
+  const sameView = () => scopeCurrent() && generation === submissionGeneration && requestedSessionId === sessionId.value
+  const isCurrentSubmission = () => sameView() && activeResponse === handle
   const meshStart = payload.action === 'start' && typeof payload.mesh_message_id === 'string' && Boolean(payload.mesh_message_id)
   const activeRoute = router?.currentRoute?.value
   const requestPayload = payload.action === 'start'
@@ -1575,6 +1590,18 @@ async function runResponse(payload: Record<string, unknown>, onDeferred?: () => 
 
   let deferred = false
   let pendingMeshResponse: Record<string, unknown> | null = null
+  function observeActivity(event: ResponseStreamEvent): void {
+    if (event.type === 'response.tool.started' && typeof event.tool_name === 'string'
+      && isPageActionTool(event.tool_name) && pageActionTargetHint(event)) {
+      activityStore.begin(toolRunningPhrase(event.tool_name, MASCOT_NAME), event.call_id, isCurrentSubmission() ? pageActionTargetHint(event) : undefined, 'admin', activityOwner, requestedSessionId)
+    } else if ((event.type === 'response.tool.completed' || event.type === 'response.tool.failed' || event.type === 'response.tool.rejected')
+      && typeof event.call_id === 'string') {
+      if (event.type === 'response.tool.completed') activityStore.complete(event.call_id, undefined, 'admin', activityOwner)
+      else activityStore.end(event.call_id, 'admin', activityOwner)
+    } else if (['response.completed', 'response.incomplete', 'response.failed', 'response.cancelled', 'error', 'auth_expired'].includes(event.type)) {
+      activityStore.clear('admin', activityOwner)
+    }
+  }
   const applyCreatedResponse = (response: Record<string, unknown>): void => {
     if (typeof response.id === 'string' && response.id) unconfirmedStart.value = null
     const runId = typeof response.id === 'string' ? response.id : sessionRun.value?.run_id ?? ''
@@ -1592,7 +1619,25 @@ async function runResponse(payload: Record<string, unknown>, onDeferred?: () => 
 
   const handle = streamResponses(requestPayload, {
     async onEvent(event) {
-      if (!isCurrentSubmission() || deferred) return
+      if (!accountCurrent() || deferred) return
+      if (event.type === 'response.created' && typeof event.response.id === 'string') {
+        const stream = responseStreams.get(activityOwner)
+        if (stream) stream.runId = event.response.id
+      }
+      if (!isCurrentSubmission()) {
+        if (isAgentMeshResponseDeferred(event, payload.mesh_message_id) && meshStart) {
+          deferred = true
+          activityStore.clear('admin', activityOwner)
+          return
+        }
+        if (event.type === 'response.created' && typeof event.response.id === 'string') activeRunId = event.response.id
+        if (activeRunId && isResponseRunResumeBlocked(activeRunId)) {
+          activityStore.clear('admin', activityOwner)
+          return
+        }
+        observeActivity(event)
+        return
+      }
       if (isAgentMeshResponseDeferred(event, payload.mesh_message_id) && meshStart) {
         deferred = true
         pendingMeshResponse = null
@@ -1647,18 +1692,8 @@ async function runResponse(payload: Record<string, unknown>, onDeferred?: () => 
             ElMessage.info(toolRunningPhrase(event.tool_name, MASCOT_NAME))
           }
           // 页面操作类:点亮彩框+虚拟鼠标,targetHint 带目标路由供真实定位
-          if (isPageActionTool(event.tool_name) && pageActionTargetHint(event)) {
-            activityStore.begin(toolRunningPhrase(event.tool_name, MASCOT_NAME), event.call_id, pageActionTargetHint(event))
-          }
-        } else if (
-          (event.type === 'response.tool.completed'
-            || event.type === 'response.tool.failed'
-            || event.type === 'response.tool.rejected')
-          && typeof event.call_id === 'string'
-        ) {
-          if (event.type === 'response.tool.completed') activityStore.complete(event.call_id)
-          else activityStore.end(event.call_id)
         }
+        observeActivity(event)
         if (!applyExistingTimelineToolEvent(event)) {
           applyResponseToolEvent(runToolCalls, event)
           syncTimeline()
@@ -1718,7 +1753,7 @@ async function runResponse(payload: Record<string, unknown>, onDeferred?: () => 
         lastActiveToolName.value = ''
         runningSinceMs.value = null
         sandboxProgress.value = ''
-        activityStore.clear()
+        activityStore.clear('admin', activityOwner)
         protocolError ||= eventErrorMessage(event)
         const terminalStatus = event.type === 'response.completed'
           ? 'completed'
@@ -1741,6 +1776,8 @@ async function runResponse(payload: Record<string, unknown>, onDeferred?: () => 
     },
   })
   activeResponse = handle
+  responseStreams.set(activityOwner, { sessionId: requestedSessionId,
+    runId: payload.action === 'start' ? '' : String(payload.run_id || sessionRun.value?.run_id || ''), handle })
   chatScope.track(handle)
 
   try {
@@ -1753,8 +1790,8 @@ async function runResponse(payload: Record<string, unknown>, onDeferred?: () => 
     }
     return true
   } catch (error) {
+    activityStore.clear('admin', activityOwner)
     if (!isCurrentSubmission() || deferred) return false
-    activityStore.clear()
     if (!(error instanceof Error && error.name === 'AbortError')) {
       const info = actionableError(error, 'Agent 请求失败')
       ElMessage.error(info.message)
@@ -1769,13 +1806,15 @@ async function runResponse(payload: Record<string, unknown>, onDeferred?: () => 
     }
     return false
   } finally {
+    responseStreams.delete(activityOwner)
+    activityStore.clear('admin', activityOwner)
     if (isCurrentSubmission()) {
-      if (activeResponse === handle) activeResponse = null
+      activeResponse = null
       loading.value = false
       showTyping.value = false
       syncBusy()
       await scrollToBottom()
-      if (isCurrentSubmission()) scheduleSessionPoll(deferred)
+      if (sameView() && activeResponse === null) scheduleSessionPoll(deferred)
     }
   }
 }
@@ -1804,11 +1843,15 @@ async function cancelResponse(reason = ''): Promise<void> {
       rememberResponseStop(cancelledResponseRunIds, runId)
       if (requestedSessionId === sessionId.value) settlePendingCancelledRunReceipts(runId)
     }
+    for (const [owner, stream] of responseStreams) {
+      if (stream.sessionId !== requestedSessionId || stream.runId !== runId) continue
+      activityStore.clear('admin', owner)
+      stream.handle.abort()
+    }
     if (!isCurrent()) return
     sessionRun.value = { ...sessionRun.value!, status: result.status, error: result.error || '', output_text: result.output_text }
-    activeResponse?.abort()
     activeResponse = null
-    activityStore.clear()
+    activityStore.clear('admin', '')
     loading.value = false
     showTyping.value = false
     syncBusy()
@@ -1837,10 +1880,14 @@ async function cancelResponse(reason = ''): Promise<void> {
     if (requestedSessionId === sessionId.value) {
       settlePendingCancelledRunReceipts(runId, '停止请求尚未确认，团队回执仅保留审计，不再自动续跑')
     }
+    for (const [owner, stream] of responseStreams) {
+      if (stream.sessionId !== requestedSessionId || stream.runId !== runId) continue
+      activityStore.clear('admin', owner)
+      stream.handle.abort()
+    }
     if (!isCurrent()) return
-    activeResponse?.abort()
     activeResponse = null
-    activityStore.clear()
+    activityStore.clear('admin', '')
     loading.value = false
     showTyping.value = false
     syncBusy()
@@ -2106,7 +2153,7 @@ watch([() => userStore.profile?.id, () => userStore.token], () => {
   dragActive.value = false
   cancelPromptVisible.value = false
   lastActiveToolName.value = ''
-  activityStore.clear()
+  activityStore.clear('admin')
   restoreGeneration += 1
   clearUnconfirmedStart()
   unreadAlerts.value = 0
@@ -2130,7 +2177,7 @@ onBeforeUnmount(() => {
   sessionPollStopped = true
   invalidateSessionPoll()
   activeResponse?.abort()
-  activityStore.clear()
+  activityStore.clear('admin')
   if (reconnectHintTimer !== undefined) window.clearTimeout(reconnectHintTimer)
   window.clearTimeout(copiedResetTimer)
   window.removeEventListener('keydown', handleKeydown)
@@ -2198,7 +2245,7 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
   <div class="admin-copilot" :class="{ 'is-open': visible }">
     <Teleport :to="triggerTeleportTarget">
       <button
-        v-if="!visible"
+        v-if="!visible && props.showLauncher !== false"
         class="copilot-trigger"
         :class="{ 'is-busy': mascotStatus !== 'idle', 'is-header-trigger': useAdminHeaderTrigger, 'is-floating-trigger': !useAdminHeaderTrigger }"
         type="button"
@@ -2215,6 +2262,7 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
       v-if="visible"
       ref="panelRef"
       class="copilot-panel"
+      data-assistant-panel="admin"
       :class="{ 'is-dragging': dragging, 'is-resizing': resizing, 'drag-over': dragActive }"
       :style="panelStyle"
       role="dialog"
@@ -2272,8 +2320,9 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
           </div>
         </div>
         <div class="copilot-header-actions">
+          <AssistantSurfaceSwitch current="admin" :admin-unread="unreadAlerts" @select="emit('switch-surface', $event)" />
           <div id="roundtable-admin-assistant-slot" class="roundtable-assistant-slot"></div>
-          <button class="icon-button" type="button" aria-label="收起管理副驾驶" title="收起" @click="closePanel">
+          <button class="icon-button" type="button" aria-label="收起管理副驾驶" title="收起" @click="closePanel()">
             <el-icon><Close /></el-icon>
           </button>
         </div>
@@ -2379,6 +2428,7 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
                 :href="nav.route"
                 :label="nav.label || '前往对应管理页'"
                 :hint="nav.hint"
+                :session-id="sessionId"
                 prominent
               />
             </div>
