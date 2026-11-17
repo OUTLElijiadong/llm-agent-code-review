@@ -6,6 +6,10 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 
 const api = vi.hoisted(() => ({
   getCopilotSecurityCenter: vi.fn(),
+  getSecOpsDigest: vi.fn(),
+  getSecOpsBaseline: vi.fn(),
+  getSecOpsPatrol: vi.fn(),
+  blockSecOpsSource: vi.fn(),
   getCopilotSecurityPolicy: vi.fn(),
   updateCopilotSecurityPolicy: vi.fn(),
   applyCopilotSecurityPreset: vi.fn(),
@@ -106,11 +110,15 @@ function render(): VueWrapper {
             return () => h('section', attrs, [slots.header?.(), slots.default?.()])
           },
         }),
-        // el-alert 的标题是具名插槽 #title，整改项的检查项名就在里面。
+        // el-alert 的标题既可能是具名插槽 #title，也可能是 title 属性（真实组件两种都支持）。
         'el-alert': defineComponent({
           inheritAttrs: false,
-          setup(_, { slots, attrs }) {
-            return () => h('div', { ...attrs, class: 'el-alert-stub' }, [slots.title?.(), slots.default?.()])
+          props: { title: String },
+          setup(props, { slots, attrs }) {
+            return () => h('div', { ...attrs, class: 'el-alert-stub' }, [
+              slots.title?.() ?? props.title,
+              slots.default?.(),
+            ])
           },
         }),
         'el-tag': passthrough('span'),
@@ -188,6 +196,30 @@ beforeEach(() => {
   vi.clearAllMocks()
   api.getCopilotSecurityCenter.mockResolvedValue(center)
   api.listCopilotSecurityEvents.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 0 })
+  api.getSecOpsDigest.mockResolvedValue({
+    window_hours: 24,
+    generated_at: '2026-11-17T12:00:00Z',
+    sensors: [{ action: 'nginx_attack_events', ok: true, events: 3, error: null }],
+    totals: { sources: 1, critical: 1, high: 0 },
+    sources: [{
+      ip: '45.135.228.155', hits: 5, sensors: ['nginx_attack_events', 'ssh_login_events'],
+      kinds: ['sql_injection'], severity: 'critical', geo: { country: '新加坡' },
+      last_seen: '2026-11-17T11:00:00Z', recommended: 'block',
+    }],
+    recommendations: ['存在多源同时命中的攻击源'],
+  })
+  api.getSecOpsBaseline.mockResolvedValue({
+    generated_at: '2026-11-17T12:00:00Z', base_url: 'https://example.test', score: 80,
+    checks: [
+      { key: 'openapi', title: 'OpenAPI/文档未公开', passed: false, detail: 'docs=200', remediation: 'Nginx 返回 404', weight: 3 },
+      { key: 'hsts', title: '响应头 strict-transport-security', passed: true, detail: 'max-age', remediation: '', weight: 2 },
+    ],
+    failed: ['openapi'], remediations: ['Nginx 返回 404'],
+  })
+  api.getSecOpsPatrol.mockResolvedValue({
+    auto_block_enabled: false, patrol_enabled: true, public_base_url: 'https://example.test',
+    asset_hosts: ['example.test'], last_run: {}, recent: [],
+  })
   api.updateCopilotSecurityPolicy.mockResolvedValue({ policy, changed: ['deny_shell'], posture: center.posture })
   api.applyCopilotSecurityPreset.mockResolvedValue({ policy: { ...policy, preset: 'max' }, changed: ['preset'], posture: center.posture })
 })
@@ -203,6 +235,20 @@ describe('小菱安全中心', () => {
     expect(wrapper.get('[data-preset="balanced"]').classes()).toContain('is-current')
     expect(wrapper.text()).toContain('配置 IP 白名单')
     expect(wrapper.text()).toContain('至少填一条可信网段')
+    wrapper.unmount()
+  })
+
+  it('安全运营卡片展示攻击源研判与自身基线', async () => {
+    const user = useUserStore()
+    user.profile = { id: 1, username: 'admin', role: 'super_admin', status: 1 }
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="secops-card"]').text()).toContain('安全运营')
+    expect(wrapper.text()).toContain('45.135.228.155')
+    expect(wrapper.text()).toContain('critical')
+    expect(wrapper.text()).toContain('OpenAPI/文档未公开')
+    expect(api.getSecOpsDigest).toHaveBeenCalled()
+    expect(api.getSecOpsBaseline).toHaveBeenCalled()
     wrapper.unmount()
   })
 

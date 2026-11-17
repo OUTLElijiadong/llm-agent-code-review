@@ -224,7 +224,8 @@ def test_all_registered_capabilities_bind_existing_openapi_operations() -> None:
     openapi = app.openapi()
     # 固定角色模型移除新建角色与页面未使用的逐用户角色查询能力。
     # 小菱安全中心新增 10 条（读 7 + 写/停机 3），基线 145 → 155。
-    assert len(ADMIN_CAPABILITIES) == 155
+    # 小菱安全运营新增 8 条，基线 155 → 163。
+    assert len(ADMIN_CAPABILITIES) == 163
     assert len(CAPABILITY_BY_CODE) == len(ADMIN_CAPABILITIES)
     for spec in ADMIN_CAPABILITIES:
         contract = operation_contract(spec, openapi)

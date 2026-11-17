@@ -6,6 +6,11 @@
 import { get, post, put } from './http'
 import type {
   CopilotSecurityCenterOut,
+  SecOpsBaselineOut,
+  SecOpsBlockOut,
+  SecOpsCandidatesOut,
+  SecOpsDigestOut,
+  SecOpsPatrolOut,
   CopilotSecurityEventListOut,
   CopilotSecurityEventQuery,
   CopilotSecurityKillSwitchIn,
@@ -68,4 +73,46 @@ export function listCopilotSecurityEvents(
   query: CopilotSecurityEventQuery,
 ): Promise<CopilotSecurityEventListOut> {
   return get<CopilotSecurityEventListOut>(`${BASE}/events`, query)
+}
+
+// ── 小菱安全运营（自动化攻防）────────────────────────────────────────────────
+
+/** 多源攻击研判 */
+export function getSecOpsDigest(hours = 24, limit = 200): Promise<SecOpsDigestOut> {
+  return get<SecOpsDigestOut>('/admin/secops/digest', { hours, limit })
+}
+
+/** 自身攻击面盘点 */
+export function getSecOpsSurface(): Promise<{ available: boolean; surface: Record<string, unknown> }> {
+  return get<{ available: boolean; surface: Record<string, unknown> }>('/admin/secops/surface')
+}
+
+/** 自动封禁候选 */
+export function getSecOpsCandidates(): Promise<SecOpsCandidatesOut> {
+  return get<SecOpsCandidatesOut>('/admin/secops/candidates')
+}
+
+/** 自身安全基线 */
+export function getSecOpsBaseline(): Promise<SecOpsBaselineOut> {
+  return get<SecOpsBaselineOut>('/admin/secops/baseline')
+}
+
+/** 巡检状态 */
+export function getSecOpsPatrol(): Promise<SecOpsPatrolOut> {
+  return get<SecOpsPatrolOut>('/admin/secops/patrol')
+}
+
+/** 封禁一个攻击源（需超级管理员 + confirm） */
+export function blockSecOpsSource(payload: {
+  ip: string
+  reason: string
+  duration_seconds: number
+  confirm: boolean
+}): Promise<SecOpsBlockOut> {
+  return post<SecOpsBlockOut>('/admin/secops/block', payload)
+}
+
+/** 解封一个来源 */
+export function releaseSecOpsSource(payload: { ip: string; reason: string }): Promise<SecOpsBlockOut> {
+  return post<SecOpsBlockOut>('/admin/secops/release', payload)
 }

@@ -296,6 +296,15 @@ class Settings(BaseSettings):
     security_backup_dir_max_gb: int = 10
     # 弹窗最低严重度：info<warning<high<critical
     security_popup_min_severity: str = "warning"
+    # ── 小菱安全运营（SecOps，自动化攻防编排）──
+    # 定时巡检：把四类传感器聚合成攻击源画像并生成告警（不落地封禁）。
+    secops_patrol_enabled: bool = True
+    # 自动封禁：默认关；打开后只处理"多源同时命中且不在白名单"的来源，每轮至多 5 个。
+    secops_auto_block_enabled: bool = False
+    # 基线核查探测的自有地址（如 https://lijiadong.cn）；留空则跳过网络探测。
+    secops_public_base_url: str = ""
+    # 允许作为渗透测试目标的自有主机名清单；为空时拒绝任何指向外部地址的委托。
+    secops_asset_hosts: List[str] = []
     # 被动溯源情报服务固定前缀（执行器侧再做 URL 白名单校验）
     threat_intel_base_url: str = "http://ip-api.com/json"
     # 生产数据库内部威胁信号巡检（只读 mysql.general_log 采样；须先由运维开启

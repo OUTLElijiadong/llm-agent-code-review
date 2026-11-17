@@ -81,7 +81,7 @@ def route_inventory():
     # 新增企业本人会话计费预览；由服务层校验会话与企业成员权限。
     # 微信资金账单新增四条超管接口，写入时还会重验原 JWT 与当前角色。
     # 澄清 GET、decision、resume 三条接口均有当前用户依赖，资源权限由服务层按会话成员和权限等级复核。
-    assert len(rows) == 548, "完整路由基线变化，需逐项复核后显式更新矩阵"
+    assert len(rows) == 557, "完整路由基线变化，需逐项复核后显式更新矩阵"
     return rows
 
 
@@ -91,11 +91,11 @@ GUARDED_ROUTES = [row for row in AUTHENTICATED_ROUTES if row["guards"]]
 
 
 def test_route_inventory_is_complete_and_studio_guard_is_included():
-    assert len(ROUTES) == 548
-    assert len({(row["method"], row["path"]) for row in ROUTES}) == 548
-    assert len({row["source"] for row in ROUTES}) == 60
-    assert len(AUTHENTICATED_ROUTES) == 532
-    assert len(GUARDED_ROUTES) == 332
+    assert len(ROUTES) == 557
+    assert len({(row["method"], row["path"]) for row in ROUTES}) == 557
+    assert len({row["source"] for row in ROUTES}) == 61
+    assert len(AUTHENTICATED_ROUTES) == 541
+    assert len(GUARDED_ROUTES) == 341
     funds = [row for row in ROUTES if row['source'].endswith('/api/v1/wechat_fund_admin.py')]
     assert {(row['method'], row['path']) for row in funds} == {
         ('POST', '/api/billing/admin/fund-statements/import'),
@@ -121,6 +121,16 @@ def test_route_inventory_is_complete_and_studio_guard_is_included():
     assert catalog[0]["guards"] == ["security:view"]
     expected_new_routes = {
         # 小菱安全中心：读与演练需管理员 + security:view；改策略/切预设/停机只允许唯一超级管理员。
+        # 小菱安全运营（自动化攻防）：读 security:view，处置类仅超管。
+        ("GET", "/api/admin/secops/digest"): ["require_admin", "security:view"],
+        ("GET", "/api/admin/secops/surface"): ["require_admin", "security:view"],
+        ("GET", "/api/admin/secops/candidates"): ["require_admin", "security:view"],
+        ("GET", "/api/admin/secops/baseline"): ["require_admin", "security:view"],
+        ("GET", "/api/admin/secops/patrol"): ["require_admin", "security:view"],
+        ("GET", "/api/admin/secops/tools"): ["require_admin", "security:view"],
+        ("POST", "/api/admin/secops/block"): ["require_super_admin"],
+        ("POST", "/api/admin/secops/release"): ["require_super_admin"],
+        ("POST", "/api/admin/secops/pentest/{public_id}/start"): ["require_super_admin"],
         ("GET", "/api/admin/copilot-security/center"): ["require_admin", "security:view"],
         ("GET", "/api/admin/copilot-security/policy"): ["require_admin", "security:view"],
         ("PUT", "/api/admin/copilot-security/policy"): ["require_super_admin"],

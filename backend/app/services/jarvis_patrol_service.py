@@ -159,6 +159,23 @@ def patrol_once() -> dict[str, int]:
                 cleanup["messages"],
                 cleanup["runs"],
             )
+        # 安全运营巡检：感知 → 研判 → 告警（自动封禁默认关闭，由配置显式打开）。
+        # 放在 brief 采集之前：即使没有待投递告警，安全巡检也要照常跑。
+        patrol: dict | None = None
+        if getattr(settings, "secops_patrol_enabled", True):
+            try:
+                from app.services import secops_service
+
+                patrol = secops_service.patrol_once(db)
+                logger.info(
+                    "[secops-patrol] sources={} critical={} high={} auto_blocked={}",
+                    patrol.get("sources"), patrol.get("critical"),
+                    patrol.get("high"), len(patrol.get("auto_blocked") or []),
+                )
+            except Exception as exc:  # noqa: BLE001 - 安全巡检失败不能杀死 JARVIS 巡逻
+                logger.warning("[secops-patrol] failed: {}", exc)
+                db.rollback()
+        _ = patrol
         items, fingerprint = _brief_evidence(db)
         if not items:
             return {"alerts": 0, "delivered": 0, "skipped": 0}

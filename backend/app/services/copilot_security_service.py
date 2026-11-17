@@ -335,6 +335,10 @@ def apply_preset(
     policy["tool_denylist"] = list(current.get("tool_denylist") or [])
     # 代理拓扑是部署事实，不是安全档位：切预设不应把可信代理清空。
     policy["trusted_proxies"] = list(current.get("trusted_proxies") or [])
+    # 安全运营工具清单属于"能力授权"，不是安全档位：切预设不应把自动化攻防关掉。
+    policy["security_ops_tools"] = list(
+        current.get("security_ops_tools") or rules.DEFAULT_POLICY.get("security_ops_tools") or []
+    )
     policy["trust_proxy_headers"] = bool(current.get("trust_proxy_headers"))
     policy["kill_switch"] = bool(current.get("kill_switch"))
     policy["kill_switch_reason"] = current.get("kill_switch_reason") or ""
@@ -970,6 +974,27 @@ def tighten_tool_decision(
     flags = rules.classify_action(action, tool_code, resource)
 
     if not active.get("enabled", True):
+        return decision
+
+    # 安全运营工具白名单：自动化攻防需要这些工具有序穿过"禁改生产配置/禁外带"的一刀切。
+    # 只跳过按名字猜风险的几道闸；停机、预算、预算超额仍然生效。
+    security_ops = {str(item) for item in (active.get("security_ops_tools") or [])}
+    if tool_code in security_ops:
+        run_id = str(ctx.get("run_id") or "")
+        per_turn = int(active.get("max_tool_calls_per_turn") or 0)
+        if per_turn and _count_turn_calls(db, run_id) >= per_turn:
+            return _block(
+                policy_engine.DENY, policy_engine.HIGH,
+                f"单轮工具调用已达上限 {per_turn} 次", "turn_budget_exceeded",
+                {"used": per_turn, "limit": per_turn, "run_id": run_id},
+            )
+        per_hour = int(active.get("max_tool_calls_per_hour") or 0)
+        if per_hour and _count_hourly_calls(db, agent_code) >= per_hour:
+            return _block(
+                policy_engine.DENY, policy_engine.HIGH,
+                f"每小时工具调用已达上限 {per_hour} 次", "hour_budget_exceeded",
+                {"used": per_hour, "limit": per_hour},
+            )
         return decision
 
     def _block(target: str, risk: str, reason: str, kind: str, detail: dict) -> policy_engine.PolicyDecision:

@@ -262,3 +262,75 @@ export interface CopilotSecurityEventListOut {
   page_size: number
   pages: number
 }
+
+// ── 小菱安全运营（自动化攻防）────────────────────────────────────────────────
+
+/** 归一化后的攻击源画像。 */
+export interface SecOpsSourceOut {
+  ip: string
+  hits: number
+  sensors: string[]
+  kinds: string[]
+  severity: 'critical' | 'high' | 'medium' | 'low'
+  geo: Record<string, unknown>
+  last_seen: string | null
+  recommended: 'block' | 'watch'
+}
+
+export interface SecOpsSensorOut {
+  action: string
+  ok: boolean
+  events: number
+  error: string | null
+}
+
+export interface SecOpsDigestOut {
+  window_hours: number
+  generated_at: string
+  sensors: SecOpsSensorOut[]
+  totals: { sources: number; critical: number; high: number }
+  sources: SecOpsSourceOut[]
+  recommendations: string[]
+}
+
+export interface SecOpsBaselineCheckOut {
+  key: string
+  title: string
+  passed: boolean | null
+  detail: string
+  remediation: string
+  weight: number
+}
+
+export interface SecOpsBaselineOut {
+  generated_at: string
+  base_url: string | null
+  score: number
+  checks: SecOpsBaselineCheckOut[]
+  failed: string[]
+  remediations: string[]
+}
+
+export interface SecOpsCandidatesOut {
+  available: boolean
+  candidates: Record<string, unknown>[]
+  raw: Record<string, unknown> | null
+}
+
+export interface SecOpsPatrolOut {
+  auto_block_enabled: boolean
+  patrol_enabled: boolean
+  public_base_url: string | null
+  asset_hosts: string[]
+  last_run: Record<string, unknown>
+  recent: Record<string, unknown>[]
+}
+
+export interface SecOpsBlockOut {
+  ip: string
+  duration_seconds: number
+  blocked: boolean
+  released: boolean
+  result: Record<string, unknown>
+  configure: Record<string, unknown>
+}

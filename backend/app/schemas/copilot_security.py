@@ -59,6 +59,7 @@ class CopilotSecurityPolicyOut(BaseModel):
     dangerous_tools_require_approval: bool = True
     escalate_unknown_tools: bool = False
     scan_tool_output: bool = True
+    security_ops_tools: List[str] = Field(default_factory=list)
     max_tool_calls_per_turn: int = 0
     max_tool_calls_per_hour: int = 0
     audit_events_enabled: bool = True
@@ -101,6 +102,7 @@ class CopilotSecurityPolicyIn(StrictInputModel):
     dangerous_tools_require_approval: Optional[bool] = None
     escalate_unknown_tools: Optional[bool] = None
     scan_tool_output: Optional[bool] = None
+    security_ops_tools: Optional[List[str]] = None
     max_tool_calls_per_turn: Optional[int] = None
     max_tool_calls_per_hour: Optional[int] = None
     audit_events_enabled: Optional[bool] = None

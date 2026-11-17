@@ -25,7 +25,7 @@ EXPECTED_MODULES = {
     'models/user.py': '86de7d8a3378b24087fc0362f71c1b56516a30e4e32ad1da936c88c56bceee64',
     'api/v1/billing.py': '2348f600c2dc7043d22b1b47be0d1fcbb17d12f28fd9c958e9ada9ad23c908eb',
     'api/v1/enterprise_agent_teams.py': 'aba2c8249e26b29768c30859c218dbf16e054194191b278c5911e0bc9b68ede3',
-    'api/__init__.py': 'f167631eef538bf61808a40f303eca52f1e94d7ec15ad35c73562b1c8ccc6f70',
+    'api/__init__.py': '6d8c77ee328e0192028cac8bd9c5efa1eb9049218453196973a6732b35aa73bc',
     'core/dependencies.py': 'e3b3ce8243edcaefb28b7c859992541523cce45b064dcfa9d1bb496018f7f107',
     'core/security.py': '4cb6ad192bb5f4a3d0633da8a6cedc64ef3a745ffce7df0a369cd0abe9bbcde9',
     'core/super_admin.py': '5acabc74bd3119c3dec2fcc8023088ad473cd75ee0d0f7d5504dff2f355e0b55',

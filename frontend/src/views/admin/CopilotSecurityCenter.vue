@@ -267,6 +267,117 @@
       </el-collapse>
     </el-card>
 
+    <!-- 4.5 安全运营（自动化攻防） -->
+    <el-card shadow="hover" class="section-card" data-testid="secops-card">
+      <template #header>
+        <div class="card-head-row">
+          <span>安全运营（自动化攻防）</span>
+          <div class="secops-head">
+            <el-tag size="small" :type="secops.patrol.auto_block_enabled ? 'warning' : 'info'">
+              自动封禁 {{ secops.patrol.auto_block_enabled ? '开启' : '关闭' }}
+            </el-tag>
+            <el-tag size="small" :type="secops.patrol.patrol_enabled ? 'success' : 'info'">
+              巡检 {{ secops.patrol.patrol_enabled ? '开启' : '关闭' }}
+            </el-tag>
+            <el-button size="small" :loading="secops.loading" @click="loadSecOps">刷新研判</el-button>
+          </div>
+        </div>
+      </template>
+
+      <el-row :gutter="16">
+        <el-col :xs="24" :md="12">
+          <div class="secops-block">
+            <div class="secops-title">
+              攻击源研判（近 {{ secops.digest?.window_hours ?? 24 }} 小时）
+              <span class="secops-sub" v-if="secops.digest">
+                共 {{ secops.digest.totals.sources }} 源 · critical {{ secops.digest.totals.critical }} ·
+                high {{ secops.digest.totals.high }}
+              </span>
+            </div>
+            <div class="secops-top" v-if="secops.digest?.sources?.length">
+              <span class="secops-sub">Top 来源：</span>
+              <el-tag v-for="row in secops.digest.sources.slice(0, 3)" :key="row.ip" size="small"
+                      :type="severityTagType(row.severity)" class="sensor-tag">
+                {{ row.ip }} · {{ row.severity }} · {{ row.hits }}
+              </el-tag>
+            </div>
+            <el-table :data="secops.digest?.sources ?? []" size="small" empty-text="窗口内没有可用攻击事件"
+                      max-height="260">
+              <el-table-column prop="ip" label="来源" width="140" />
+              <el-table-column label="等级" width="90">
+                <template #default="scope">
+                  <el-tag size="small" :type="severityTagType(scope.row.severity)">{{ scope.row.severity }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="hits" label="命中" width="70" />
+              <el-table-column label="传感器" min-width="150">
+                <template #default="scope">{{ (scope.row.sensors ?? []).join(' / ') }}</template>
+              </el-table-column>
+              <el-table-column label="处置" width="130">
+                <template #default="scope">
+                  <el-tooltip :disabled="canWrite" content="仅超级管理员可修改" placement="top">
+                    <span>
+                      <el-button size="small" type="danger" plain :disabled="!canWrite || secops.blocking"
+                                 data-testid="secops-block-button"
+                                 @click="onBlockSource(scope.row.ip, scope.row.recommended)">
+                        封禁
+                      </el-button>
+                    </span>
+                  </el-tooltip>
+                </template>
+              </el-table-column>
+            </el-table>
+            <ul v-if="secops.digest?.recommendations?.length" class="secops-tips">
+              <li v-for="tip in secops.digest.recommendations" :key="tip">{{ tip }}</li>
+            </ul>
+            <div class="secops-sensors" v-if="secops.digest">
+              <el-tag v-for="sensor in secops.digest.sensors" :key="sensor.action" size="small"
+                      :type="sensor.ok ? 'success' : 'danger'" class="sensor-tag">
+                {{ sensor.action }}{{ sensor.ok ? ` · ${sensor.events}` : ' · 降级' }}
+              </el-tag>
+            </div>
+          </div>
+        </el-col>
+
+        <el-col :xs="24" :md="12">
+          <div class="secops-block">
+            <div class="secops-title">
+              自身基线
+              <span class="secops-sub" v-if="secops.baseline">得分 {{ secops.baseline.score }}</span>
+            </div>
+            <el-empty v-if="!secops.baseline" description="点击刷新研判以读取基线" :image-size="60" />
+            <template v-else>
+              <el-alert v-for="check in secopsFailed" :key="check.key" type="warning" :closable="false"
+                        show-icon :title="check.title" class="secops-alert">
+                {{ check.remediation || check.detail }}
+              </el-alert>
+              <p class="secops-ok" v-if="!secopsFailed.length">全部基线检查通过</p>
+              <p class="secops-sub" v-if="secops.baseline.base_url">
+                探测目标：{{ secops.baseline.base_url }}
+              </p>
+              <p class="secops-sub" v-else>
+                未配置 secops_public_base_url，跳过 HTTP/TLS 探测
+              </p>
+            </template>
+          </div>
+        </el-col>
+      </el-row>
+
+      <div class="secops-block secops-pentest">
+        <div class="secops-title">授权攻（渗透测试）</div>
+        <p class="secops-sub">
+          小菱只能驱动**已授权且处于时间窗内**的委托，目标是自有资产清单里的主机；
+          攻击载荷由既有渗透流水线生成，安全中心不提供任意目标扫描。
+        </p>
+        <p class="secops-sub" v-if="secops.patrol.asset_hosts.length">
+          自有资产：{{ secops.patrol.asset_hosts.join('、') }}
+        </p>
+        <p class="secops-sub" v-else>
+          未配置 secops_asset_hosts：指向外部地址的委托会被拒绝启动
+        </p>
+      </div>
+    </el-card>
+
     <!-- 5. 注入演练 -->
     <el-card shadow="hover" class="section-card">
       <template #header>注入演练</template>
@@ -375,7 +486,11 @@ import { useUserStore } from '@/stores/user'
 import { actionableError } from '@/composables/withFeedback'
 import {
   applyCopilotSecurityPreset,
+  blockSecOpsSource,
   getCopilotSecurityCenter,
+  getSecOpsBaseline,
+  getSecOpsDigest,
+  getSecOpsPatrol,
   listCopilotSecurityEvents,
   scanCopilotSecurityText,
   toggleCopilotSecurityKillSwitch,
@@ -393,6 +508,9 @@ import {
   type CopilotSecurityPreset,
   type CopilotSecurityScanOut,
   type PostureGrade,
+  type SecOpsBaselineOut,
+  type SecOpsDigestOut,
+  type SecOpsPatrolOut,
 } from '@/types/copilotSecurity'
 
 const userStore = useUserStore()
@@ -422,6 +540,78 @@ const eventFilters = reactive<{ kind: string; status: string; days: number }>({
   status: '',
   days: 7,
 })
+
+/** 安全运营（自动化攻防）：研判 / 基线 / 巡检状态。 */
+const secops = reactive({
+  loading: false,
+  blocking: false,
+  digest: null as SecOpsDigestOut | null,
+  baseline: null as SecOpsBaselineOut | null,
+  patrol: {
+    auto_block_enabled: false,
+    patrol_enabled: true,
+    public_base_url: null,
+    asset_hosts: [],
+    last_run: {},
+    recent: [],
+  } as SecOpsPatrolOut,
+})
+
+const secopsFailed = computed(() =>
+  (secops.baseline?.checks ?? []).filter((check) => check.passed === false),
+)
+
+function severityTagType(severity: string): 'danger' | 'warning' | 'info' {
+  if (severity === 'critical') return 'danger'
+  if (severity === 'high') return 'warning'
+  return 'info'
+}
+
+async function loadSecOps(): Promise<void> {
+  secops.loading = true
+  try {
+    const [digest, baseline, patrol] = await Promise.all([
+      getSecOpsDigest(24),
+      getSecOpsBaseline(),
+      getSecOpsPatrol(),
+    ])
+    secops.digest = digest
+    secops.baseline = baseline
+    secops.patrol = patrol
+  } catch (error) {
+    reportError(error, '安全运营数据加载失败')
+  } finally {
+    secops.loading = false
+  }
+}
+
+async function onBlockSource(ip: string, recommended: string): Promise<void> {
+  if (!canWrite.value) return
+  try {
+    await ElMessageBox.confirm(
+      `确认封禁 ${ip} ？处置会写入审计，可在安全运营记录里核对。推荐动作：${recommended}`,
+      '封禁攻击源',
+      { type: 'warning', confirmButtonText: '封禁 1 小时', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  secops.blocking = true
+  try {
+    const result = await blockSecOpsSource({
+      ip,
+      reason: '小菱安全中心人工处置',
+      duration_seconds: 3600,
+      confirm: true,
+    })
+    ElMessage.success(result.blocked ? `已封禁 ${ip}` : `封禁请求已提交：${ip}`)
+    await loadSecOps()
+  } catch (error) {
+    reportError(error, '封禁失败')
+  } finally {
+    secops.blocking = false
+  }
+}
 
 const scanText = ref('')
 const scanning = ref(false)
@@ -656,6 +846,8 @@ async function onScan(): Promise<void> {
 }
 
 onMounted(() => {
+  // 安全运营数据与主数据并行加载；单点失败不影响页面主体。
+  void loadSecOps()
   void loadCenter()
   void loadEvents()
 })
@@ -683,6 +875,17 @@ onMounted(() => {
 .preset-card.is-current { border-color: var(--el-color-success); background: var(--el-color-success-light-9); }
 .preset-card:disabled { cursor: not-allowed; opacity: 0.6; }
 .preset-code { color: var(--el-text-color-secondary); font-size: 12px; }
+.secops-head { display: inline-flex; align-items: center; gap: 8px; }
+.secops-block { margin-bottom: 14px; }
+.secops-title { font-weight: 600; font-size: 14px; margin-bottom: 8px; }
+.secops-sub { color: var(--el-text-color-secondary); font-size: 12px; margin: 4px 0; }
+.secops-tips { margin: 8px 0 0; padding-left: 18px; color: var(--el-color-warning); font-size: 12px; }
+.secops-top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
+.secops-sensors { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.sensor-tag { font-family: var(--el-font-family-mono, monospace); }
+.secops-alert { margin-bottom: 6px; }
+.secops-ok { color: var(--el-color-success); font-size: 13px; }
+.secops-pentest { border-top: 1px dashed var(--el-border-color); padding-top: 10px; }
 .policy-head-controls { display: inline-flex; align-items: center; gap: 12px; }
 .policy-enabled-switch { display: inline-flex; align-items: center; gap: 6px; }
 .switch-label { color: var(--el-text-color-secondary); font-size: 13px; }

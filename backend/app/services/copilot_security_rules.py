@@ -565,6 +565,15 @@ DEFAULT_POLICY: dict = {
     "escalate_unknown_tools": False,
     # 工具输出（源码、网页、团队结果）回流给模型前做注入扫描。
     "scan_tool_output": True,
+    # 安全运营工具：小菱要能自动化攻防，就得让这些工具有序穿过"禁止改生产配置/禁止外带"的
+    # 一刀切。默认只放行只读研判类；封禁/解封/启动渗透属于状态变更，要放行需管理员显式加进来。
+    "security_ops_tools": [
+        "secops.threat_digest",
+        "secops.surface_audit",
+        "secops.block_candidates",
+        "secops.baseline_check",
+        "secops.patrol_status",
+    ],
     "max_tool_calls_per_turn": 0,
     "max_tool_calls_per_hour": 0,
     # 审计与告警
