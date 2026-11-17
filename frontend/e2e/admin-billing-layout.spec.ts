@@ -20,6 +20,39 @@ async function mockApi(page: Page, salesEnabled = false, role: 'admin' | 'user' 
   })
 }
 
+test('管理员连续切换平台、充值和支持页面时小菱入口始终可见可打开', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockApi(page)
+  await page.goto('/admin/platform?section=report-templates')
+  expect(new URL(page.url()).searchParams.get('section')).toBe('report-templates')
+
+  async function checkAssistant() {
+    await expect(page.locator('.admin-layout')).toBeVisible()
+    const trigger = page.locator('#admin-copilot-trigger-slot').getByRole('button', { name: '打开小菱 · 管理助手' })
+    await expect(trigger).toBeVisible()
+    await trigger.click()
+    await expect(page.getByRole('dialog', { name: '管理副驾驶对话' })).toBeVisible()
+    await page.getByRole('button', { name: '收起管理副驾驶' }).click()
+    await expect(trigger).toBeVisible()
+  }
+
+  async function navigate(group: string, path: string) {
+    const section = page.getByRole('button', { name: group, exact: true })
+    if (await section.getAttribute('aria-expanded') === 'false') await section.click()
+    await page.locator(`[data-route="${path}"]`).click()
+    await expect.poll(() => new URL(page.url()).pathname).toBe(path)
+  }
+
+  await checkAssistant()
+  await navigate('计费与对账', '/billing')
+  await checkAssistant()
+  await expect(page.getByRole('button', { name: '选择支付方式' })).toBeDisabled()
+  await navigate('社区与支持', '/support')
+  await checkAssistant()
+  await navigate('平台治理', '/admin/platform')
+  await checkAssistant()
+})
+
 for (const path of ['/billing/?enterprise_id=7', '/support/?section=feedback']) {
   test(`管理员带尾斜杠访问 ${path} 时保留页头小菱入口和参数`, async ({ page }) => {
     await mockApi(page)
