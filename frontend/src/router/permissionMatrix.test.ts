@@ -19,7 +19,10 @@ type Guard = (to: RouteLocationNormalized, from: RouteLocationNormalized) => Pro
 
 function installedGuard(): Guard {
   let before!: Guard
-  setupGuards({ beforeEach: (guard: Guard) => { before = guard }, afterEach: () => undefined } as unknown as Router)
+  setupGuards({
+    push: vi.fn(), replace: vi.fn(),
+    beforeEach: (guard: Guard) => { before = guard }, afterEach: () => undefined,
+  } as unknown as Router)
   return before
 }
 

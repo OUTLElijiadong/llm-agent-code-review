@@ -40,6 +40,12 @@ declare module 'vue-router' {
  */
 export function setupGuards(router: Router): void {
   let latestNavigation = 0
+  // Vue Router skips beforeEach for a duplicate target. Count the explicit
+  // attempt too, so an older asynchronous guard cannot override that choice.
+  const push = router.push.bind(router)
+  const replace = router.replace.bind(router)
+  router.push = (to) => { latestNavigation += 1; return push(to) }
+  router.replace = (to) => { latestNavigation += 1; return replace(to) }
   router.beforeEach(async (to: RouteLocationNormalized, _from: RouteLocationNormalized) => {
     const navigation = ++latestNavigation
     const user = useUserStore()
