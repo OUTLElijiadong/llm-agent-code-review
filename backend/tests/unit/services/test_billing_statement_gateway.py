@@ -63,6 +63,7 @@ def test_alipay_download_verifies_signed_url_and_bounds_download():
     def handle(request):
         calls.append(request)
         if request.method == "POST":
+            assert request.url == "https://openapi.alipay.com/gateway.do"
             params = {key: value[0] for key, value in parse_qs(request.content.decode()).items()}
             assert params["method"] == "alipay.data.dataservice.bill.downloadurl.query"
             assert json.loads(params["biz_content"]) == {"bill_type": "trade", "bill_date": "2026-11-05"}
