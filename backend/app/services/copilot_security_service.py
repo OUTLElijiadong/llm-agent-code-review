@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -107,11 +108,32 @@ def _raw_policy_json(db: Session) -> Optional[str]:
 
 
 def _coerce_policy(stored: Optional[dict]) -> dict:
-    """把库里的策略叠加到默认值上，并丢掉未知键。"""
+    """把库里的策略叠加到默认值上，并做类型归一。
+
+    库里被人改坏（字符串写成列表、列表写成字符串）时按类型纠正而不是原样使用：
+    ``governed_agents="admin_copilot"`` 若原样进内存会变成字符集合，等于全部不受管。
+    """
     policy = dict(rules.DEFAULT_POLICY)
     if isinstance(stored, dict):
         for key, value in stored.items():
-            if key in rules.DEFAULT_POLICY or key == "preset":
+            if key not in rules.DEFAULT_POLICY and key != "preset":
+                continue
+            default = rules.DEFAULT_POLICY.get(key)
+            if isinstance(default, bool):
+                policy[key] = _as_bool(value)
+            elif isinstance(default, int):
+                try:
+                    policy[key] = int(value)
+                except (TypeError, ValueError):
+                    policy[key] = default
+            elif isinstance(default, list):
+                if isinstance(value, str):
+                    value = [value]
+                if isinstance(value, (list, tuple, set)):
+                    policy[key] = [str(item) for item in value if str(item).strip()]
+            elif isinstance(default, str):
+                policy[key] = str(value or "")
+            else:
                 policy[key] = value
     policy.setdefault("preset", "balanced")
     return policy
@@ -205,7 +227,8 @@ def _sanitize_patch(current: dict, patch: dict) -> tuple[dict, list[str]]:
             policy[key] = _as_bool(value)
         elif isinstance(default, int):
             bounds = {
-                "injection_block_threshold": (0, 101),
+                # 阻断阈值不接受 0：0 会让"命中即拦"退化成"永不拦"。
+                "injection_block_threshold": (1, 101),
                 "injection_warn_threshold": (0, 101),
                 "session_idle_timeout_seconds": (0, 7 * 24 * 3600),
                 "session_absolute_timeout_seconds": (0, 30 * 24 * 3600),
@@ -310,6 +333,9 @@ def apply_preset(
     policy["ip_allowlist"] = list(current.get("ip_allowlist") or [])
     policy["tool_allowlist"] = list(current.get("tool_allowlist") or [])
     policy["tool_denylist"] = list(current.get("tool_denylist") or [])
+    # 代理拓扑是部署事实，不是安全档位：切预设不应把可信代理清空。
+    policy["trusted_proxies"] = list(current.get("trusted_proxies") or [])
+    policy["trust_proxy_headers"] = bool(current.get("trust_proxy_headers"))
     policy["kill_switch"] = bool(current.get("kill_switch"))
     policy["kill_switch_reason"] = current.get("kill_switch_reason") or ""
     policy["preset"] = name
@@ -487,24 +513,40 @@ def resolve_client_ip(request: Any, *, policy: Optional[dict] = None) -> str:
     peer = str(getattr(client, "host", "") or "")
     headers = getattr(request, "headers", None) or {}
     active = policy or rules.DEFAULT_POLICY
-    if active.get("trust_proxy_headers"):
+    if not active.get("trust_proxy_headers"):
+        return peer
+    # 只有 peer 本身是可信代理时才采信转发头，否则客户端可以随手伪造。
+    trusted = list(active.get("trusted_proxies") or [])
+    if not trusted or not rules.ip_allowed(peer, trusted):
+        return peer
+    forwarded = ""
+    try:
+        forwarded = str(headers.get("x-forwarded-for") or "")
+    except (AttributeError, TypeError):
         forwarded = ""
+    if not forwarded:
+        return peer
+    # 从右往左跳过可信代理，取第一个不可信地址（最左项由客户端控制，不可信）。
+    trusted_networks = rules.parse_networks(trusted)
+    chain = [item.strip() for item in forwarded.split(",") if item.strip()]
+    for candidate in reversed(chain):
         try:
-            forwarded = str(headers.get("x-forwarded-for") or "")
-        except (AttributeError, TypeError):
-            forwarded = ""
-        if forwarded:
-            first = forwarded.split(",")[0].strip()
-            if first:
-                return first
-        real_ip = ""
-        try:
-            real_ip = str(headers.get("x-real-ip") or "")
-        except (AttributeError, TypeError):
-            real_ip = ""
-        if real_ip:
-            return real_ip.strip()
+            address = ipaddress.ip_address(candidate)
+        except ValueError:
+            continue
+        if any(address in network for network in trusted_networks):
+            continue
+        return str(address)
     return peer
+
+
+# 审计表 target_id 只有 80 字符，写入与查询必须用同一个截断口径。
+_SESSION_KEY_LIMIT = 80
+
+
+def _session_key(session_id: str) -> str:
+    """绑定用的会话键：统一截断，避免超长 session_id 永远查不到绑定。"""
+    return str(session_id or "")[:_SESSION_KEY_LIMIT]
 
 
 def _session_binding(db: Session, session_id: str) -> Optional[AuditLog]:
@@ -514,11 +556,45 @@ def _session_binding(db: Session, session_id: str) -> Optional[AuditLog]:
         db.query(AuditLog)
         .filter(
             AuditLog.action == _SESSION_BIND_ACTION,
-            AuditLog.target_id == session_id,
+            AuditLog.target_id == _session_key(session_id),
         )
         .order_by(AuditLog.id.desc())
         .first()
     )
+
+
+def _write_session_binding(
+    db: Session,
+    *,
+    actor: Optional[User],
+    session_id: str,
+    client_ip: str,
+) -> None:
+    """写入会话绑定行。
+
+    绑定必须独立于 ``audit_events_enabled`` 与脱敏开关：IP 存在不脱敏的
+    ``AuditLog.ip`` 列，detail 只放长度这类无害信息，避免脱敏把 IP 抹成占位符
+    导致每次请求都被判成"IP 不一致"而自锁。
+    """
+    if not _is_orm_session(db):
+        return
+    row = AuditLog(
+        actor_id=getattr(actor, "id", None) if actor is not None else None,
+        actor_name=(getattr(actor, "username", "") or "")[:80] or None,
+        action=_SESSION_BIND_ACTION,
+        target_type="copilot_security",
+        target_id=_session_key(session_id) or None,
+        detail=json.dumps({"bound": True}, ensure_ascii=False),
+        status="success",
+        ip=(client_ip or "")[:64] or None,
+        create_time=datetime.now(timezone.utc).replace(tzinfo=None),
+    )
+    try:
+        db.add(row)
+        db.commit()
+    except Exception:  # noqa: BLE001 - 绑定失败按未绑定处理，不阻断请求
+        db.rollback()
+        logger.exception("写入小菱会话绑定失败")
 
 
 def _session_timeout_hit(
@@ -549,9 +625,18 @@ def _session_timeout_hit(
     )
     if row is None:
         return None
+    # 绝对存活时间从"这个会话的第一轮"算起，否则每发一轮就被重置，永远不会触发。
+    first = (
+        db.query(func.min(AgentResponseRun.create_time))
+        .filter(
+            AgentResponseRun.user_id == user_id,
+            AgentResponseRun.session_key == session_id,
+        )
+        .scalar()
+    )
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     updated = getattr(row, "update_time", None) or getattr(row, "create_time", None)
-    created = getattr(row, "create_time", None) or updated
+    created = first or getattr(row, "create_time", None) or updated
     if absolute_limit and created and (now - created).total_seconds() > absolute_limit:
         return f"会话已超过绝对存活时间（{absolute_limit}s），请新建会话"
     if idle_limit and updated and (now - updated).total_seconds() > idle_limit:
@@ -599,11 +684,7 @@ def guard_request(
         "warnings": [],
     }
 
-    if not active.get("enabled", True):
-        result["disabled"] = True
-        return result
-
-    # 1) 紧急停机：最高优先级，任何面都拦。
+    # 1) 紧急停机：最高优先级，且不受策略总开关影响（关掉总开关不能顺手解除停机）。
     if active.get("kill_switch"):
         reason = active.get("kill_switch_reason") or "管理员已开启紧急停机"
         record_event(
@@ -618,6 +699,10 @@ def guard_request(
         raise CopilotSecurityError(
             f"管理小菱已紧急停机：{reason}", reason_code="kill_switch", detail={"reason": reason},
         )
+
+    if not active.get("enabled", True):
+        result["disabled"] = True
+        return result
 
     guarded = surface in (active.get("session_guard_surfaces") or [])
 
@@ -642,17 +727,15 @@ def guard_request(
     if guarded and active.get("bind_session_to_ip") and session_id and client_ip:
         binding = _session_binding(db, session_id)
         if binding is None:
+            _write_session_binding(db, actor=actor, session_id=session_id, client_ip=client_ip)
             record_event(
                 db, kind="session_bind", actor=actor, client_ip=client_ip,
-                status="info", target=session_id,
-                detail={"ip": client_ip, "user_agent": (user_agent or "")[:200]},
+                status="info", target=_session_key(session_id),
+                detail={"bound": True, "user_agent_len": len(user_agent or "")},
             )
         else:
-            bound_ip = ""
-            try:
-                bound_ip = str((json.loads(binding.detail or "{}") or {}).get("ip") or "")
-            except (TypeError, ValueError):
-                bound_ip = ""
+            # 绑定 IP 取不脱敏的 AuditLog.ip 列。
+            bound_ip = str(binding.ip or "")
             if bound_ip and bound_ip != client_ip:
                 record_event(
                     db, kind="session_ip_mismatch", actor=actor, client_ip=client_ip,
@@ -682,6 +765,17 @@ def guard_request(
     max_chars = int(active.get("max_message_chars") or 0)
     if max_chars:
         longest = max((len(text) for text in payload_texts), default=0)
+        total_chars = sum(len(text) for text in payload_texts)
+        if total_chars > max_chars:
+            record_event(
+                db, kind="message_too_long", actor=actor, client_ip=client_ip,
+                status="failed", target=_session_key(session_id),
+                detail={"total_length": total_chars, "limit": max_chars, "pieces": len(payload_texts)},
+            )
+            raise CopilotSecurityError(
+                f"本次请求文本总量超过 {max_chars} 字符上限，请拆分后重试",
+                reason_code="message_too_long", detail={"total_length": total_chars, "limit": max_chars},
+            )
         if longest > max_chars:
             record_event(
                 db, kind="message_too_long", actor=actor, client_ip=client_ip,
@@ -849,12 +943,34 @@ def tighten_tool_decision(
         policy_engine.PolicyDecision: 收紧后的决策。
     """
     active = policy or load_policy(db)
-    if not active.get("enabled", True) or not _governed_agent(active, agent_code):
+    # 停机是全局开关：即使 agent 不在受管名单里也必须拒（否则名单外编码等于后门）。
+    if active.get("kill_switch"):
+        tightened = _tighten(
+            db, decision, subject=f"agent:{agent_code}", action=action, resource=resource,
+            context=dict(context or {}), target=policy_engine.DENY,
+            risk_level=policy_engine.CRITICAL,
+            reason="管理小菱处于紧急停机状态，工具调用全部拒绝",
+        )
+        record_event(
+            db, kind="kill_switch_tool", actor=actor, client_ip=client_ip, status="failed",
+            target=tool_code, detail={"action": action, "resource": resource, "agent": agent_code},
+        )
+        _alert(
+            db, policy=active, kind="kill_switch_tool", severity="critical",
+            title="管理小菱处于紧急停机状态，工具调用被拒",
+            detail={"agent": agent_code, "tool": tool_code, "actor": getattr(actor, "username", "")},
+        )
+        return tightened
+
+    if not _governed_agent(active, agent_code):
         return decision
 
     ctx = dict(context or {})
     subject = f"agent:{agent_code}"
     flags = rules.classify_action(action, tool_code, resource)
+
+    if not active.get("enabled", True):
+        return decision
 
     def _block(target: str, risk: str, reason: str, kind: str, detail: dict) -> policy_engine.PolicyDecision:
         tightened = _tighten(
@@ -872,14 +988,6 @@ def tighten_tool_decision(
                     "resource": resource, "actor": getattr(actor, "username", "")},
         )
         return tightened
-
-    # 0) 紧急停机：直接拒绝一切工具。
-    if active.get("kill_switch"):
-        return _block(
-            policy_engine.DENY, policy_engine.CRITICAL,
-            "管理小菱处于紧急停机状态，工具调用全部拒绝", "kill_switch_tool",
-            {"kill_switch_reason": active.get("kill_switch_reason") or ""},
-        )
 
     # 1) 工具黑白名单。
     denylist = {str(item) for item in (active.get("tool_denylist") or [])}
@@ -925,17 +1033,20 @@ def tighten_tool_decision(
                 "写操作需管理员审批后执行", "write_requires_approval", {"flags": sorted(flags)},
             )
 
-    # 5) 未知高风险工具：允许但必须审批。
-    if decision.risk_level in {policy_engine.HIGH, policy_engine.CRITICAL} and active.get(
-        "dangerous_tools_require_approval", True
-    ):
-        return _block(
-            policy_engine.ESCALATE, decision.risk_level,
-            "高风险工具调用需管理员审批", "dangerous_tool_requires_approval",
-            {"risk": decision.risk_level},
-        )
+    # 4.5) 外带通道：能把数据带出平台的工具（HTTP/邮件/上传/浏览器）。
+    if "egress" in flags:
+        if active.get("deny_egress"):
+            return _block(
+                policy_engine.DENY, policy_engine.HIGH,
+                "小菱安全中心禁止外带类工具", "egress_denied", {"flags": sorted(flags)},
+            )
+        if active.get("require_approval_for_writes"):
+            return _block(
+                policy_engine.ESCALATE, policy_engine.HIGH,
+                "外带类工具需管理员审批后执行", "egress_requires_approval", {"flags": sorted(flags)},
+            )
 
-    # 6) 调用预算。
+    # 5) 调用预算：已超额一律拒绝，不再转审批。
     run_id = str(ctx.get("run_id") or "")
     per_turn = int(active.get("max_tool_calls_per_turn") or 0)
     if per_turn:
@@ -955,7 +1066,86 @@ def tighten_tool_decision(
                 f"每小时工具调用已达上限 {per_hour} 次", "hour_budget_exceeded",
                 {"used": used, "limit": per_hour},
             )
+    # 6) 名字看不出风险、也不在只读白名单里的工具：升级审批而不是静默放行。
+    if (
+        not flags
+        and active.get("escalate_unknown_tools")
+        and tool_code not in rules.READ_ONLY_TOOL_CODES
+    ):
+        return _block(
+            policy_engine.ESCALATE, policy_engine.HIGH,
+            f"未知风险工具 {tool_code} 需管理员审批", "undeclared_tool_requires_approval",
+            {"tool_code": tool_code},
+        )
+
+    # 7) 未知高风险工具：允许但必须审批。
+    if decision.risk_level in {policy_engine.HIGH, policy_engine.CRITICAL} and active.get(
+        "dangerous_tools_require_approval", True
+    ):
+        return _block(
+            policy_engine.ESCALATE, decision.risk_level,
+            "高风险工具调用需管理员审批", "dangerous_tool_requires_approval",
+            {"risk": decision.risk_level},
+        )
+
     return decision
+
+
+# ── 工具输出回流扫描 ──────────────────────────────────────────────────────
+
+
+def scan_tool_output(
+    db: Session,
+    *,
+    agent_code: str,
+    tool_code: str,
+    output: Any,
+    actor: Optional[User] = None,
+    client_ip: str = "",
+    policy: Optional[dict] = None,
+) -> dict:
+    """工具输出回流给模型前做注入扫描（间接注入闸门）。
+
+    工具读回来的源码、网页、团队结果都可能被攻击者污染；这里只做检测与留痕，
+    不改写数据（改写会破坏 XML/JSON 契约），命中即记事件并告警。
+
+    Args:
+        db: 数据库会话。
+        agent_code: Agent 编码。
+        tool_code: 工具编码。
+        output: 工具返回值。
+        actor: 触发用户。
+        client_ip: 来源 IP。
+        policy: 已加载策略。
+
+    Returns:
+        dict: ``{"score": int, "codes": [...], "suspicious": bool}``。
+    """
+    active = policy or load_policy(db)
+    if not active.get("enabled", True) or not active.get("scan_tool_output", True):
+        return {"score": 0, "codes": [], "suspicious": False}
+    if not _governed_agent(active, agent_code):
+        return {"score": 0, "codes": [], "suspicious": False}
+    text = output if isinstance(output, str) else json.dumps(output, ensure_ascii=False, default=str)
+    scan = rules.scan_injection((text or "")[:20000])
+    score = int(scan["score"])
+    warn = int(active.get("injection_warn_threshold") or 101)
+    codes = [hit["code"] for hit in scan["hits"]]
+    suspicious = score >= warn
+    if suspicious:
+        record_event(
+            db, kind="tool_output_injection", actor=actor, client_ip=client_ip,
+            status="failed", target=tool_code,
+            detail={"agent": agent_code, "score": score, "codes": codes,
+                    "evidence": [hit["evidence"] for hit in scan["hits"]][:3]},
+        )
+        _alert(
+            db, policy=active, kind="tool_output_injection", severity="high",
+            title="工具输出疑似被投毒（间接注入）",
+            detail={"agent": agent_code, "tool": tool_code, "score": score, "codes": codes,
+                    "actor": getattr(actor, "username", "")},
+        )
+    return {"score": score, "codes": codes, "suspicious": suspicious}
 
 
 # ── 安全态势 ──────────────────────────────────────────────────────────────
@@ -1114,6 +1304,7 @@ def posture(db: Session, *, policy: Optional[dict] = None) -> dict:
             "governed_agents": list(active.get("governed_agents") or []),
             "session_guard_surfaces": list(active.get("session_guard_surfaces") or []),
             "ip_allowlist": list(active.get("ip_allowlist") or []),
+            "trusted_proxies": list(active.get("trusted_proxies") or []),
             "tool_allowlist": list(active.get("tool_allowlist") or []),
             "tool_denylist": list(active.get("tool_denylist") or []),
         },
@@ -1185,6 +1376,10 @@ EVENT_KINDS: tuple[dict[str, str], ...] = (
     {"kind": "injection_warning", "label": "注入特征告警（未拦截）"},
     {"kind": "tool_denied", "label": "工具黑名单拒绝"},
     {"kind": "tool_not_allowlisted", "label": "工具不在白名单"},
+    {"kind": "egress_denied", "label": "外带类工具被拒"},
+    {"kind": "egress_requires_approval", "label": "外带类工具转审批"},
+    {"kind": "undeclared_tool_requires_approval", "label": "未知风险工具转审批"},
+    {"kind": "tool_output_injection", "label": "工具输出疑似投毒"},
     {"kind": "shell_denied", "label": "系统命令被拒"},
     {"kind": "production_config_denied", "label": "生产配置改动被拒"},
     {"kind": "write_denied", "label": "写操作被拒（只读模式）"},

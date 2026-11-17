@@ -187,6 +187,15 @@ def execute(
 
     try:
         data = handler() if handler else {"ok": True}
+        # 小菱安全中心：工具输出回流给模型前做间接注入扫描（只检测与留痕，不改写数据）。
+        copilot_security_service.scan_tool_output(
+            db,
+            agent_code=agent_code,
+            tool_code=tool_code,
+            output=data,
+            actor=actor,
+            policy=security_policy,
+        )
         log = _write_log(
             db,
             agent_code=agent_code,

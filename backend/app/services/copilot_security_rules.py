@@ -20,7 +20,19 @@ from typing import Iterable, Optional, Union
 # ── 分值口径：单条规则 5~45 分，累加封顶 100；阈值在策略里配。
 _SCORE_CAP = 100
 # 零宽字符与双向控制符，常被用来把"忽略指令"拆开躲检索。
-_INVISIBLE_CHARS = "\u200b\u200c\u200d\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2060\u2061\u2062\u2063\u2064\ufeff"
+_INVISIBLE_CHARS = (
+    "\u200b\u200c\u200d\u200e\u200f\u202a\u202b\u202c\u202d\u202e"
+    "\u2060\u2061\u2062\u2063\u2064\ufeff"
+    # Unicode Tag 区段（U+E0000–U+E007F）：肉眼不可见，可承载整段隐藏指令
+    + "".join(chr(code) for code in range(0xE0000, 0xE0080))
+)
+
+# 常见同形字折叠：西里尔/希腊字母冒充拉丁字母，用来绕过英文规则。
+_HOMOGLYPHS = str.maketrans({
+    "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x", "і": "i",
+    "ј": "j", "ѕ": "s", "н": "h", "в": "b", "к": "k", "м": "m", "т": "t",
+    "ο": "o", "α": "a", "ε": "e", "ι": "i", "κ": "k", "ν": "v", "ρ": "p", "τ": "t", "υ": "u",
+})
 _INVISIBLE_TABLE = {ord(ch): None for ch in _INVISIBLE_CHARS}
 
 
@@ -61,7 +73,7 @@ def normalize_text(raw: str) -> NormalizedText:
     invisibles = sum(1 for ch in source if ch in _INVISIBLE_CHARS)
     rtl = any(ch in source for ch in "\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069")
     stripped = source.translate(_INVISIBLE_TABLE)
-    folded = unicodedata.normalize("NFKC", stripped)
+    folded = unicodedata.normalize("NFKC", stripped).translate(_HOMOGLYPHS)
     return NormalizedText(
         text=folded.casefold(),
         invisibles_removed=invisibles,
@@ -88,7 +100,7 @@ INJECTION_RULES: tuple[InjectionRule, ...] = (
     _rule(
         "inj.override.zh", "指令覆盖", 40,
         r"(忽略|无视|忘记|忘掉|跳过|不要遵守|不再遵守|取消|作废)\s*(掉)?\s*"
-        r"(?:(?:之前|以上|上面|前面|先前|刚才|所有|全部|系统|开发者|你(?:的)?|原本)\s*(?:的)?\s*){0,3}"
+        r"(?:(?:之前|以上|上面|前面|先前|刚才|上述|前述|前面提到|所有|全部|系统|开发者|你(?:的)?|原本)\s*(?:的)?\s*){0,3}"
         r"(指令|指示|要求|提示词?|规则|约束|设定|限制|安全策略)",
         "试图让模型丢弃系统/开发者指令",
     ),
@@ -209,8 +221,19 @@ INJECTION_RULES: tuple[InjectionRule, ...] = (
     # ── 通过 markdown/图片外带 ──
     _rule(
         "inj.exfil.markdown", "凭据外带", 30,
-        r"!\[[^\]\n]{0,80}\]\(\s*https?://[^)\s]{0,300}?[?&](data|q|text|payload|token|content)=",
+        r"!\[[^\]\n]{0,80}\]\(\s*https?://[^)\s]{0,300}?[?&](data|q|text|payload|token|content|key|secret|d|c)=",
         "Markdown 图片夹带参数外传",
+    ),
+    _rule(
+        "inj.exfil.markdown_any", "凭据外带", 20,
+        r"!\[[^\]\n]{0,80}\]\(\s*https?://(?!(?:localhost|127\.0\.0\.1|\S*\.internal))[^)\s]{0,200}\?[^)\s]{0,200}\)",
+        "Markdown 图片指向外站并携带查询串（任意参数名）",
+    ),
+    _rule(
+        "inj.exfil.link_any", "凭据外带", 15,
+        r"\[[^\]\n]{0,60}\]\(\s*https?://(?!(?:localhost|127\.0\.0\.1|\S*\.internal))[^)\s]{0,200}"
+        r"[?&](?:data|q|text|payload|token|secret|content)=",
+        "Markdown 链接夹带参数外传",
     ),
 )
 
@@ -409,22 +432,46 @@ def redact_text(raw: str, *, kinds: Optional[Iterable[str]] = None) -> tuple[str
 
 # ── 动作风险词表 ──────────────────────────────────────────────────────────
 
-# 系统命令执行类动作。
+# 系统命令/进程/数据库执行类动作。
 SHELL_TOKENS: tuple[str, ...] = (
-    "shell", "exec", "command", "cmd", "bash", "powershell", "ssh", "script", "pty",
+    "shell", "exec", "execute", "command", "cmd", "bash", "sh", "powershell", "ssh", "script",
+    "pty", "sql", "query", "db", "database", "kill", "terminate", "restart", "systemctl",
+    "docker", "kubectl", "cron", "crontab", "sudo", "spawn", "process",
 )
 # 写类动作（改变平台数据或状态）。
 WRITE_TOKENS: tuple[str, ...] = (
     "write", "create", "update", "delete", "remove", "drop", "truncate", "patch", "apply",
     "set", "insert", "upsert", "grant", "revoke", "reset", "rollback", "import", "deploy",
     "publish", "enable", "disable", "toggle", "archive", "restore",
+    # 复核补洞：批准/决定/启停/编辑/身份类动词此前全部漏判
+    "decide", "approve", "reject", "close", "extend", "trigger", "start", "stop", "cancel",
+    "run", "invoke", "invite", "add", "adduser", "rotate", "change", "modify", "edit", "save",
+    "upload", "send", "post", "submit", "bind", "assign", "activate", "unlock", "lock",
+    "impersonate", "suspend", "merge", "move", "rename", "commit", "push", "checkout",
 )
 # 生产配置/权限/凭据类资源，改动影响面最大。
 PRODUCTION_TOKENS: tuple[str, ...] = (
-    "production", "prod_config", "system_config", "llm_config", "api_config", "policy",
-    "permission", "role", "rbac", "secret", "credential", "webhook", "mcp", "sandbox:deploy",
-    "user:password", "jwt",
+    "production", "prod_config", "system_config", "systemconfig", "llm_config", "api_config",
+    "policy", "permission", "role", "rbac", "secret", "credential", "webhook", "mcp",
+    "sandbox:deploy", "user:password", "jwt", "env", "dotenv", "release", "deploy", "gateway",
+    "billing", "refund", "enterprise", "pentest", "governance", "studio",
 )
+
+# 外带通道：能把数据带出平台的工具/动作（HTTP、邮件、上传、浏览器导航）。
+EGRESS_TOKENS: tuple[str, ...] = (
+    "curl", "wget", "http", "https", "request", "fetch", "egress", "webhook", "email", "mail",
+    "smtp", "upload", "export", "download", "browser", "navigate", "screenshot", "proxy",
+    "https_proxy", "dns", "socket", "netcat", "nc",
+)
+
+# 明确只读、可安全放行的工具编码（工具闸门的"未声明工具"白名单）。
+READ_ONLY_TOOL_CODES: frozenset[str] = frozenset({
+    "list_projects", "get_project_detail", "list_review_tasks", "list_review_issues",
+    "list_code_files", "list_rules", "list_reports", "dashboard_summary", "detect_language",
+    "list_agent_skills", "admin_list_users", "admin_list_roles", "admin_governance_overview",
+    "admin_list_agents", "admin_list_approvals", "admin_list_agent_release_approvals",
+    "admin_system_status", "list_alerts", "recall_knowledge", "ask_user",
+})
 
 
 # 词元分割：``admin_set_user_role`` → {admin,set,user,role}，避免 ``settings`` 命中 ``set``。
@@ -466,6 +513,8 @@ def classify_action(action: str, tool_code: str = "", resource: str = "") -> set
         flags.add("write")
     if _hit(PRODUCTION_TOKENS):
         flags.add("production")
+    if _hit(EGRESS_TOKENS):
+        flags.add("egress")
     return flags
 
 
@@ -488,6 +537,8 @@ DEFAULT_POLICY: dict = {
     # 会话级守卫强制的面（IP/超时/长度）；与 session_guard_surfaces 取交集。
     "ip_allowlist": [],
     "trust_proxy_headers": False,
+    # 只有 peer 落在可信代理网段内时才采信 X-Forwarded-For，并从右往左取第一个不可信地址。
+    "trusted_proxies": [],
     "bind_session_to_ip": False,
     "session_idle_timeout_seconds": 0,
     "session_absolute_timeout_seconds": 0,
@@ -507,8 +558,13 @@ DEFAULT_POLICY: dict = {
     "deny_shell": False,
     "deny_write_actions": False,
     "deny_production_config": False,
+    "deny_egress": False,
     "require_approval_for_writes": False,
     "dangerous_tools_require_approval": False,
+    # 名字里看不出风险、也不在只读白名单里的工具：严格/最顶级预设下升级审批而不是直接放行。
+    "escalate_unknown_tools": False,
+    # 工具输出（源码、网页、团队结果）回流给模型前做注入扫描。
+    "scan_tool_output": True,
     "max_tool_calls_per_turn": 0,
     "max_tool_calls_per_hour": 0,
     # 审计与告警
@@ -535,8 +591,11 @@ PRESETS: dict[str, dict] = {
         "deny_shell": False,
         "deny_write_actions": False,
         "deny_production_config": False,
+        "deny_egress": False,
         "require_approval_for_writes": False,
         "dangerous_tools_require_approval": False,
+        "escalate_unknown_tools": False,
+        "scan_tool_output": True,
         "max_tool_calls_per_turn": 0,
         "max_tool_calls_per_hour": 0,
         "audit_events_enabled": True,
@@ -562,6 +621,10 @@ PRESETS: dict[str, dict] = {
         "deny_shell": True,
         "deny_write_actions": False,
         "deny_production_config": True,
+        "deny_egress": False,
+        # 名字看不出风险又不在只读白名单的工具：升级审批，而不是静默放行。
+        "escalate_unknown_tools": True,
+        "scan_tool_output": True,
         "require_approval_for_writes": True,
         "dangerous_tools_require_approval": True,
         "max_tool_calls_per_turn": 40,
@@ -591,6 +654,9 @@ PRESETS: dict[str, dict] = {
         "deny_shell": True,
         "deny_write_actions": False,
         "deny_production_config": True,
+        "deny_egress": False,
+        "escalate_unknown_tools": True,
+        "scan_tool_output": True,
         "require_approval_for_writes": True,
         "dangerous_tools_require_approval": True,
         "max_tool_calls_per_turn": 24,
@@ -666,6 +732,10 @@ def ip_allowed(client_ip: str, entries: Iterable[str]) -> bool:
         address = ipaddress.ip_address(str(client_ip or "").strip())
     except ValueError:
         return False
+    # 双栈部署里 ::ffff:10.1.2.3 与 10.1.2.3 是同一来源，先归一。
+    mapped = getattr(address, "ipv4_mapped", None)
+    if mapped is not None:
+        address = mapped
     parsed = parse_networks(networks)
     return any(address in network for network in parsed)
 

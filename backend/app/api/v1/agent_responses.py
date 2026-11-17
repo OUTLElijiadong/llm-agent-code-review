@@ -341,11 +341,27 @@ def _guard_copilot_request(
         dict: 守卫结果（放行时含注入评分与告警）。
     """
     policy = copilot_security_service.load_policy(db)
+    # 伪造历史是最好用的注入通道：管理面只接受服务端账本历史，客户端不得自带 assistant 轮次。
+    if (
+        payload.surface == "admin"
+        and payload.action == "start"
+        and not payload.use_server_history
+    ):
+        raise copilot_security_service.CopilotSecurityError(
+            "管理小菱只接受服务端对话历史，请升级客户端后重试",
+            reason_code="client_history_forbidden",
+        )
+    # 扫描本次请求里所有会进入模型的文本：全部消息（含 assistant，防止伪造轮次）、
+    # 追问回答与取消原因；长度上限也按总量算。
     user_texts = [
         item.content
         for item in payload.messages
-        if item.role == "user" and item.content.strip()
-    ][-1:]
+        if item.content.strip()
+    ]
+    if payload.answer.strip():
+        user_texts.append(payload.answer)
+    if payload.cancel_reason.strip():
+        user_texts.append(payload.cancel_reason)
     user_agent = ""
     if request is not None:
         try:

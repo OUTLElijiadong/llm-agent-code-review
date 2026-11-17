@@ -37,6 +37,7 @@ class CopilotSecurityPolicyOut(BaseModel):
     session_guard_surfaces: List[str] = Field(default_factory=list)
     ip_allowlist: List[str] = Field(default_factory=list)
     trust_proxy_headers: bool = False
+    trusted_proxies: List[str] = Field(default_factory=list)
     bind_session_to_ip: bool = False
     session_idle_timeout_seconds: int = 0
     session_absolute_timeout_seconds: int = 0
@@ -53,8 +54,11 @@ class CopilotSecurityPolicyOut(BaseModel):
     deny_shell: bool = True
     deny_write_actions: bool = False
     deny_production_config: bool = True
+    deny_egress: bool = False
     require_approval_for_writes: bool = False
     dangerous_tools_require_approval: bool = True
+    escalate_unknown_tools: bool = False
+    scan_tool_output: bool = True
     max_tool_calls_per_turn: int = 0
     max_tool_calls_per_hour: int = 0
     audit_events_enabled: bool = True
@@ -75,6 +79,7 @@ class CopilotSecurityPolicyIn(StrictInputModel):
     session_guard_surfaces: Optional[List[str]] = None
     ip_allowlist: Optional[List[str]] = None
     trust_proxy_headers: Optional[bool] = None
+    trusted_proxies: Optional[List[str]] = None
     bind_session_to_ip: Optional[bool] = None
     session_idle_timeout_seconds: Optional[int] = None
     session_absolute_timeout_seconds: Optional[int] = None
@@ -91,8 +96,11 @@ class CopilotSecurityPolicyIn(StrictInputModel):
     deny_shell: Optional[bool] = None
     deny_write_actions: Optional[bool] = None
     deny_production_config: Optional[bool] = None
+    deny_egress: Optional[bool] = None
     require_approval_for_writes: Optional[bool] = None
     dangerous_tools_require_approval: Optional[bool] = None
+    escalate_unknown_tools: Optional[bool] = None
+    scan_tool_output: Optional[bool] = None
     max_tool_calls_per_turn: Optional[int] = None
     max_tool_calls_per_hour: Optional[int] = None
     audit_events_enabled: Optional[bool] = None
@@ -207,6 +215,7 @@ class PosturePolicyOut(BaseModel):
     governed_agents: List[str] = Field(default_factory=list)
     session_guard_surfaces: List[str] = Field(default_factory=list)
     ip_allowlist: List[str] = Field(default_factory=list)
+    trusted_proxies: List[str] = Field(default_factory=list)
     tool_allowlist: List[str] = Field(default_factory=list)
     tool_denylist: List[str] = Field(default_factory=list)
 
