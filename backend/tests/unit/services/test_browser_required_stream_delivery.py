@@ -1,6 +1,7 @@
 """浏览器桥真实 SSE 出站回归：签名只在可信边界校验，不在公开队列二次丢失。"""
 
 import json
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -55,6 +56,10 @@ async def test_signed_browser_event_survives_complete_api_queue_and_encoding(mon
 
     monkeypatch.setattr(api, "AgentResponsesService", FakeService)
     monkeypatch.setattr(api, "_is_admin_actor", lambda *_args: True)
+    # This test exercises signed browser-event delivery through the SSE queue, not
+    # the admin billing boundary. Billing scope has its own service tests; keep the
+    # dummy ``db=object()`` from reaching its real session-factory lookup here.
+    monkeypatch.setattr(api, "_response_action_billing_scope", lambda *_args, **_kwargs: nullcontext())
     response = await api.stream_agent_response(
         api.AgentResponsesRequest(
             surface=surface, session_id=row.session_key, run_id=run_id,

@@ -153,9 +153,11 @@ def _sha1_gzip_content(raw: bytes) -> str:
 
 
 def download_alipay_trade_statement(
-    *, app_id: str, private_key_pem: bytes, public_key_pem: bytes, bill_date: str,
+    *, app_id: str, private_key_pem: bytes, public_key_pem: bytes, bill_date: str, sandbox: bool,
     client: httpx.Client | None = None, now: datetime | None = None,
 ) -> DownloadedProviderStatement:
+    if type(sandbox) is not bool or sandbox:
+        raise StatementGatewayError("支付宝沙箱账单下载尚未验证，已停止请求")
     _validate_bill_date(bill_date, now=now)
     try:
         result = _alipay_call(

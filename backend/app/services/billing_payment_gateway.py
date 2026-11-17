@@ -222,7 +222,7 @@ def _alipay_call(*, method: str, app_id: str, private_key_pem: bytes, public_key
         "format": "JSON",
         "charset": "utf-8",
         "sign_type": "RSA2",
-        "timestamp": observed_at.strftime("%Y-%m-%d %H:%M:%S"),
+        "timestamp": observed_at.astimezone(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
         "version": "1.0",
         "biz_content": json.dumps(biz_content, ensure_ascii=False, separators=(",", ":")),
     }
