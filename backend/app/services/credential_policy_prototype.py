@@ -218,6 +218,7 @@ def replace_key(db: Session, expected: Snapshot, *, ciphertext: str, user_config
 
 def save_current_user_configuration(
     db: Session, *, owner_id: int, ciphertext: str, provider: str, base_url: str, model: str,
+    authorization_guard=None,
 ):
     """Save the real user row and version together; caller owns the transaction.
 
@@ -229,6 +230,8 @@ def save_current_user_configuration(
     if any(not isinstance(value, str) or not value or len(value) > limit for value, limit in fields):
         raise PolicyError("用户配置无效")
     with db.no_autoflush:
+        if authorization_guard is not None:
+            authorization_guard(db)
         record, config = _current(db, "user", owner_id)
         if record.revision >= _MAX_REVISION:
             raise PolicyConflict("凭据版本已耗尽")

@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import SingletonThreadPool, StaticPool
 
 from app.core.config import settings
-from app.core.exceptions import ValidationError
+from app.core.exceptions import AuthError, ForbiddenError, ValidationError
 from app.models.api_config import UserApiConfig
 from app.schemas.api_config import (
     ApiConfigOut,
@@ -115,6 +115,73 @@ def get_config(db: Session, user_id: int) -> ApiConfigOut:
         is_active=True,
         is_custom=False,
     )
+
+
+def save_config_for_verified_request(
+    db: Session, user_id: int, payload: ApiConfigSaveIn, authorization: Optional[str],
+) -> ApiConfigOut:
+    """Disabled route experiment: reauthenticate and lock user in the write txn.
+
+    This does not authorize paid model calls or protect old writers. Existing
+    callers must not enable the experiment until all deployment gates exist.
+    """
+    from app.core.security import decode_token
+    from app.models.user import User
+    from app.services import credential_policy_prototype as policy
+
+    if not _CREDENTIAL_POLICY_SAVE_EXPERIMENT:
+        raise policy.PolicyError("凭据策略实验尚未启用")
+    if db.new or db.dirty or db.deleted or any(isinstance(obj, UserApiConfig) for obj in db.identity_map.values()):
+        raise policy.PolicyError("请求会话含未提交变更或旧配置对象")
+    bind = db.get_bind()
+    if not isinstance(bind, Engine) or isinstance(bind.pool, (SingletonThreadPool, StaticPool)):
+        raise policy.PolicyError("凭据策略实验需要独立数据库引擎连接")
+    if not authorization or not authorization.startswith("Bearer "):
+        raise AuthError("缺少token", code=40100)
+    token = authorization[7:]
+    # Validate URL and prepare ciphertext before taking any write locks.
+    safe_base_url = normalize_ai_base_url(payload.base_url, resolve_host=True, allow_private=False)
+    encrypted = encrypt_api_key(payload.api_key)
+
+    def check_token():
+        try:
+            claims = decode_token(token)
+            token_user_id = int(claims["sub"])
+            token_version = int(claims.get("ver", 0))
+            token_expiry = int(claims["exp"])
+        except Exception as exc:
+            raise AuthError("token非法或已过期", code=40101) from exc
+        if token_user_id != user_id or token_expiry <= int(time.time()):
+            raise AuthError("token非法或已过期", code=40101)
+        return token_version
+
+    def authorize_in_write_transaction(policy_db: Session) -> None:
+        version = check_token()
+        # A locking current read defeats stale REPEATABLE READ snapshots. The
+        # user lock serializes logout/disable writes until this txn commits.
+        current = (policy_db.query(User).filter_by(id=user_id)
+                   .populate_existing().with_for_update().one_or_none())
+        if current is None or current.status != 1:
+            raise ForbiddenError("账号不存在或已禁用", code=40301)
+        if version != (current.token_version or 0):
+            raise AuthError("账号已在另一台设备登录，当前设备已下线", code=40102)
+
+    with Session(bind=bind, autoflush=False, expire_on_commit=False) as policy_db:
+        with policy_db.begin():
+            _, row = policy.save_current_user_configuration(
+                policy_db, owner_id=user_id, ciphertext=encrypted, provider=payload.provider,
+                base_url=safe_base_url, model=payload.model, authorization_guard=authorize_in_write_transaction,
+            )
+            # Re-check expiry at the last application-controlled point before
+            # commit. Authentication is not a financial authorization.
+            check_token()
+            policy_db.refresh(row)
+            result = ApiConfigOut(
+                provider=row.provider, api_key_masked=mask_api_key(payload.api_key), base_url=row.base_url,
+                model=row.model, is_active=row.is_active, is_custom=True,
+                created_at=row.created_at, updated_at=row.updated_at,
+            )
+    return result
 
 
 def save_config(db: Session, user_id: int, payload: ApiConfigSaveIn) -> ApiConfigOut:

@@ -143,23 +143,16 @@ def test_caller_direct_sql_write_does_not_self_block_or_commit(store):
         assert db.query(UserApiConfig).filter_by(user_id=701).one().model == 'new-model'
 
 
-def test_actual_authenticated_api_requires_session_refactor_before_enabling(store):
-    from app.api.v1.api_config import router
-    from app.core.database import get_db
+def test_authenticated_session_cannot_directly_enter_experimental_save(store):
+    from app.core.dependencies import get_current_user
     from app.core.security import create_access_token
 
     _, sessions, _ = store
-    app = FastAPI()
-    app.include_router(router, prefix='/api')
-
-    def isolated_db():
-        with sessions() as db:
-            yield db
-
-    app.dependency_overrides[get_db] = isolated_db
     token = create_access_token(701, 'user')
-    with TestClient(app) as client, pytest.raises(policy.PolicyError, match='调用者仍有活动事务'):
-        client.put('/api/api-config', headers={'Authorization': f'Bearer {token}'}, json=_payload().model_dump())
+    with sessions() as caller:
+        user = get_current_user(authorization=f'Bearer {token}', db=caller)
+        with pytest.raises(policy.PolicyError, match='调用者仍有活动事务'):
+            api_config_service.save_config(caller, user.id, _payload())
     with sessions() as db:
         assert db.query(UserApiConfig).filter_by(user_id=701).one_or_none() is None
 

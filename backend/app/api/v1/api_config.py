@@ -1,11 +1,14 @@
 """
 用户 API 配置路由
 """
-from fastapi import APIRouter, Depends
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Header
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from app.core.exceptions import AppError, ServiceUnavailableError
 from app.models.user import User
 from app.schemas.api_config import (
     ApiConfigOut,
@@ -38,12 +41,25 @@ def save_config(
     payload: ApiConfigSaveIn,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
+    authorization: Optional[str] = Header(None),
 ):
     """保存或更新用户的 API 配置
 
     配置后即刻生效：审查、聊天、安全扫描均使用用户自定义 API。
     """
-    cfg = api_config_service.save_config(db, user.id, payload)
+    if api_config_service._CREDENTIAL_POLICY_SAVE_EXPERIMENT:
+        try:
+            cfg = api_config_service.save_config_for_verified_request(db, user.id, payload, authorization)
+        except AppError:
+            raise
+        except Exception:
+            # Do not log payloads, tokens or traceback locals. A failed commit
+            # can be indeterminate; do not suggest automatic retries.
+            raise ServiceUnavailableError(
+                "配置暂无法保存，请刷新后核对", retryable=False,
+            ) from None
+    else:
+        cfg = api_config_service.save_config(db, user.id, payload)
     return Resp(data=cfg)
 
 
