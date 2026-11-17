@@ -6,14 +6,14 @@ import AppHeader from './AppHeader.vue'
 import ProactivePageGuide from '@/components/ai/ProactivePageGuide.vue'
 import XiaolingGreeter from '@/components/ai/XiaolingGreeter.vue'
 import { useUserStore } from '@/stores/user'
-import { isAdminSharedRoute } from '@/utils/adminSharedLayout'
+import { shouldUseAdminSharedLayout } from '@/utils/adminSharedLayout'
 
 const sidebarVisible = ref(false)
 const AdminLayout = defineAsyncComponent(() => import('@/components/admin/AdminLayout.vue'))
 const route = useRoute()
 const userStore = useUserStore()
 const useAdminSharedLayout = computed(() => (
-  isAdminSharedRoute(route.path) && userStore.isAdmin()
+  shouldUseAdminSharedLayout(route.path, userStore.isAdmin())
 ))
 
 /**
