@@ -17,7 +17,6 @@ EXPECTED_MODULES = {
     'services/billing_reservation_reconciliation_service.py': 'ea7d3a4b24122b6833739278006d18d520390d5784a5e402c86f84b1edb0f226',
     'services/billing_ledger_service.py': 'd4fb310a97cdc5bd394b6a464f7e347776dd7f7dc9e3ff4ab918ecf628d92a7a',
     'services/billing_metered_call.py': 'e188b657c8e9e90bfe3c5baab504cc3e1fa0f3265847f8f20c3f5712c7c243a3',
-    'services/billing_statement_gateway.py': '07b3d66351753bee9ebcc5d31466db9a44ce38f7306f7bb624206d9cb050a2bd',
     'services/enterprise_agent_team_runtime_service.py': 'f7d86d5c1de83d96a06677eab59eb72aecee3b72f3b35fad9fff8f10915a135f',
     'services/enterprise_agent_team_dispatcher.py': 'e90afbf0bf7b0c00f9d9bae6c2e6273de013d59a943e488e6c89dea1fe4bc66e',
     'services/enterprise_assistant_billing_group.py': 'f67915278451a3bd4658c85fed9dd1e8c6a8fe8bf3cab43e67f43a3213288093',
@@ -25,6 +24,7 @@ EXPECTED_MODULES = {
     'models/billing_ledger.py': '9a6f515ae2f19e85c011e940059597a0b270c82ea86513526fdcfd24c0a8666a',
     'models/user.py': '86de7d8a3378b24087fc0362f71c1b56516a30e4e32ad1da936c88c56bceee64',
     'api/v1/billing.py': '3186425eab84d9f70d54da396ab064cc6c6f7acbfbc667f5a03aeb76477b0889',
+    'services/billing_statement_gateway.py': '07b3d66351753bee9ebcc5d31466db9a44ce38f7306f7bb624206d9cb050a2bd',
     'api/v1/enterprise_agent_teams.py': 'aba2c8249e26b29768c30859c218dbf16e054194191b278c5911e0bc9b68ede3',
     'api/__init__.py': 'cc6aa367a02f65af9a856168e9fa68b714ba8433599d3899a75dfdf0f0cc71d4',
     'core/dependencies.py': '218a69b3b0ca1e380b3261619638b90052590b45f2bed868435faa3fce173b11',
@@ -48,10 +48,20 @@ EXPECTED_MODULES = {
     'models/rbac.py': 'f6e6b5a9eb36e70236c051677adfdda4eda2e9cd6d2b63bd89a4dfabb525b699',
 }
 
-# Review these modules as complete combinations, including the billing API
-# and its statement gateway; their call signatures must remain compatible.
-# 4.1.53 used the old entry and API; 4.1.54/55 use the new entry and old API;
-# the sandbox candidate uses the new entry and the reviewed new API.
+# Accept only the production baseline and reviewed platform-cost gate revisions.
+# This keeps a 4.1.55 rollback image compatible while refusing mixed or
+# unreviewed billing gate code.
+REVIEWED_MODULE_PROFILES = {
+    'services/billing_runtime_gate.py': {
+        EXPECTED_MODULES['services/billing_runtime_gate.py'],
+        'dca4a319ec20b8628bb20d088bcb167ce14d99e94ddabb416afbed1906f9d16a',
+        'a137a20730865a1805351d9c5aa0bc3889c4bbcd73e55d61481f971423615581',
+    },
+}
+
+# Pin the entry, logging filter, billing API, and statement gateway as reviewed
+# combinations. This rejects mixed old/new billing implementations while the
+# independently reviewed platform-cost gate profiles remain compatible.
 REVIEWED_ENTRY_PROFILES = {
     (
         '0debff8636df3f2fb8759dd1ebd8cf6145e3abfb4cddd252782a383715e02c5d',
@@ -75,8 +85,10 @@ REVIEWED_ENTRY_PROFILES = {
         EXPECTED_MODULES['services/billing_statement_gateway.py'],
     ),
 }
-PROFILE_MODULES = ('main.py', 'core/error_handlers.py', 'core/uvicorn_log_filter.py', 'api/v1/billing.py',
-                   'services/billing_statement_gateway.py')
+PROFILE_MODULES = (
+    'main.py', 'core/error_handlers.py', 'core/uvicorn_log_filter.py',
+    'api/v1/billing.py', 'services/billing_statement_gateway.py',
+)
 
 
 def module_digest(path: pathlib.Path) -> str:
@@ -84,12 +96,16 @@ def module_digest(path: pathlib.Path) -> str:
     return hashlib.sha256(ast.dump(module, include_attributes=False).encode()).hexdigest()
 
 
+def module_is_reviewed(path: str, digest: str) -> bool:
+    return digest in REVIEWED_MODULE_PROFILES.get(path, {EXPECTED_MODULES[path]})
+
+
 def probe(root: pathlib.Path) -> bool:
     # Parse one module at a time to fit the isolated image probe memory cap.
-    for path, expected in EXPECTED_MODULES.items():
+    for path in EXPECTED_MODULES:
         if path in PROFILE_MODULES:
             continue
-        if module_digest(root / path) != expected:
+        if not module_is_reviewed(path, module_digest(root / path)):
             return False
     main, handlers, hook, billing, statement = (root / path for path in PROFILE_MODULES)
     hook_digest = module_digest(hook) if os.path.lexists(hook) else None

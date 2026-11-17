@@ -16,6 +16,7 @@ _MODEL_MODULES = (
     "api_config",
     "audit_log",
     "billing_ledger",
+    "platform_model_cost_attempt",
     "beta_invite_code",
     "code_file",
     "code_version",

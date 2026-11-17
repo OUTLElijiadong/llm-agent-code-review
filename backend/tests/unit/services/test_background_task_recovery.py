@@ -12,11 +12,11 @@ from app.models.user import User
 from app.services import background_task_recovery
 
 
-def _seed_recoverable_run(db, *, status="completed", raise_error=False):
+def _seed_recoverable_run(db, *, status="completed", raise_error=False, surface="user", role="user"):
     user = User(
         username="recovery-owner",
         password="x" * 60,
-        role="user",
+        role=role,
         status=1,
     )
     db.add(user)
@@ -29,7 +29,7 @@ def _seed_recoverable_run(db, *, status="completed", raise_error=False):
         idempotency_key="recovery-idempotency",
         trace_id="recovery-trace",
         sent_from="agent:code_reviewer",
-        send_to=f"session:user:{session_key}",
+        send_to=f"session:{surface}:{session_key}",
         message_type="task.result",
         subject="审查结果",
         payload_json="{}",
@@ -43,7 +43,7 @@ def _seed_recoverable_run(db, *, status="completed", raise_error=False):
     run = AgentResponseRun(
         run_id="recoverable-run",
         user_id=user.id,
-        surface="user",
+        surface=surface,
         session_key=session_key,
         mesh_message_id=message.message_id,
         status="failed",
@@ -102,6 +102,36 @@ def test_recovered_terminal_run_finishes_its_processing_mesh_message(
     db.refresh(message)
     assert finish_calls == [("recovery-message", status == "completed")]
     assert message.status == expected_message_status
+
+
+def test_admin_recovery_restores_platform_cost_scope(db, monkeypatch):
+    user, _run, _message, _status, _raise_error = _seed_recoverable_run(
+        db, surface="admin", role="admin",
+    )
+    Session = sessionmaker(bind=db.get_bind(), autoflush=False, expire_on_commit=False)
+    monkeypatch.setattr(background_task_recovery, "SessionLocal", Session)
+
+    class CheckedResume:
+        def __init__(self, session, owner, *, surface, session_key):
+            pass
+
+        async def resume(self, *, run_id, action):
+            from app.services.billing_runtime_gate import _scope
+
+            scope = _scope.get()
+            assert action == "retry"
+            assert scope["platform_cost"] is True
+            assert scope["platform_actor_user_id"] == user.id
+            assert scope["platform_run_id"] == run_id
+            return SimpleNamespace(status="completed", output_text="恢复完成", error="")
+
+    monkeypatch.setattr(background_task_recovery, "AgentResponsesService", CheckedResume)
+    background_task_recovery._resume_agent_run(background_task_recovery.AgentRunRecovery(
+        run_id="recoverable-run",
+        user_id=int(user.id),
+        surface="admin",
+        session_key="recovery-session",
+    ))
 
 
 @pytest.mark.parametrize("status", ["waiting_approval", "waiting_input"])

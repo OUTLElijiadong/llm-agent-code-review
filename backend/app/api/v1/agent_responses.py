@@ -8,7 +8,7 @@ import hmac
 import json
 import re
 import uuid
-from contextlib import contextmanager, nullcontext
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, List, Literal, Mapping, Optional, Sequence
 
@@ -50,50 +50,47 @@ from app.utils.input_validation import normalize_plain_text
 router = APIRouter()
 _BACKGROUND_RESPONSE_TASKS: set[asyncio.Task[Any]] = set()
 _BILLABLE_AGENT_ACTIONS = frozenset({"start", "approve", "reject", "answer", "retry"})
+_RETRYABLE_RESPONSE_STATUSES = frozenset({"failed", "incomplete", "max_rounds_exceeded"})
 
 
-@contextmanager
-def _trusted_response_billing_scope(session_factory, user: User, surface: str):
-    """Attribute paid Responses model attempts to the authenticated personal wallet.
+def _trusted_response_billing_scope(session_factory, user: User, surface: str, *, run_id: str | None = None):
+    from app.services.agent_response_billing_service import trusted_response_billing_scope
 
-    Enterprise and platform surfaces intentionally fail closed here: this route has
-    no trusted enterprise/group conversation context or platform cost center.
-    """
-    if not settings.billing_commercial_metering_ready:
-        yield
-        return
-
-    from app.models.billing_ledger import BillingWallet
-    from app.services.billing_ledger_service import BillingError
-    from app.services.billing_runtime_gate import billing_scope
-
-    if surface != "user":
-        raise BillingError("当前 Agent 入口尚未配置个人钱包以外的可信计费归属")
-    if not callable(session_factory) or type(getattr(user, "id", None)) is not int or user.id <= 0:
-        raise BillingError("当前 Agent 请求缺少可验证的账号或数据库会话")
-
-    with session_factory() as billing_db:
-        wallet = billing_db.query(BillingWallet).filter_by(owner_type="user", owner_id=user.id).first()
-        wallet_id = int(wallet.id) if wallet is not None else None
-    if wallet_id is None:
-        raise BillingError("个人积分账户尚未开通，请先购买积分或会员")
-
-    with billing_scope(
-        session_factory=session_factory,
-        user_id=int(user.id),
-        personal_wallet_id=wallet_id,
-        max_input_tokens=int(settings.deepseek_context_window_tokens),
-        max_output_tokens=int(settings.deepseek_max_output_tokens),
-        allow_personal=False,
-        usage_kind="member",
-    ):
-        yield
+    return trusted_response_billing_scope(session_factory, user, surface, run_id=run_id)
 
 
-def _response_action_billing_scope(session_factory, user: User, surface: str, action: str):
+def _response_action_billing_scope(
+    session_factory, user: User, surface: str, action: str, *, run_id: str | None = None,
+):
     if action not in _BILLABLE_AGENT_ACTIONS:
         return nullcontext()
-    return _trusted_response_billing_scope(session_factory, user, surface)
+    return _trusted_response_billing_scope(session_factory, user, surface, run_id=run_id)
+
+
+def _freeze_interrupted_admin_attempts(
+    session_factory, *, user_id: int, session_key: str, run_id: str,
+) -> int:
+    """Freeze old platform calls before a manual retry claims a failed run."""
+    if not callable(session_factory):
+        return 0
+    from app.services import platform_model_cost_service
+
+    with session_factory.begin() as db:
+        row = db.query(AgentResponseRun).filter(
+            AgentResponseRun.run_id == run_id,
+            AgentResponseRun.user_id == user_id,
+            AgentResponseRun.surface == "admin",
+            AgentResponseRun.session_key == session_key,
+        ).with_for_update().one_or_none()
+        if row is None or row.status not in _RETRYABLE_RESPONSE_STATUSES:
+            return 0
+        try:
+            checkpoint = json.loads(row.checkpoint_json or "{}")
+        except (TypeError, json.JSONDecodeError):
+            checkpoint = {}
+        if isinstance(checkpoint, Mapping) and checkpoint.get("recovery_requested") is True:
+            raise InvalidRunStateError("小菱正在后台恢复此运行，请等待恢复结束后再重试")
+        return platform_model_cost_service.mark_interrupted_run_attempts(db, run_id)
 
 
 @router.get(
@@ -1760,6 +1757,17 @@ async def stream_agent_response(
                         .first()
                     )
                     mesh_message_id = active_row.mesh_message_id if active_row is not None else ""
+                    if (
+                        payload.action == "retry"
+                        and payload.surface == "admin"
+                        and owns_run_db
+                    ):
+                        _freeze_interrupted_admin_attempts(
+                            run_session_factory,
+                            user_id=int(run_user.id),
+                            session_key=payload.session_id,
+                            run_id=run_id,
+                        )
                     if payload.action == "cancel" and not mesh_message_id:
                         # 首次执行尚未结束前，关联 ID 还没写回运行行。当前会话同一时刻
                         # 只允许一个活动 Responses 运行，因此唯一 processing 消息就是它的来源。
@@ -1804,6 +1812,7 @@ async def stream_agent_response(
                         run_user,
                         payload.surface,
                         payload.action,
+                        run_id=run_id,
                     )
                     with billing_context:
                         if payload.action == "start":

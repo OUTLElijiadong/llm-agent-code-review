@@ -10,11 +10,10 @@ import subprocess
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "lib"))
-import pytest  # noqa: E402
-
-from billing_evidence_compatibility import EXPECTED_MODULES as FINGERPRINTS  # noqa: E402
-from billing_evidence_compatibility import probe  # noqa: E402
-from billing_evidence_schema_compatibility import EXPECTED, classify  # noqa: E402
+import pytest
+from billing_evidence_compatibility import EXPECTED_MODULES as FINGERPRINTS
+from billing_evidence_compatibility import module_is_reviewed, probe
+from billing_evidence_schema_compatibility import EXPECTED, classify
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -130,6 +129,14 @@ def test_reader_requires_reviewed_modules_and_rejects_old_or_altered_code(tmp_pa
         assert not probe(tmp_path)
     except FileNotFoundError:
         pass  # The CLI catches errors and reports unsupported.
+
+
+def test_platform_cost_gate_accepts_baseline_and_reviewed_hotfix_only():
+    path = 'services/billing_runtime_gate.py'
+    assert module_is_reviewed(path, FINGERPRINTS[path])
+    assert module_is_reviewed(path, 'dca4a319ec20b8628bb20d088bcb167ce14d99e94ddabb416afbed1906f9d16a')
+    assert module_is_reviewed(path, 'a137a20730865a1805351d9c5aa0bc3889c4bbcd73e55d61481f971423615581')
+    assert not module_is_reviewed(path, '0' * 64)
 
 
 @pytest.mark.parametrize('change', ['old_entry', 'remove_api_router', 'override_entry'])
@@ -460,6 +467,16 @@ def test_121_requires_reviewed_reader_and_accepts_it(tmp_path):
         result = run_compatibility_gate(tmp_path, schema='complete', revision='121_billing_model_evidence',
                                         capability=capability)
         assert result.returncode != 0 and 'ALLOWED:' not in result.stdout
+
+
+def test_122_known_descendant_keeps_complete_121_schema_with_activation_marker(tmp_path):
+    result = run_compatibility_gate(
+        tmp_path,
+        schema='complete',
+        revision='122_platform_model_cost_ledger',
+        marker=True,
+    )
+    assert result.returncode == 0 and 'ALLOWED:complete' in result.stdout
 
 
 def test_partial_migration_and_revision_mismatch_stop_writers(tmp_path):

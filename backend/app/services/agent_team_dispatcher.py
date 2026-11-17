@@ -6,6 +6,7 @@ import json
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import nullcontext
 from typing import Any
+from uuid import uuid4
 
 from loguru import logger
 from sqlalchemy.orm import Session, sessionmaker
@@ -112,11 +113,6 @@ def _owner_access_error(db: Session, owner_id: int, task_input: dict | None = No
 def _task_billing_scope(db: Session, team: AgentTeam, task: AgentTeamTask,
                         member: Any, claimed: dict[str, Any]):
     """Bill paid personal-team model attempts to the owner and fence unknown retries."""
-    if not settings.billing_commercial_metering_ready:
-        return nullcontext()
-    if team.surface != "user":
-        raise BillingError("管理端 Agent 团队尚无可验证的付款主体，禁止平台代付")
-
     bind = db.get_bind()
     factory = sessionmaker(
         bind=getattr(bind, "engine", bind), autocommit=False, autoflush=False, expire_on_commit=False,
@@ -130,6 +126,47 @@ def _task_billing_scope(db: Session, team: AgentTeam, task: AgentTeamTask,
     request_prefix = f"agent-team:{team_id}:task:{task_id}:attempt-{int(claimed.get('attempt_count') or 0)}"
     unresolved_prefix = f"agent-team:{team_id}:task:{task_id}:attempt-%"
     task_input = agent_team_service._unjson(task.input_json, {})
+
+    if team.surface == "admin":
+        from app.services import platform_model_cost_service
+        from app.services.agent_response_billing_service import authorize_platform_admin
+        from app.services.billing_runtime_gate import platform_cost_scope
+
+        platform_run_id = f"admin-agent-team-task:{team_id}:{task_id}"
+        with factory.begin() as billing_db:
+            platform_model_cost_service.mark_interrupted_run_attempts(billing_db, platform_run_id)
+
+        def platform_attempt_guard(guard_db: Session, _request_key: str) -> None:
+            authorize_platform_admin(guard_db, owner_id)
+            try:
+                _active_team, _active_task, active_member = agent_team_service.require_active_task_lease(
+                    guard_db, team_id=team_id, task_id=task_id, lease_token=lease_token,
+                    owner_user_id=owner_id, lock=True,
+                )
+            except agent_team_service.AgentTeamError as exc:
+                raise BillingError("管理员 Agent 团队任务租约失效，模型请求已阻断") from exc
+            if int(active_member.id) != member_id or active_member.address != address:
+                raise BillingError("管理员 Agent 团队成员已变化，模型请求已阻断")
+            access_error = _owner_access_error(
+                guard_db, owner_id, task_input, team_id=team_id, task_id=task_id,
+            )
+            if access_error:
+                raise BillingError(access_error)
+
+        return platform_cost_scope(
+            session_factory=factory,
+            actor_user_id=owner_id,
+            run_id=platform_run_id,
+            max_input_tokens=int(settings.deepseek_context_window_tokens),
+            max_output_tokens=int(settings.deepseek_max_output_tokens),
+            authorization_guard=platform_attempt_guard,
+            request_key_prefix=f"admin-team:{team_id}:{task_id}:{uuid4().hex}",
+        )
+
+    if team.surface != "user":
+        raise BillingError("当前 Agent 团队入口没有已配置的可信付款归属")
+    if not settings.billing_commercial_metering_ready:
+        return nullcontext()
 
     with factory.begin() as billing_db:
         wallet = billing_db.query(BillingWallet).filter_by(owner_type="user", owner_id=owner_id).first()
