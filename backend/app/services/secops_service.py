@@ -38,7 +38,15 @@ from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
 from app.models.audit_log import AuditLog
 from app.models.pentest import PentestEngagement
 from app.models.user import User
-from app.services import copilot_security_service, geoip_service, observability_service, ops_service
+from app.services import (
+    copilot_security_rules as rules,
+)
+from app.services import (
+    copilot_security_service,
+    geoip_service,
+    observability_service,
+    ops_service,
+)
 
 # 宿主机执行器要求的来源标识（见 ops_service 对 INTERNAL_SECURITY_ACTIONS 的两条校验分支）：
 # - 最高管理员在小菱/安全中心里发起 → "security_center"（interactive）
@@ -209,8 +217,9 @@ def _extract_events(action: str, result: dict) -> list[dict]:
     # 其次：各传感器的聚合形态
     events: list[dict] = []
     if action == "ssh_login_events":
+        # 只把失败尝试算作攻击：accepted_by_ip 是"谁登录成功了"，管理员自己也在里面，
+        # 把它当成攻击源会导致把自己封掉。
         events += _pairs_to_events(payload.get("failed_by_ip"), kind="ssh_failed")
-        events += _pairs_to_events(payload.get("accepted_by_ip"), kind="ssh_accepted")
     elif action == "nginx_attack_events":
         events += _pairs_to_events(payload.get("by_ip"), kind="web_attack")
         events += _pairs_to_events(payload.get("http_failures_by_ip"), kind="http_failure")
@@ -292,6 +301,7 @@ def threat_digest(
             "error": result.get("error"),
         })
 
+    allowlist = list(copilot_security_service.load_policy(db).get("ip_allowlist") or [])
     profile: dict[str, dict] = {}
     for action, result in raw.items():
         for item in _extract_events(action, result)[:_MAX_SOURCES * 4]:
@@ -325,6 +335,10 @@ def threat_digest(
             else "medium" if entry["hits"] >= 3
             else "low"
         )
+        allowlisted = bool(allowlist) and rules.ip_allowed(ip, allowlist)
+        if allowlisted:
+            # 自家出口/办公网段本来就在白名单里：不判 critical，也不建议封禁。
+            severity = "medium" if severity in {"critical", "high"} else severity
         sources.append({
             "ip": ip,
             "hits": entry["hits"],
@@ -337,13 +351,22 @@ def threat_digest(
                 "city": geo.get("city"),
             },
             "last_seen": entry["last_seen"],
-            "recommended": "block" if severity in {"critical", "high"} else "watch",
+            "allowlisted": allowlisted,
+            "recommended": (
+                "allowlisted" if allowlisted
+                else "block" if severity in {"critical", "high"}
+                else "watch"
+            ),
         })
     sources.sort(key=lambda row: (row["severity"] != "critical", row["severity"] != "high", -row["hits"]))
 
     recommendations: list[str] = []
     if any(row["recommended"] == "block" for row in sources):
         recommendations.append("存在多源同时命中的攻击源，建议先看候选名单再封禁（封禁需二次确认）")
+    if any(row.get("allowlisted") for row in sources):
+        recommendations.append(
+            "有来源命中但属于小菱安全中心 IP 白名单（自家出口），已降级且不建议封禁"
+        )
     if not any(sensor["ok"] for sensor in sensors):
         recommendations.append("所有传感器都不可用：先确认宿主机执行器与采集脚本，再谈自动处置")
     if any(sensor["ok"] is False for sensor in sensors):
@@ -438,7 +461,6 @@ def apply_block(
     target = _normalize_ip(ip)
     duration = max(60, min(int(duration_seconds or 3600), 86_400))
     policy_ip_allowlist = list(copilot_security_service.load_policy(db).get("ip_allowlist") or [])
-    from app.services import copilot_security_rules as rules
 
     if policy_ip_allowlist and rules.ip_allowed(target, policy_ip_allowlist):
         raise ValidationError("该地址在小菱安全中心的白名单内，拒绝封禁（先确认不是自家出口）")
@@ -681,7 +703,6 @@ def patrol_once(db: Session, *, actor: Optional[User] = None) -> dict:
 
     if getattr(settings, "secops_auto_block_enabled", False):
         allowlist = list(copilot_security_service.load_policy(db).get("ip_allowlist") or [])
-        from app.services import copilot_security_rules as rules
 
         for row in [item for item in digest["sources"] if item["severity"] == "critical"][:5]:
             target = row["ip"]

@@ -83,6 +83,8 @@ class TestThreatDigest:
         # 只有 SSH 失败次数的境外地址同样应当被抓成高危并建议封禁
         assert by_ip["149.56.217.226"]["hits"] == 29
         assert by_ip["149.56.217.226"]["recommended"] == "block"
+        # 成功登录（accepted_by_ip）不计入攻击命中
+        assert "183.6.24.50" not in by_ip or by_ip["183.6.24.50"]["hits"] == 0
         # 低量噪音不判 critical
         assert by_ip["203.0.113.9"]["severity"] in {"low", "medium"}
 
@@ -99,6 +101,19 @@ class TestThreatDigest:
     def test_digest_is_audited(self, db, ops_stub):
         secops_service.threat_digest(db, None)
         assert db.query(AuditLog).filter(AuditLog.action == "secops.threat_digest").count() == 1
+
+
+class TestAllowlistedSource:
+    def test_allowlisted_source_is_downgraded_and_not_blocked(self, db, ops_stub):
+        from app.services import copilot_security_service as cs
+
+        cs.save_policy(db, patch={"ip_allowlist": ["45.135.228.155/32"]})
+        digest = secops_service.threat_digest(db, None)
+        row = [item for item in digest["sources"] if item["ip"] == "45.135.228.155"][0]
+        assert row["allowlisted"] is True
+        assert row["severity"] != "critical"
+        assert row["recommended"] == "allowlisted"
+        assert any("白名单" in tip for tip in digest["recommendations"])
 
 
 class TestBlocking:
