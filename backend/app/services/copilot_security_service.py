@@ -1157,8 +1157,8 @@ _POSTURE_CHECKS: tuple[tuple[str, str, int, bool, str], ...] = (
     ("kill_switch_off", "紧急停机开关未开启", 4, True, "停机只用于事故处置；日常请关闭。"),
     ("ip_allowlist", "配置了来源 IP 白名单", 10, True,
      "把管理小菱限制在内网出口/办公固定 IP，例如 10.0.0.0/8、203.0.113.7/32。"),
-    ("trust_proxy_headers", "未无条件信任转发头", 3, False,
-     "除非前置反代会覆写 X-Forwarded-For，否则不要打开，防止伪造来源。"),
+    ("trust_proxy_headers", "转发头可信范围已界定", 3, False,
+     "采信 X-Forwarded-For 时必须在 trusted_proxies 里限定反代网段，否则来源可被伪造。"),
     ("bind_session_to_ip", "会话与来源 IP 绑定", 10, True, "阻止 cookie/令牌被搬到其他主机继续用。"),
     ("idle_timeout", "配置了会话空闲超时", 8, True, "建议 1800s：人离开后会话自动失效。"),
     ("absolute_timeout", "配置了会话绝对超时", 6, True, "建议 28800s：即使一直在用也要强制重登。"),
@@ -1194,7 +1194,10 @@ def _check_passed(key: str, policy: dict) -> bool:
     if key == "ip_allowlist":
         return bool(policy.get("ip_allowlist"))
     if key == "trust_proxy_headers":
-        return not bool(policy.get("trust_proxy_headers"))
+        # 要么不采信转发头，要么采信但限定可信代理网段；"打开了又不限代理"才是问题。
+        if not policy.get("trust_proxy_headers"):
+            return True
+        return bool(policy.get("trusted_proxies"))
     if key == "bind_session_to_ip":
         return bool(policy.get("bind_session_to_ip"))
     if key == "idle_timeout":
