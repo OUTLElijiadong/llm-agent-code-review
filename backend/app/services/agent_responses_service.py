@@ -1154,8 +1154,10 @@ class NativeResponsesTransport:
         from app.services.billing_ledger_service import BillingError
         from app.services.billing_runtime_gate import before_stream_send, begin_attempt, finish_attempt, unknown_attempt
 
+        request_url = _responses_url(self._config.base_url)
+        billable_payload = prepare_deepseek_responses_payload(payload, request_url)
         ticket = begin_attempt(
-            model_name=payload.get("model", self._config.model), payload=dict(payload),
+            model_name=billable_payload.get("model", self._config.model), payload=billable_payload,
             provider_name=self._config.provider, base_url=self._config.base_url,
             credential_source=getattr(
                 self._config, "billing_credential_source", getattr(self._config, "source", "system"),
@@ -1163,7 +1165,7 @@ class NativeResponsesTransport:
         )
         try:
             before_stream_send(ticket)
-            async for event in self._stream_without_billing(payload):
+            async for event in self._stream_without_billing(billable_payload):
                 if ticket is not None and not ticket.get("done") and event.get("type") in {
                     "response.completed", "response.failed", "response.incomplete", "response.cancelled",
                 }:
@@ -1203,7 +1205,7 @@ class NativeResponsesTransport:
         async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
             async with client.stream(
                 "POST", url, headers=headers,
-                json=prepare_deepseek_responses_payload(payload, url),
+                json=payload,
             ) as response:
                 if response.status_code >= 400:
                     raw = (await response.aread()).decode("utf-8", errors="replace")

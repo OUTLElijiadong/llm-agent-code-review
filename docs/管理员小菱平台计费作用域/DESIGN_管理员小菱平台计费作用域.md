@@ -28,10 +28,12 @@ flowchart LR
 ## 请求流程
 
 1. 请求入口读取服务端账号和管理员 RBAC；后台路径同样重验账号有效性、运行/团队租约和权限。
-2. 作用域仅允许托管凭据和 DeepSeek 官方端点；BYOK 沿用调用方自付语义，不记成平台供应商成本。
+2. DeepSeek 端点先执行请求级协议归一化，再将同一个归一化 payload 交给计量门和供应商；兼容层只移除官方文档明确不支持的 reasoning `summary` 与 `encrypted_content`。其他未知字段仍由计量门拒绝。BYOK 沿用调用方自付语义，不记成平台供应商成本。
 3. 发请求前固定价格快照与最大 Token 成本。模型、端点、输出上界或计价数据不匹配即拒绝。
 4. 成功只用供应商返回且通过上界校验的 usage 结算。传输异常/usage 不可信写入 `unknown`，禁止自动重试；同一请求的发送状态只能从未开始变为已开始一次。人工重试仅在运行处于可重试终态且没有后台恢复任务时先冻结旧预占，再原子认领检查点。
 5. 平台管理员每轮调用继续写 `AiCallLog`，不创建个人或企业钱包预占。
+
+协议依据：[DeepSeek Responses API 输入项说明](https://api-docs.deepseek.com/guides/responses_api/)说明 reasoning 回传支持纯文本 content，不支持 summary 与 encrypted_content。归一化在计量预占之前运行，确保计价上界与实际发送内容一致。
 
 ## 失败处理
 

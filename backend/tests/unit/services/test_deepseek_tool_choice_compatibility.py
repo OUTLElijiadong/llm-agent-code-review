@@ -32,7 +32,8 @@ def reasoning_item():
      {"type": "function_call_output", "call_id": "one", "output": "ok"},
      {"type": "function_call", "call_id": "forced-none", "name": "read_forum", "arguments": "{}"},
      {"type": "function_call_output", "call_id": "forced-none", "output": "ok"}],
-    [{"type": "reasoning", "summary": [{"type": "summary_text", "text": "摘要不能替代原reasoning"}]},
+    [{"type": "reasoning", "summary": [{"type": "summary_text", "text": "摘要不能替代原reasoning"}],
+     "encrypted_content": "synthetic-unsupported-reasoning"},
      {"type": "function_call", "call_id": "one", "name": "read_forum", "arguments": "{}"},
      {"type": "function_call_output", "call_id": "one", "output": "ok"}],
 ])
@@ -53,7 +54,12 @@ async def test_missing_reasoning_history_continues_locally_without_fabrication(m
         return provider_response(outgoing)
     await send(monkeypatch, kind, payload, handler)
     assert seen[0]["reasoning"]["effort"] == "none"
-    assert seen[0]["input"] == history
+    expected_history = copy.deepcopy(history)
+    for item in expected_history:
+        if item.get("type") == "reasoning":
+            item.pop("summary", None)
+            item.pop("encrypted_content", None)
+    assert seen[0]["input"] == expected_history
     assert seen[0]["tools"] == payload["tools"]
     assert payload == original
 

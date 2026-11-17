@@ -29,3 +29,4 @@ flowchart TD
 - A–F 的本地实现与隔离验证已完成：管理员 Responses、恢复、管理员团队、计量隔离、权限撤销、手动重试和同运行未知结果并发拦截均有覆盖。
 - SQLite 迁移升级、回退、再升级通过；生产 MySQL 迁移、生产发布和真实管理员 Safari 调用须在发布后核验。
 - DeepSeek 官方价格于 2026-11-17 核对，来源、费率和定价版本写入每条平台成本记录。
+- 首次生产 Safari 重试确认平台付款作用域已进入计量门，随后发现历史 reasoning 项含 DeepSeek Responses 不支持的 `summary` / `encrypted_content`。新增 4.1.57 修复：先移除官方明确不支持的字段，再让同一份 payload 经过计量和发送；其他未知字段继续拒绝。

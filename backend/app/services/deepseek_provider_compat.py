@@ -45,6 +45,20 @@ def prepare_deepseek_responses_payload(payload: Mapping[str, Any], upstream_url:
     outgoing = dict(payload)
     if urlsplit(upstream_url).hostname != "api.deepseek.com":
         return outgoing
+    input_items = outgoing.get("input")
+    if isinstance(input_items, list):
+        normalized_items = []
+        for item in input_items:
+            if isinstance(item, Mapping) and item.get("type") == "reasoning":
+                normalized_item = dict(item)
+                # DeepSeek accepts reasoning_text content but does not support
+                # Responses' summary or encrypted_content pass-back fields.
+                normalized_item.pop("summary", None)
+                normalized_item.pop("encrypted_content", None)
+                normalized_items.append(normalized_item)
+            else:
+                normalized_items.append(item)
+        outgoing["input"] = normalized_items
     reasoning = payload.get("reasoning")
     if reasoning is not None and not isinstance(reasoning, Mapping):
         return outgoing  # 不把格式不合法的调用方请求悄悄修成其他含义。

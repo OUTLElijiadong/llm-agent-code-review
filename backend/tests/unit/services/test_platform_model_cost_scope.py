@@ -100,6 +100,96 @@ async def test_native_admin_responses_transport_calls_pro_and_settles_platform_c
 
 
 @pytest.mark.asyncio
+async def test_native_admin_transport_normalizes_unsupported_deepseek_reasoning_fields_before_metering(db, monkeypatch):
+    user = User(username="native-platform-reasoning-admin", password="x", role="admin", status=1)
+    db.add(user)
+    db.commit()
+    _factory, scope = _platform_scope(db, user, run_id="native-admin-reasoning-run")
+    monkeypatch.setattr(billing_runtime_gate.settings, "billing_commercial_metering_ready", True)
+    monkeypatch.setattr(billing_runtime_gate.settings, "billing_allow_unmetered_external_calls", False)
+    transport = NativeResponsesTransport(ApiConfig(
+        api_key="platform-managed-key", base_url="https://api.deepseek.com/v1", model="deepseek-v4-pro",
+        provider="deepseek", source="system",
+    ))
+    sent = []
+
+    async def completed(payload):
+        sent.append(payload)
+        yield {"type": "response.completed", "response": {
+            "model": "deepseek-v4-pro", "usage": {"input_tokens": 11, "output_tokens": 4},
+        }}
+
+    monkeypatch.setattr(transport, "_stream_without_billing", completed)
+    original_payload = {
+        "model": "deepseek-v4-pro",
+        "input": [
+            {
+                "type": "reasoning", "id": "reasoning-1", "status": "completed",
+                "content": [{"type": "reasoning_text", "text": "synthetic reasoning"}],
+                "summary": [{"type": "summary_text", "text": "unsupported summary"}],
+                "encrypted_content": "synthetic-encrypted-reasoning",
+            },
+            {"type": "message", "role": "user", "content": "检查待审批事项"},
+        ],
+        "max_output_tokens": 64,
+    }
+
+    with scope:
+        events = [event async for event in transport._stream(original_payload)]
+
+    row = db.query(PlatformModelCostAttempt).one()
+    assert sent[0]["input"][0] == {
+        "type": "reasoning", "id": "reasoning-1", "status": "completed",
+        "content": [{"type": "reasoning_text", "text": "synthetic reasoning"}],
+    }
+    assert "encrypted_content" in original_payload["input"][0]
+    assert "summary" in original_payload["input"][0]
+    assert events[-1]["type"] == "response.completed"
+    assert row.status == "settled" and row.actual_cost_cny_micros == 207
+    assert db.query(BillingReservation).count() == 0
+    assert db.query(BillingWallet).count() == 0
+
+
+@pytest.mark.asyncio
+async def test_native_admin_transport_keeps_unknown_reasoning_fields_fail_closed(db, monkeypatch):
+    user = User(username="native-platform-unknown-field-admin", password="x", role="admin", status=1)
+    db.add(user)
+    db.commit()
+    _factory, scope = _platform_scope(db, user, run_id="native-admin-unknown-field-run")
+    monkeypatch.setattr(billing_runtime_gate.settings, "billing_commercial_metering_ready", True)
+    transport = NativeResponsesTransport(ApiConfig(
+        api_key="platform-managed-key", base_url="https://api.deepseek.com/v1", model="deepseek-v4-pro",
+        provider="deepseek", source="system",
+    ))
+    sent = []
+
+    async def never_sent(payload):
+        sent.append(payload)
+        yield {}
+
+    monkeypatch.setattr(transport, "_stream_without_billing", never_sent)
+    payload = {
+        "model": "deepseek-v4-pro",
+        "input": [
+            {
+                "type": "reasoning", "content": [{"type": "reasoning_text", "text": "synthetic"}],
+                "provider_extension": "unknown",
+            },
+            {"type": "message", "role": "user", "content": "检查待审批事项"},
+        ],
+        "max_output_tokens": 64,
+    }
+
+    with scope, pytest.raises(BillingError, match="推理项字段未知"):
+        _ = [event async for event in transport._stream(payload)]
+
+    assert sent == []
+    assert db.query(PlatformModelCostAttempt).count() == 0
+    assert db.query(BillingReservation).count() == 0
+    assert db.query(BillingWallet).count() == 0
+
+
+@pytest.mark.asyncio
 async def test_admin_responses_api_binds_real_start_to_platform_scope(db, monkeypatch):
     from app.api.v1 import agent_responses as api_module
     from app.services.deepseek_responses_runtime import RuntimeResult
