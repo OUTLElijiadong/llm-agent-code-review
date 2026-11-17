@@ -18,7 +18,7 @@ from app.models.user import User
 from app.services import agent_model_service, agent_responses_service, api_config_service, system_config_service
 from app.services.billing_ledger_service import BillingError, get_or_create_wallet, grant
 from app.services.billing_runtime_gate import billing_scope
-from app.utils.api_resolver import encrypt_api_key
+from app.utils.api_resolver import encrypt_api_key, resolve_api_config
 
 
 @pytest.mark.asyncio
@@ -181,3 +181,29 @@ async def test_config_read_failure_remains_nonbillable_on_first_runtime(db, monk
     )
     _, runtime = await service._runtime("first-after-config-read", None)
     assert runtime._transport._config.billing_credential_source == "fallback"
+
+
+@pytest.mark.parametrize("case", ["no_config", "explicit_delete", "already_inactive"])
+def test_existing_system_selection_paths_remain_distinguishable_in_repair_design(db, monkeypatch, case):
+    """Current source selection is observed only; it is not a paid-use authorization."""
+    settings = agent_responses_service.settings
+    monkeypatch.setattr(settings, "enforce_ai_base_url_dns_check", False)
+    monkeypatch.setattr(settings, "deepseek_api_key", "isolated-system-key")
+    monkeypatch.setattr(settings, "deepseek_base_url", "https://api.deepseek.com/v1")
+    monkeypatch.setattr(settings, "deepseek_model", "deepseek-v4-flash")
+    monkeypatch.setattr(system_config_service, "get_llm_config", lambda _db: None)
+    db.add(User(id=22, username="admin-reset", password="test-only", role="super_admin", status=1))
+    if case != "no_config":
+        db.add(UserApiConfig(
+            user_id=22, provider="deepseek", base_url="https://api.deepseek.com/v1",
+            model="deepseek-v4-flash", is_active=case == "explicit_delete",
+            api_key_enc=encrypt_api_key("isolated-user-key"),
+        ))
+    db.commit()
+    if case == "explicit_delete":
+        assert resolve_api_config(db, 22).source == "user"
+        api_config_service.delete_config(db, 22)
+        assert db.query(UserApiConfig).filter_by(user_id=22).one_or_none() is None
+    elif case == "already_inactive":
+        assert db.query(UserApiConfig).filter_by(user_id=22).one().is_active is False
+    assert resolve_api_config(db, 22).billing_credential_source == "system"
