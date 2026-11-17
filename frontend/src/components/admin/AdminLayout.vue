@@ -70,6 +70,12 @@ const visibleMenuItems = computed(() => (
   ))
 ))
 
+function isCurrentNavigationPath(path: string): boolean {
+  const currentPath = route.path.replace(/\/+$/, '').toLowerCase()
+  const navigationPath = path.replace(/\/+$/, '').toLowerCase()
+  return currentPath === navigationPath || currentPath.startsWith(`${navigationPath}/`)
+}
+
 const navigationGroups = computed(() => ADMIN_NAVIGATION_GROUPS.map((group) => ({
   ...group,
   items: group.paths
@@ -88,9 +94,7 @@ watch(
 )
 
 const activePath = computed(() => {
-  const found = visibleMenuItems.value.find(
-    (item) => route.path === item.path || route.path.startsWith(item.path + '/'),
-  )
+  const found = visibleMenuItems.value.find((item) => isCurrentNavigationPath(item.path))
   return found?.path || '/admin/operations'
 })
 
@@ -140,9 +144,9 @@ watch(
   async (current, previous) => {
     const pathChanged = current.split(/[?#]/, 1)[0] !== previous.split(/[?#]/, 1)[0]
     if (pathChanged) navigationInteracted.value = false
-    const activeGroup = navigationGroups.value.find((group) => group.items.some((item) => (
-      route.path === item.path || route.path.startsWith(`${item.path}/`)
-    )))
+    const activeGroup = navigationGroups.value.find((group) => (
+      group.items.some((item) => isCurrentNavigationPath(item.path))
+    ))
     if (activeGroup) expandedGroups.value = { ...expandedGroups.value, [activeGroup.key]: true }
     await nextTick()
     contentRef.value?.scrollTo?.({ top: 0, behavior: 'auto' })
@@ -153,7 +157,7 @@ watch(
 function isGroupExpanded(key: AdminNavigationGroupKey): boolean {
   if (Object.prototype.hasOwnProperty.call(expandedGroups.value, key)) return expandedGroups.value[key] === true
   const group = navigationGroups.value.find((item) => item.key === key)
-  return Boolean(group?.items.some((item) => route.path === item.path || route.path.startsWith(`${item.path}/`)))
+  return Boolean(group?.items.some((item) => isCurrentNavigationPath(item.path)))
 }
 
 function toggleGroup(key: AdminNavigationGroupKey): void {

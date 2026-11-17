@@ -79,6 +79,11 @@ it('管理员布局按平台、计费、工作区和社区分组，计费入口�
         component: { template: '<main />' },
         meta: path === '/forum' ? { workspace: 'personal' as const } : {},
       } as RouteRecordRaw)),
+      {
+        path: '/forum/:pathMatch(.*)*',
+        component: { template: '<main />' },
+        meta: { workspace: 'personal' as const },
+      },
       { path: '/admin/:pathMatch(.*)*', component: { template: '<main />' } },
     ],
   })
@@ -118,6 +123,13 @@ it('管理员布局按平台、计费、工作区和社区分组，计费入口�
       .toContain('计费与对账')
     expect(wrapper.get('[data-route="/support"]').element.closest('.admin-nav-group')?.textContent)
       .toContain('社区与支持')
+
+    await router.push('/FORUM/new')
+    await flushPromises()
+    const forumNavigation = wrapper.get('[data-route="/forum"]')
+    expect(forumNavigation.attributes('aria-current')).toBe('page')
+    expect(forumNavigation.element.closest('.admin-nav-group')
+      ?.querySelector('.admin-nav-section')?.getAttribute('aria-expanded')).toBe('true')
 
     workspace.setEnterpriseMembership(true)
     await flushPromises()
