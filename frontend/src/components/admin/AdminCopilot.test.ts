@@ -659,6 +659,8 @@ it.each([
   { width: 390, path: '/admin/overview' },
   { width: 390, path: '/support' },
   { width: 1280, path: '/support' },
+  { width: 390, path: '/billing' },
+  { width: 1280, path: '/billing' },
   { width: 1280, path: '/admin/operations' },
   { width: 1280, path: '/admin/security-center' },
 ])('$width px从非管理页切入管理页时先保留入口，页头槽位挂载后自动迁移', async ({ width, path }) => {
@@ -668,6 +670,7 @@ it.each([
     routes: [
       { path: '/projects', component: { template: '<main />' } },
       { path: '/support', component: { template: '<main />' } },
+      { path: '/billing', component: { template: '<main />' } },
       { path: '/admin/:pathMatch(.*)*', component: { template: '<main />' } },
     ],
   })
@@ -721,10 +724,11 @@ it.each([
   }
 })
 
-it('管理页与支持页往返时页头槽位重建仍保留唯一可用入口', async () => {
+it('管理页、充值页与支持页往返时页头槽位重建仍保留唯一可用入口', async () => {
   const router = createRouter({ history: createMemoryHistory(), routes: [
     { path: '/admin/platform', component: { template: '<main />' } },
     { path: '/support', component: { template: '<main />' } },
+    { path: '/billing', component: { template: '<main />' } },
   ] })
   await router.push('/support?section=feedback')
   let slot = document.createElement('div')
@@ -734,7 +738,7 @@ it('管理页与支持页往返时页头槽位重建仍保留唯一可用入口'
   try {
     await flushPromises()
     expect(slot.querySelectorAll('.copilot-trigger')).toHaveLength(1)
-    for (const path of ['/admin/platform', '/support?section=feedback']) {
+    for (const path of ['/admin/platform', '/billing?enterprise_id=7', '/support?section=feedback']) {
       await router.push(path)
       await flushPromises()
       slot.remove()

@@ -23,6 +23,7 @@ import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { isNavigationPathAllowed } from '@/utils/agentNavigation'
 import UserAvatar from '@/components/common/UserAvatar.vue'
 import { ADMIN_NAVIGATION_GROUPS, type AdminNavigationGroupKey } from '@/utils/adminNavigation'
+import { isAdminSharedRoute } from '@/utils/adminSharedLayout'
 
 interface AdminMenuItem {
   path: string
@@ -265,7 +266,7 @@ async function logout(): Promise<void> {
           <div
             id="admin-copilot-trigger-slot"
             class="admin-copilot-trigger-slot"
-            :class="{ 'is-page-header-trigger': route.path.startsWith('/admin') || route.path === '/support' }"
+            :class="{ 'is-page-header-trigger': route.path.startsWith('/admin') || isAdminSharedRoute(route.path) }"
             aria-label="小菱入口"
           ></div>
         </div>
