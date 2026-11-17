@@ -8,7 +8,9 @@ describe('administrator shared layout routes', () => {
     '/billing',
     '/forum',
     '/forum/',
+    '/Forum',
     '/forum/new',
+    '/FORUM/new',
     '/forum/38',
     '/forum/38/edit',
   ])('uses the administrator shell for %s', (path) => {
