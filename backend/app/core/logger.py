@@ -24,6 +24,7 @@ def setup_logger() -> None:
             "<level>{message}</level>"
         ),
         colorize=True,
+        diagnose=False,
     )
     logger.add(
         "logs/app_{time:YYYY-MM-DD}.log",
@@ -36,4 +37,5 @@ def setup_logger() -> None:
         retention="30 days",
         encoding="utf-8",
         enqueue=True,
+        diagnose=False,
     )
