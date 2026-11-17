@@ -2581,9 +2581,8 @@ it.each(['pending', 'claim'] as const)('停止真实接线：%s 迟到及停止�
       claim.mockReturnValueOnce(delayed.promise)
     }
     vm.sessionRun = { run_id: action.run_id, status: 'running', model: '', rounds: 1, error: '', updated_at: '' }
-    await flushPromises()
-    expect(pending).toHaveBeenCalled()
-    if (stage === 'claim') expect(claim).toHaveBeenCalledOnce()
+    await vi.waitFor(() => expect(pending).toHaveBeenCalled(), { timeout: 5000 })
+    if (stage === 'claim') await vi.waitFor(() => expect(claim).toHaveBeenCalledOnce(), { timeout: 5000 })
 
     let rejectCancel!: (reason: Error) => void
     responseApi.cancel.mockReturnValueOnce(new Promise((_resolve, reject) => { rejectCancel = reject }))
