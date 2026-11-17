@@ -5,12 +5,14 @@ import ast
 import copy
 import json
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "lib"))
 import pytest
+import billing_evidence_compatibility as compatibility
 from billing_evidence_compatibility import EXPECTED_MODULES as FINGERPRINTS
 from billing_evidence_compatibility import module_is_reviewed, probe
 from billing_evidence_schema_compatibility import EXPECTED, classify
@@ -137,6 +139,88 @@ def test_platform_cost_gate_accepts_baseline_and_reviewed_hotfix_only():
     assert module_is_reviewed(path, 'dca4a319ec20b8628bb20d088bcb167ce14d99e94ddabb416afbed1906f9d16a')
     assert module_is_reviewed(path, 'a137a20730865a1805351d9c5aa0bc3889c4bbcd73e55d61481f971423615581')
     assert not module_is_reviewed(path, '0' * 64)
+
+
+FINGERPRINT_PATTERN = re.compile(r'[0-9a-f]{64}\Z')
+
+
+def fingerprint_problem(value) -> str | None:
+    """Explain why *value* is not an acceptable reviewed pin, or None when it is one.
+
+    Pins are compared by digest equality, so a 66-character value matches nothing and
+    silently turns the whole gate into `unsupported` for every shipped image.
+    """
+    if not isinstance(value, str):
+        return f'expected str, got {type(value).__name__}'
+    if len(value) != 64:
+        return f'expected 64 hex characters, got {len(value)}'
+    if not FINGERPRINT_PATTERN.fullmatch(value):
+        return 'expected lowercase hexadecimal characters (0-9a-f) only'
+    return None
+
+
+def pinned_fingerprints(gate=compatibility):
+    """Yield ``(origin, digest)`` for every non-empty pin in *gate*, in a stable order.
+
+    ``REVIEWED_ENTRY_PROFILES`` leaves the uvicorn log-filter slot empty when the hook
+    is absent, so falsy slots are skipped rather than pinned.
+    """
+    for path in sorted(gate.EXPECTED_MODULES):
+        if gate.EXPECTED_MODULES[path]:
+            yield f'EXPECTED_MODULES[{path!r}]', gate.EXPECTED_MODULES[path]
+    for path in sorted(gate.REVIEWED_MODULE_PROFILES):
+        for digest in sorted(filter(None, gate.REVIEWED_MODULE_PROFILES[path])):
+            yield f'REVIEWED_MODULE_PROFILES[{path!r}]', digest
+    profiles = sorted(gate.REVIEWED_ENTRY_PROFILES, key=lambda slots: tuple(slot or '' for slot in slots))
+    for index, profile in enumerate(profiles):
+        for slot, digest in enumerate(profile):
+            if digest:
+                yield f'REVIEWED_ENTRY_PROFILES[{index}][{slot}]', digest
+
+
+PINNED_FINGERPRINTS = list(pinned_fingerprints())
+
+
+@pytest.mark.parametrize(
+    'origin,digest', PINNED_FINGERPRINTS, ids=[origin for origin, _ in PINNED_FINGERPRINTS],
+)
+def test_pinned_fingerprint_is_exactly_64_lowercase_hex(origin, digest):
+    """Every pin in every compatibility container is a bare sha256 hex digest."""
+    problem = fingerprint_problem(digest)
+    assert problem is None, f'{origin} pins an invalid fingerprint: {problem}: {digest!r}'
+
+
+def test_fingerprint_inventory_covers_every_compatibility_container():
+    """A scan that silently finds nothing would let the next mistyped pin through."""
+    expected = (
+        len(compatibility.EXPECTED_MODULES)
+        + sum(len(digests) for digests in compatibility.REVIEWED_MODULE_PROFILES.values())
+        + sum(1 for profile in compatibility.REVIEWED_ENTRY_PROFILES for slot in profile if slot)
+    )
+    assert compatibility.EXPECTED_MODULES and compatibility.REVIEWED_MODULE_PROFILES
+    assert compatibility.REVIEWED_ENTRY_PROFILES
+    assert expected == len(PINNED_FINGERPRINTS) > 0
+
+
+def test_scan_flags_66_character_pins_in_every_compatibility_container(monkeypatch):
+    """Reproduce the root cause: a reviewed pin stored two characters too long."""
+    gateway = 'services/billing_runtime_gate.py'
+    entry = sorted(compatibility.REVIEWED_ENTRY_PROFILES,
+                   key=lambda slots: tuple(slot or '' for slot in slots))[0]
+    oversize_entry = tuple((slot or '') + 'ab' if slot else slot for slot in entry)
+    monkeypatch.setitem(compatibility.EXPECTED_MODULES, 'services/rbac_service.py',
+                        compatibility.EXPECTED_MODULES['services/rbac_service.py'] + 'ab')
+    monkeypatch.setitem(compatibility.REVIEWED_MODULE_PROFILES, gateway,
+                        {sorted(compatibility.REVIEWED_MODULE_PROFILES[gateway])[0] + 'ab'})
+    monkeypatch.setattr(compatibility, 'REVIEWED_ENTRY_PROFILES', {oversize_entry})
+
+    flagged = [(origin, fingerprint_problem(digest))
+               for origin, digest in pinned_fingerprints() if fingerprint_problem(digest)]
+    assert [origin.split('[')[0] for origin, _ in flagged] == [
+        'EXPECTED_MODULES', 'REVIEWED_MODULE_PROFILES',
+        *['REVIEWED_ENTRY_PROFILES'] * sum(1 for slot in entry if slot),
+    ]
+    assert {problem for _, problem in flagged} == {'expected 64 hex characters, got 66'}
 
 
 @pytest.mark.parametrize('change', ['old_entry', 'remove_api_router', 'override_entry'])
