@@ -13,8 +13,9 @@ import pytest
 from app.agents.base import AgentResult
 from app.models.agent_mesh import AgentMeshMessage
 from app.models.agent_team import AgentTeam, AgentTeamEvent, AgentTeamMember, AgentTeamTask
-from app.models.billing_ledger import BillingReservation
+from app.models.billing_ledger import BillingReservation, BillingWallet
 from app.models.code_file import CodeFile
+from app.models.platform_model_cost_attempt import PlatformModelCostAttempt
 from app.models.project import Project
 from app.models.rbac import Permission, Role, RolePermission, UserRole
 from app.models.user import User
@@ -117,6 +118,58 @@ def test_personal_team_unknown_attempt_blocks_later_retries(db, monkeypatch):
     claimed["attempt_count"] = 2
     with pytest.raises(BillingError, match="禁止自动重试"):
         agent_team_dispatcher._task_billing_scope(db, team, task, member, claimed)
+
+
+def test_admin_team_model_attempt_uses_platform_cost_ledger(db, monkeypatch):
+    user = User(username="admin-team-platform-cost", password="x", email="admin-team-cost@example.test",
+                role="admin", status=1)
+    db.add(user)
+    db.flush()
+    team = AgentTeam(
+        user_id=int(user.id), surface="admin", session_key="admin-cost-session", title="管理端任务",
+        objective="验证平台成本归属", status="running", max_active_children=1, max_attempts=3,
+        priority=0, trace_id="admin-team-platform-cost-trace",
+    )
+    db.add(team)
+    db.flush()
+    member = AgentTeamMember(
+        team_id=int(team.id), member_key="worker", display_name="worker", address="temporary:admin-worker",
+        kind="temporary", role="worker", capabilities_json="{}", status="running",
+    )
+    db.add(member)
+    db.flush()
+    task = AgentTeamTask(
+        team_id=int(team.id), member_id=int(member.id), task_key="summarize", title="汇总",
+        instructions="读取已给上下文", input_json="{}", status="running", attempt_count=1,
+        max_attempts=3, lease_token="admin-cost-lease",
+        lease_expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=10),
+    )
+    db.add(task)
+    db.commit()
+    claimed = {
+        "team_id": int(team.id), "task_id": int(task.id), "member_id": int(member.id),
+        "address": member.address, "lease_token": task.lease_token, "attempt_count": 1,
+    }
+    monkeypatch.setattr(agent_team_dispatcher.settings, "billing_commercial_metering_ready", False)
+    monkeypatch.setattr(agent_team_dispatcher.settings, "billing_allow_unmetered_external_calls", False)
+    monkeypatch.setattr(agent_team_dispatcher, "_owner_access_error", lambda *_args, **_kwargs: "")
+    payload = {"model": "deepseek-v4-pro", "messages": [{"role": "user", "content": "summarize"}],
+               "max_tokens": 32}
+
+    with agent_team_dispatcher._task_billing_scope(db, team, task, member, claimed):
+        metered_response_request(
+            model_name="deepseek-v4-pro", payload=payload,
+            provider_name="deepseek", base_url="https://api.deepseek.com/v1", credential_source="system",
+            send=lambda: (httpx.Response(200, json={
+                "usage": {"prompt_tokens": 10, "completion_tokens": 4},
+            }), 1),
+        )
+
+    cost = db.query(PlatformModelCostAttempt).one()
+    assert cost.status == "settled" and cost.actor_user_id == user.id
+    assert cost.run_id == f"admin-agent-team-task:{team.id}:{task.id}"
+    assert db.query(BillingReservation).count() == 0
+    assert db.query(BillingWallet).count() == 0
 
 
 def test_temporary_agent_usage_accounting_failure_marks_worker_failed_for_verification(monkeypatch, db):

@@ -1174,6 +1174,8 @@ class NativeResponsesTransport:
                 finish_attempt(ticket, None)
         except (httpx.TimeoutException, httpx.TransportError) as exc:
             if ticket is not None:
+                if ticket.get("platform_authorization_only"):
+                    raise BillingError("用户自有 Key 调用结果未知，已阻止自动重试；请核实供应商用量后重新发起") from exc
                 raise BillingError("模型调用结果未知，预占待对账，禁止自动重试") from exc
             raise
         finally:

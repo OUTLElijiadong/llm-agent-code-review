@@ -312,7 +312,17 @@ def _resume_agent_run_locked(recovery: AgentRunRecovery) -> None:
             surface=recovery.surface,
             session_key=recovery.session_key,
         )
-        result = asyncio.run(service.resume(run_id=recovery.run_id, action="retry"))
+        from app.services.agent_response_billing_service import trusted_response_billing_scope
+
+        if recovery.surface == "admin":
+            from app.services import platform_model_cost_service
+
+            with SessionLocal.begin() as billing_db:
+                platform_model_cost_service.mark_interrupted_run_attempts(billing_db, recovery.run_id)
+        with trusted_response_billing_scope(
+            SessionLocal, user, recovery.surface, run_id=recovery.run_id,
+        ):
+            result = asyncio.run(service.resume(run_id=recovery.run_id, action="retry"))
         if not is_paused(result):
             row = (
                 db.query(AgentResponseRun)

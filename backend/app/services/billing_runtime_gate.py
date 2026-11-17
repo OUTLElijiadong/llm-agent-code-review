@@ -95,6 +95,56 @@ def billing_scope(*, session_factory, user_id, max_input_tokens, max_output_toke
         _scope.reset(token)
 
 
+@contextmanager
+def platform_cost_scope(*, session_factory, actor_user_id, max_input_tokens, max_output_tokens,
+                         authorization_guard, request_key_prefix, run_id=None):
+    """Trusted platform payer scope; authorization is rechecked before reserve and send."""
+    if (not callable(session_factory) or type(actor_user_id) is not int or actor_user_id <= 0
+            or type(max_input_tokens) is not int or max_input_tokens <= 0
+            or type(max_output_tokens) is not int or max_output_tokens <= 0
+            or not callable(authorization_guard) or not isinstance(request_key_prefix, str)
+            or not request_key_prefix or len(request_key_prefix) > 120
+            or (run_id is not None and (not isinstance(run_id, str) or not run_id or len(run_id) > 128))):
+        raise ledger.BillingError("平台模型成本作用域参数无效")
+
+    def authorize_before_send(request_key):
+        with session_factory.begin() as db:
+            authorization_guard(db, request_key)
+            from app.services import platform_model_cost_service
+
+            if run_id is not None:
+                from app.models.platform_model_cost_attempt import PlatformModelCostAttempt
+
+                unresolved_sibling = db.query(PlatformModelCostAttempt.id).filter(
+                    PlatformModelCostAttempt.run_id == run_id,
+                    PlatformModelCostAttempt.request_key != request_key,
+                    PlatformModelCostAttempt.status == "unknown",
+                ).first()
+                if unresolved_sibling is not None:
+                    raise ledger.BillingError("该小菱运行有结果未知的模型调用，待核对后才能继续")
+
+            platform_model_cost_service.mark_started(db, request_key)
+
+    data = {
+        "platform_cost": True,
+        "session_factory": session_factory,
+        "platform_actor_user_id": actor_user_id,
+        "platform_run_id": run_id,
+        "max_input_tokens": max_input_tokens,
+        "max_output_tokens": max_output_tokens,
+        "request_key_prefix": request_key_prefix,
+        "request_counter": 0,
+        "request_lock": Lock(),
+        "attempt_guard": authorization_guard,
+        "before_stream_send": authorize_before_send,
+    }
+    token = _scope.set(data)
+    try:
+        yield
+    finally:
+        _scope.reset(token)
+
+
 def verify_priced_tools(payload, *, allow_unmetered_server_tools=False):
     """Reject unpriced server tools in paid scopes and default-deny platform use."""
     scope = _current_scope()
@@ -384,12 +434,23 @@ def metered_response_request(*, model_name, payload, send, provider_name=None, b
                              credential_source=None):
     scope = _current_scope()
     verify_priced_tools(payload, allow_unmetered_server_tools=credential_source == "user")
+    if scope is not None and scope.get("platform_cost") and credential_source == "user":
+        # BYOK remains caller-paid, but still passes the platform admin/task authorization guard.
+        ticket = begin_attempt(
+            model_name=model_name, payload=payload, provider_name=provider_name,
+            base_url=base_url, credential_source=credential_source,
+        )
+        try:
+            before_stream_send(ticket)
+            return send()
+        finally:
+            unknown_attempt(ticket)
     if scope is None:
         _require_unmetered_provider_opt_in(credential_source)
         return send()
     if payload.get("model") not in (None, model_name):
         raise ledger.BillingError("计费模型与实际请求模型不一致")
-    provider_identity = ledger.resolve_billing_provider_identity(
+    provider_identity = None if scope.get("platform_cost") else ledger.resolve_billing_provider_identity(
         provider_name=provider_name,
         base_url=base_url,
         credential_source=credential_source,
@@ -408,6 +469,28 @@ def metered_response_request(*, model_name, payload, send, provider_name=None, b
             body = {}
         usage = body.get("usage") if isinstance(body, dict) else None
         return (response, duration), usage
+
+    if scope.get("platform_cost"):
+        ticket = begin_attempt(
+            model_name=model_name, payload=payload, output_key="max_tokens", provider_name=provider_name,
+            base_url=base_url, credential_source=credential_source,
+        )
+        try:
+            before_stream_send(ticket)
+            result, usage = tracked_send()
+            finish_attempt(ticket, usage)
+            return result
+        except Exception as exc:
+            unknown_attempt(ticket)
+            try:
+                import httpx
+            except ImportError:  # pragma: no cover - httpx is a runtime dependency
+                httpx = None
+            if httpx is not None and isinstance(exc, (httpx.TimeoutException, httpx.TransportError)):
+                raise ledger.BillingError("模型调用结果未知，平台成本待核对，禁止自动重试") from exc
+            raise
+        finally:
+            unknown_attempt(ticket)
 
     call_scope = {
         key: scope[key] for key in (
@@ -431,6 +514,12 @@ def begin_attempt(*, model_name, payload, output_key="max_output_tokens", provid
         payload,
         allow_unmetered_server_tools=allow_unmetered_server_tools or credential_source == "user",
     )
+    if scope is not None and scope.get("platform_cost") and credential_source == "user":
+        return {
+            "scope": scope,
+            "platform_authorization_only": True,
+            "done": False,
+        }
     if scope is None:
         _require_unmetered_provider_opt_in(credential_source)
         return None
@@ -438,7 +527,7 @@ def begin_attempt(*, model_name, payload, output_key="max_output_tokens", provid
         raise ledger.BillingError("当前团队执行器不支持流式上游请求，已在发出请求前拒绝")
     if payload.get("model") not in (None, model_name):
         raise ledger.BillingError("计费模型与实际请求模型不一致")
-    provider_identity = ledger.resolve_billing_provider_identity(
+    provider_identity = None if scope.get("platform_cost") else ledger.resolve_billing_provider_identity(
         provider_name=provider_name,
         base_url=base_url,
         credential_source=credential_source,
@@ -448,6 +537,34 @@ def begin_attempt(*, model_name, payload, output_key="max_output_tokens", provid
     output_limit = payload.get(output_key) if isinstance(payload, dict) else None
     if type(output_limit) is not int or not 0 < output_limit <= scope["max_output_tokens"]:
         raise ledger.BillingError("模型请求输出上限未受可信预算约束")
+    if scope.get("platform_cost"):
+        from app.services import platform_model_cost_service
+
+        with scope["session_factory"].begin() as db:
+            key = _next_request_key(scope)
+            platform_model_cost_service.reserve(
+                db,
+                request_key=key,
+                actor_user_id=scope["platform_actor_user_id"],
+                run_id=scope.get("platform_run_id"),
+                model_name=model_name,
+                provider_name=provider_name,
+                base_url=base_url,
+                credential_source=credential_source,
+                max_input_tokens=input_limit,
+                max_output_tokens=output_limit,
+            )
+            guard = scope.get("attempt_guard")
+            if guard is not None:
+                guard(db, key)
+        return {
+            "key": key,
+            "model_name": model_name,
+            "scope": scope,
+            "input_limit": input_limit,
+            "output_limit": output_limit,
+            "platform_cost": True,
+        }
     key = _next_request_key(scope)
     with scope["session_factory"].begin() as db:
         pricing_now = ledger._now()
@@ -476,9 +593,29 @@ def before_stream_send(ticket):
     immutable reservation scope. Later access changes apply to subsequent attempts.
     """
     if ticket is not None:
+        if ticket.get("platform_authorization_only"):
+            try:
+                scope = ticket["scope"]
+                guard = scope.get("attempt_guard")
+                if guard is None:
+                    raise ledger.BillingError("平台管理员调用缺少发送授权复核")
+                with scope["session_factory"].begin() as db:
+                    guard(db, _next_request_key(scope))
+            finally:
+                ticket["done"] = True
+            return
         callback = ticket["scope"].get("before_stream_send")
-        if callback is not None:
-            callback(ticket["key"])
+        try:
+            if callback is not None:
+                callback(ticket["key"])
+        except BaseException:
+            if ticket.get("platform_cost"):
+                from app.services import platform_model_cost_service
+
+                with ticket["scope"]["session_factory"].begin() as db:
+                    platform_model_cost_service.mark_not_sent(db, ticket["key"])
+                ticket["done"] = True
+            raise
 
 
 def validate_priced_usage(usage, *, input_limit, output_limit):
@@ -504,6 +641,15 @@ def validate_payload_usage(usage, *, payload, max_input_tokens, max_output_token
 
 def unknown_attempt(ticket):
     if ticket is not None and not ticket.get("done"):
+        if ticket.get("platform_authorization_only"):
+            ticket["done"] = True
+            return
+        if ticket.get("platform_cost"):
+            from app.services import platform_model_cost_service
+
+            with ticket["scope"]["session_factory"].begin() as db:
+                platform_model_cost_service.mark_unknown(db, ticket["key"])
+            return
         counts = ticket.get("server_tool_counts")
         with ticket["scope"]["session_factory"].begin() as db:
             ledger.mark_unknown(
@@ -528,6 +674,25 @@ def reject_unpriced_call(resource: str, *, caller_pays=False):
 
 def finish_attempt(ticket, usage):
     if ticket is None:
+        return
+    if ticket.get("platform_authorization_only"):
+        ticket["done"] = True
+        return
+    if ticket.get("platform_cost"):
+        from app.services import platform_model_cost_service
+
+        try:
+            in_tokens, out_tokens = validate_priced_usage(
+                usage, input_limit=ticket["input_limit"], output_limit=ticket["output_limit"],
+            )
+            with ticket["scope"]["session_factory"].begin() as db:
+                platform_model_cost_service.settle(
+                    db, ticket["key"], input_tokens=in_tokens, output_tokens=out_tokens,
+                )
+        except ledger.BillingError:
+            unknown_attempt(ticket)
+            raise
+        ticket["done"] = True
         return
     try:
         counts = provider_tool_usage_counts(usage)

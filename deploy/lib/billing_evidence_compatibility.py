@@ -47,6 +47,17 @@ EXPECTED_MODULES = {
     'models/rbac.py': 'f6e6b5a9eb36e70236c051677adfdda4eda2e9cd6d2b63bd89a4dfabb525b699',
 }
 
+# Accept only the production baseline and reviewed platform-cost gate revisions.
+# This keeps a 4.1.55 rollback image compatible while refusing mixed or
+# unreviewed billing gate code.
+REVIEWED_MODULE_PROFILES = {
+    'services/billing_runtime_gate.py': {
+        EXPECTED_MODULES['services/billing_runtime_gate.py'],
+        'dca4a319ec20b8628bb20d088bcb167ce14d99e94ddabb416afbed1906f9d16a',
+        'a137a20730865a1805351d9c5aa0bc3889c4bbcd73e55d61481f971423615581',
+    },
+}
+
 # The 4.1.53 image and the new logging candidate are reviewed as whole
 # combinations. In particular, an old entry point cannot authorize a mixed
 # new handler/hook, and the hook must be absent for the old image.
@@ -70,12 +81,16 @@ def module_digest(path: pathlib.Path) -> str:
     return hashlib.sha256(ast.dump(module, include_attributes=False).encode()).hexdigest()
 
 
+def module_is_reviewed(path: str, digest: str) -> bool:
+    return digest in REVIEWED_MODULE_PROFILES.get(path, {EXPECTED_MODULES[path]})
+
+
 def probe(root: pathlib.Path) -> bool:
     # Parse one module at a time to fit the isolated image probe memory cap.
-    for path, expected in EXPECTED_MODULES.items():
+    for path in EXPECTED_MODULES:
         if path in ENTRY_MODULES:
             continue
-        if module_digest(root / path) != expected:
+        if not module_is_reviewed(path, module_digest(root / path)):
             return False
     main, handlers, hook = (root / path for path in ENTRY_MODULES)
     hook_digest = module_digest(hook) if os.path.lexists(hook) else None

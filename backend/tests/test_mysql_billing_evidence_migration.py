@@ -1,4 +1,4 @@
-"""Fresh MySQL migration 121 keeps zero-evidence constraints."""
+"""Fresh MySQL migrations preserve billing evidence and platform cost constraints."""
 import pytest
 import test_fresh_database_chain as chain
 from sqlalchemy import text
@@ -19,7 +19,7 @@ def test_migration_121_mysql_rejects_partial_or_nonzero_evidence(fresh_chain):
         transaction = db.begin()
         try:
             version = db.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            assert version == "121_billing_model_evidence"
+            assert version == "122_platform_model_cost_ledger"
             sql = text("INSERT INTO billing_reservation_reconciliation_event "
                        "(reservation_id,actor_id,decision,resolution,evidence_reference,evidence_sha256,note,created_at,"
                        "model_search_calls_evidence,model_fetch_calls_evidence) "
@@ -31,6 +31,38 @@ def test_migration_121_mysql_rejects_partial_or_nonzero_evidence(fresh_chain):
                 assert failure.value.orig.args[0] == 3819
         finally:
             transaction.rollback()
+
+
+def test_mysql_122_rejects_negative_platform_usage_and_cost(fresh_chain):
+    insert_sql = text(
+        "INSERT INTO platform_model_cost_attempt (request_key,actor_user_id,run_id,model_name,pricing_version,"
+        "pricing_source_url,pricing_source_checked_at,provider_identity_version,provider_name,endpoint_host,"
+        "credential_source,input_cost_cny_micros_per_million,output_cost_cny_micros_per_million,"
+        "max_input_tokens,max_output_tokens,reserved_cost_cny_micros,actual_input_tokens,actual_output_tokens,"
+        "actual_cost_cny_micros,status,provider_attempt_started_at,created_at,settled_at) VALUES "
+        "(:request_key,7,'mysql-admin-run','deepseek-v4-pro','deepseek-cny-peak-cache-miss-2026-11-17-v1',"
+        "'https://api-docs.deepseek.com/zh-cn/quick_start/pricing/','2026-11-17 00:00:00',"
+        "'deepseek-platform-cost-v1','deepseek','api.deepseek.com','system',9000000,27000000,20000,1000,207000,"
+        ":input_tokens,:output_tokens,:cost,'settled','2026-11-17 00:00:01','2026-11-17 00:00:00',"
+        "'2026-11-17 00:00:02')"
+    )
+    with fresh_chain.begin() as db:
+        db.execute(insert_sql, {
+            "request_key": "mysql-platform-cost-valid",
+            "input_tokens": 10,
+            "output_tokens": 3,
+            "cost": 171,
+        })
+        for field, value in (("input_tokens", -1), ("output_tokens", -1), ("cost", -1)):
+            with pytest.raises(OperationalError) as failure, db.begin_nested():
+                db.execute(insert_sql, {
+                    "request_key": f"mysql-platform-cost-negative-{field}",
+                    "input_tokens": value if field == "input_tokens" else 10,
+                    "output_tokens": value if field == "output_tokens" else 3,
+                    "cost": value if field == "cost" else 171,
+                })
+            assert failure.value.orig.args[0] == 3819
+        db.execute(text("DELETE FROM platform_model_cost_attempt WHERE request_key='mysql-platform-cost-valid'"))
 
 
 def test_mysql_external_evidence_settles_without_fabricating_provider_usage(fresh_chain, verified_model_catalog):
