@@ -23,7 +23,7 @@ EXPECTED_MODULES = {
     'services/rbac_service.py': '6e81c15b515e6725420fcc4538b8ffee46f4e8973c6768cb54fee89d5beafd5d',
     'models/billing_ledger.py': '9a6f515ae2f19e85c011e940059597a0b270c82ea86513526fdcfd24c0a8666a',
     'models/user.py': '86de7d8a3378b24087fc0362f71c1b56516a30e4e32ad1da936c88c56bceee64',
-    'api/v1/billing.py': '2348f600c2dc7043d22b1b47be0d1fcbb17d12f28fd9c958e9ada9ad23c908eb',
+    'api/v1/billing.py': '3186425eab84d9f70d54da396ab064cc6c6f7acbfbc667f5a03aeb76477b0889',
     'api/v1/enterprise_agent_teams.py': 'aba2c8249e26b29768c30859c218dbf16e054194191b278c5911e0bc9b68ede3',
     'api/__init__.py': 'cc6aa367a02f65af9a856168e9fa68b714ba8433599d3899a75dfdf0f0cc71d4',
     'core/dependencies.py': '218a69b3b0ca1e380b3261619638b90052590b45f2bed868435faa3fce173b11',
@@ -47,22 +47,30 @@ EXPECTED_MODULES = {
     'models/rbac.py': 'f6e6b5a9eb36e70236c051677adfdda4eda2e9cd6d2b63bd89a4dfabb525b699',
 }
 
-# The 4.1.53 image and the new logging candidate are reviewed as whole
-# combinations. In particular, an old entry point cannot authorize a mixed
-# new handler/hook, and the hook must be absent for the old image.
+# Review these modules as complete combinations, including the billing API.
+# 4.1.53 used the old entry and API; 4.1.54/55 use the new entry and old API;
+# the sandbox candidate uses the new entry and the reviewed new API.
 REVIEWED_ENTRY_PROFILES = {
     (
         '0debff8636df3f2fb8759dd1ebd8cf6145e3abfb4cddd252782a383715e02c5d',
         '33e6b79d3e605b840564af8e26da07b16e2246506df5cd65476ad96d0b3c711c',
         None,
+        '2348f600c2dc7043d22b1b47be0d1fcbb17d12f28fd9c958e9ada9ad23c908eb',
     ),
     (
         EXPECTED_MODULES['main.py'],
         EXPECTED_MODULES['core/error_handlers.py'],
         EXPECTED_MODULES['core/uvicorn_log_filter.py'],
+        '2348f600c2dc7043d22b1b47be0d1fcbb17d12f28fd9c958e9ada9ad23c908eb',
+    ),
+    (
+        EXPECTED_MODULES['main.py'],
+        EXPECTED_MODULES['core/error_handlers.py'],
+        EXPECTED_MODULES['core/uvicorn_log_filter.py'],
+        EXPECTED_MODULES['api/v1/billing.py'],
     ),
 }
-ENTRY_MODULES = ('main.py', 'core/error_handlers.py', 'core/uvicorn_log_filter.py')
+PROFILE_MODULES = ('main.py', 'core/error_handlers.py', 'core/uvicorn_log_filter.py', 'api/v1/billing.py')
 
 
 def module_digest(path: pathlib.Path) -> str:
@@ -73,13 +81,13 @@ def module_digest(path: pathlib.Path) -> str:
 def probe(root: pathlib.Path) -> bool:
     # Parse one module at a time to fit the isolated image probe memory cap.
     for path, expected in EXPECTED_MODULES.items():
-        if path in ENTRY_MODULES:
+        if path in PROFILE_MODULES:
             continue
         if module_digest(root / path) != expected:
             return False
-    main, handlers, hook = (root / path for path in ENTRY_MODULES)
+    main, handlers, hook, billing = (root / path for path in PROFILE_MODULES)
     hook_digest = module_digest(hook) if os.path.lexists(hook) else None
-    return (module_digest(main), module_digest(handlers), hook_digest) in REVIEWED_ENTRY_PROFILES
+    return (module_digest(main), module_digest(handlers), hook_digest, module_digest(billing)) in REVIEWED_ENTRY_PROFILES
 
 
 

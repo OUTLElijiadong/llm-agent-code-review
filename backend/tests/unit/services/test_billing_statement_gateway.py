@@ -33,6 +33,18 @@ def test_alipay_sandbox_statement_is_rejected_before_any_network_request():
             )
 
 
+def test_alipay_statement_requires_explicit_gateway_mode_before_any_request():
+    def handle(_request):
+        pytest.fail("gateway mode must be explicit before any request")
+
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        with pytest.raises(TypeError):
+            download_alipay_trade_statement(
+                app_id="test-app", private_key_pem=b"unused", public_key_pem=b"unused",
+                bill_date="2026-11-05", client=client, now=NOW,
+            )
+
+
 def _key_pair():
     private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     private_pem = private.private_bytes(
@@ -78,7 +90,7 @@ def test_alipay_download_verifies_signed_url_and_bounds_download():
     with httpx.Client(transport=httpx.MockTransport(handle), follow_redirects=False) as client:
         result = download_alipay_trade_statement(
             app_id="alipay-app", private_key_pem=private_pem, public_key_pem=public_pem,
-            bill_date="2026-11-05", client=client, now=NOW,
+            bill_date="2026-11-05", client=client, now=NOW, sandbox=False,
         )
 
     assert result.raw == source
@@ -108,7 +120,7 @@ def test_alipay_rejects_insecure_or_untrusted_download_urls_before_fetch(url):
         with pytest.raises(StatementGatewayError):
             download_alipay_trade_statement(
                 app_id="alipay-app", private_key_pem=private_pem, public_key_pem=public_pem,
-                bill_date="2026-11-05", client=client, now=NOW,
+                bill_date="2026-11-05", client=client, now=NOW, sandbox=False,
             )
     assert len(calls) == 1
 

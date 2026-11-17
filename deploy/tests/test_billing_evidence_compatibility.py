@@ -198,6 +198,25 @@ def _legacy_4153_entry_and_handlers(root):
     return ast.unparse(ast.fix_missing_locations(main)), ast.unparse(ast.fix_missing_locations(handlers))
 
 
+def _legacy_billing_api(root):
+    """Reconstruct the reviewed 4.1.54/4.1.55 API from the candidate AST."""
+    tree = ast.parse((root / 'api/v1/billing.py').read_text(encoding='utf-8'))
+    func = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+                and node.name == 'download_payment_statement')
+    outer_try = next(node for node in func.body if isinstance(node, ast.Try))
+    channel_branch = next(node for node in outer_try.body if isinstance(node, ast.If))
+    removed = [node for node in channel_branch.body if isinstance(node, ast.If)
+               and any(isinstance(child, ast.Attribute) and child.attr == 'alipay_gateway_mode'
+                       for child in ast.walk(node.test))]
+    assert len(removed) == 1
+    channel_branch.body.remove(removed[0])
+    calls = [node for node in ast.walk(channel_branch) if isinstance(node, ast.Call)
+             and isinstance(node.func, ast.Attribute) and node.func.attr == 'download_alipay_trade_statement']
+    assert len(calls) == 1
+    calls[0].keywords = [item for item in calls[0].keywords if item.arg != 'sandbox']
+    return ast.unparse(ast.fix_missing_locations(tree))
+
+
 @pytest.mark.parametrize('relative', ['core/uvicorn_log_filter.py', 'core/error_handlers.py'])
 @pytest.mark.parametrize('change', ['missing', 'altered'])
 def test_reader_rejects_missing_or_altered_logging_dependency(tmp_path, relative, change):
@@ -223,13 +242,22 @@ def test_reader_accepts_only_reviewed_entry_dependency_combinations(tmp_path):
                                              tmp_path / 'core/uvicorn_log_filter.py')
     new_main, new_handler, new_filter = (path.read_text(encoding='utf-8') for path in (main_path, handler_path, filter_path))
     old_main, old_handler = _legacy_4153_entry_and_handlers(tmp_path)
-    digest = lambda source: hashlib.sha256(ast.dump(ast.parse(source), include_attributes=False).encode()).hexdigest()
+    billing_path = tmp_path / 'api/v1/billing.py'
+    new_billing, old_billing = billing_path.read_text(encoding='utf-8'), _legacy_billing_api(tmp_path)
+    def digest(source):
+        return hashlib.sha256(ast.dump(ast.parse(source), include_attributes=False).encode()).hexdigest()
     # Verified independently against release commit 38f181c86c3f74f40ce73c43ce73ff23b0f6a292.
     assert digest(old_main) == '0debff8636df3f2fb8759dd1ebd8cf6145e3abfb4cddd252782a383715e02c5d'
     assert digest(old_handler) == '33e6b79d3e605b840564af8e26da07b16e2246506df5cd65476ad96d0b3c711c'
-    for entry, handler, hook in product(('old', 'new'), ('old', 'new'), ('absent', 'new', 'altered')):
+    # Verified against both release 4.1.54 and the 4.1.55 base commit.
+    assert digest(old_billing) == '2348f600c2dc7043d22b1b47be0d1fcbb17d12f28fd9c958e9ada9ad23c908eb'
+    for entry, handler, hook, billing_api in product(
+        ('old', 'new'), ('old', 'new'), ('absent', 'new', 'altered'), ('old', 'new', 'altered'),
+    ):
         main_path.write_text(old_main if entry == 'old' else new_main, encoding='utf-8')
         handler_path.write_text(old_handler if handler == 'old' else new_handler, encoding='utf-8')
+        billing_path.write_text(old_billing if billing_api == 'old' else new_billing + (
+            '\nprobe_bypass = True\n' if billing_api == 'altered' else ''), encoding='utf-8')
         if hook == 'absent':
             filter_path.unlink(missing_ok=True)
         else:
@@ -238,7 +266,11 @@ def test_reader_accepts_only_reviewed_entry_dependency_combinations(tmp_path):
             supported = probe(tmp_path)
         except FileNotFoundError:
             supported = False
-        assert supported == ((entry, handler, hook) in {('old', 'old', 'absent'), ('new', 'new', 'new')})
+        assert supported == ((entry, handler, hook, billing_api) in {
+            ('old', 'old', 'absent', 'old'),
+            ('new', 'new', 'new', 'old'),
+            ('new', 'new', 'new', 'new'),
+        })
 
 
 def test_image_gate_runs_real_probe_for_old_new_and_mixed_readers(tmp_path):
@@ -252,20 +284,27 @@ def test_image_gate_runs_real_probe_for_old_new_and_mixed_readers(tmp_path):
     new_handler = handler_path.read_text(encoding='utf-8')
     new_hook = hook_path.read_text(encoding='utf-8')
     old_main, old_handler = _legacy_4153_entry_and_handlers(tmp_path)
+    billing_path = tmp_path / 'api/v1/billing.py'
+    new_billing = billing_path.read_text(encoding='utf-8')
+    old_billing = _legacy_billing_api(tmp_path)
     script = r'''
 source "$1"
 docker() { "$TEST_PYTHON" -; }
 assert_billing_evidence_image_compatible "sha256:$(printf '%064d' 0)"
 '''
-    for entry, handler, hook, expected in [
-        (new_main, new_handler, new_hook, True),
-        (old_main, old_handler, None, True),
-        (old_main, new_handler, new_hook, False),
-        (new_main, old_handler, new_hook, False),
-        (new_main, new_handler, None, False),
+    for entry, handler, hook, billing_api, expected in [
+        (new_main, new_handler, new_hook, new_billing, True),
+        (new_main, new_handler, new_hook, old_billing, True),
+        (old_main, old_handler, None, old_billing, True),
+        (old_main, old_handler, None, new_billing, False),
+        (new_main, new_handler, new_hook, new_billing + '\nprobe_bypass = True\n', False),
+        (old_main, new_handler, new_hook, old_billing, False),
+        (new_main, old_handler, new_hook, old_billing, False),
+        (new_main, new_handler, None, old_billing, False),
     ]:
         main_path.write_text(entry, encoding='utf-8')
         handler_path.write_text(handler, encoding='utf-8')
+        billing_path.write_text(billing_api, encoding='utf-8')
         if hook is None:
             hook_path.unlink(missing_ok=True)
         else:
