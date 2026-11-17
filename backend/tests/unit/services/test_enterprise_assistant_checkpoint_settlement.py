@@ -6,7 +6,7 @@ from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -579,6 +579,76 @@ def test_cancel_response_exposes_pending_billing_marker_to_content_reader(monkey
 
         assert payload["status"] == "cancelled"
         assert payload["error"] == "provider_attempt_pending_reconciliation"
+    finally:
+        engine.dispose()
+
+
+def _cancel_after_real_reserved_model_attempt(monkeypatch):
+    """Exercise real reservation/cancel services; organization access is stubbed.
+
+    The provider-start marker represents a possibly dispatched attempt. No
+    network request is made, and the detached 122 ownership foundation is not
+    enabled or bound to this legacy runtime.
+    """
+    from app.services.billing_ledger_service import mark_model_attempt_started
+
+    engine, factory, wallet_id, run_id, _state_id, _checkpoint = _runtime_db()
+    ticket = _model_attempt(factory, run_id=run_id, wallet_id=wallet_id, monkeypatch=monkeypatch, settle=False)
+    with factory.begin() as db:
+        mark_model_attempt_started(db, ticket["key"])
+        before_available = available_milli(db, wallet_id)
+    monkeypatch.setattr(
+        runtime, "_run_control_room", lambda *_args: SimpleNamespace(kind="company", group_id=None),
+    )
+    monkeypatch.setattr(runtime, "_require_run_controller", lambda *_args: None)
+    monkeypatch.setattr(runtime, "_can_read_run_content", lambda *_args: True)
+    with factory() as session:
+        payload = runtime.cancel_run(
+            session, enterprise_id=10, user_id=2, conversation_id=20,
+            run_public_id="ear_settlement_checkpoint", reason="会话成员主动停止",
+        )
+    assert payload["status"] == "cancelled"
+    return engine, factory, wallet_id, ticket, before_available
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason="取消尚未在同一事务冻结可能已发送的预占；所有权基础未接线")
+def test_authorized_cancel_atomically_freezes_possibly_sent_real_reservation(monkeypatch):
+    engine, factory, wallet_id, ticket, before_available = _cancel_after_real_reserved_model_attempt(monkeypatch)
+    try:
+        with factory() as db:
+            hold = db.query(BillingReservation).filter_by(request_key=ticket["key"]).one()
+            assert hold.provider_attempt_started_at is not None
+            assert hold.status == "unknown" and hold.usage_state == "unknown"
+            assert available_milli(db, wallet_id) == before_available
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason="旧代次账本 unknown 写入尚无同事务所有权围栏")
+def test_stale_worker_cannot_mark_cancelled_real_reservation_unknown(monkeypatch):
+    engine, factory, wallet_id, ticket, before_available = _cancel_after_real_reserved_model_attempt(monkeypatch)
+    try:
+        # Observe actual SQL, not just the final status: once cancellation has
+        # frozen the hold, an idempotent-looking stale UPDATE is still a write.
+        writes = []
+
+        def capture(_conn, _cursor, statement, _parameters, _context, _executemany):
+            if statement.lstrip().upper().startswith("UPDATE BILLING_RESERVATION "):
+                writes.append(statement)
+
+        with factory() as db:
+            before = db.query(BillingReservation).filter_by(request_key=ticket["key"]).one().status
+        event.listen(engine, "before_cursor_execute", capture)
+        try:
+            unknown_attempt(ticket)
+        except ForbiddenError:
+            pass
+        finally:
+            event.remove(engine, "before_cursor_execute", capture)
+        assert not writes
+        with factory() as db:
+            hold = db.query(BillingReservation).filter_by(request_key=ticket["key"]).one()
+            assert hold.status == before and available_milli(db, wallet_id) == before_available
     finally:
         engine.dispose()
 
