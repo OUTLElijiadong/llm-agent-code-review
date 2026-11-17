@@ -39,7 +39,9 @@ declare module 'vue-router' {
  * @param router - Vue Router 实例
  */
 export function setupGuards(router: Router): void {
+  let latestNavigation = 0
   router.beforeEach(async (to: RouteLocationNormalized, _from: RouteLocationNormalized) => {
+    const navigation = ++latestNavigation
     const user = useUserStore()
     const workspace = useWorkspaceStore()
 
@@ -77,7 +79,8 @@ export function setupGuards(router: Router): void {
     workspace.syncIdentity(user.profile?.id, user.token)
 
     if (to.meta.personalAccountOnly) {
-      const isEnterpriseMember = await workspace.refreshEnterpriseMembership()
+      const isEnterpriseMember = await workspace.refreshEnterpriseMembership(true)
+      if (navigation !== latestNavigation) return false
       if (isEnterpriseMember !== false) return { path: '/enterprise', replace: true }
     }
 

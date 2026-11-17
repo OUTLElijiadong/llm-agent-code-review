@@ -232,7 +232,7 @@ describe('router guards', () => {
 
     expect(await before(route('/forum', { workspace: 'personal', personalAccountOnly: true }), route('/dashboard')))
       .toEqual({ path: '/enterprise', replace: true })
-    expect(workspace.refreshEnterpriseMembership).toHaveBeenCalledOnce()
+    expect(workspace.refreshEnterpriseMembership).toHaveBeenCalledExactlyOnceWith(true)
   })
 
   it('无法确认账号类型时阻止打开公开论坛', async () => {
@@ -243,6 +243,21 @@ describe('router guards', () => {
 
     expect(await before(route('/forum', { workspace: 'personal', personalAccountOnly: true }), route('/dashboard')))
       .toEqual({ path: '/enterprise', replace: true })
+  })
+
+  it('较旧的论坛资格请求返回时不得重定向较新的导航', async () => {
+    const { before } = installHarness()
+    auth.user.token = 'token'
+    auth.user.profile = { id: 9, role: 'user' }
+    let finishOld!: (value: boolean | null) => void
+    workspace.refreshEnterpriseMembership
+      .mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
+      .mockResolvedValueOnce(false)
+    const oldNavigation = before(route('/forum', { personalAccountOnly: true }), route('/dashboard'))
+    const newNavigation = before(route('/forum/7', { personalAccountOnly: true }), route('/dashboard'))
+    expect(await newNavigation).toBe(true)
+    finishOld(null)
+    expect(await oldNavigation).toBe(false)
   })
 
   it('updates the document title after navigation', () => {

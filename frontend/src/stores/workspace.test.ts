@@ -65,6 +65,30 @@ describe('全站工作空间上下文', () => {
     expect(workspace.hasEnterpriseMembership).toBe(true)
   })
 
+  it('强制刷新读取当前成员资格，失败时不沿用旧资格', async () => {
+    const workspace = useWorkspaceStore()
+    workspace.syncIdentity(17, 'account-token-a')
+    enterpriseApi.hasEnterpriseMembership.mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+    expect(await workspace.refreshEnterpriseMembership()).toBe(false)
+    expect(await workspace.refreshEnterpriseMembership(true)).toBe(true)
+    enterpriseApi.hasEnterpriseMembership.mockRejectedValueOnce(new Error('offline'))
+    expect(await workspace.refreshEnterpriseMembership(true)).toBeNull()
+    expect(workspace.hasEnterpriseMembership).toBeNull()
+  })
+
+  it('强制刷新使同一身份的旧请求失效，旧结果不能覆盖新资格', async () => {
+    let resolveOld!: (value: boolean | null) => void
+    enterpriseApi.hasEnterpriseMembership.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))
+      .mockResolvedValueOnce(true)
+    const workspace = useWorkspaceStore()
+    workspace.syncIdentity(17, 'account-token-a')
+    const oldRequest = workspace.refreshEnterpriseMembership()
+    expect(await workspace.refreshEnterpriseMembership(true)).toBe(true)
+    resolveOld(false)
+    expect(await oldRequest).toBeNull()
+    expect(workspace.hasEnterpriseMembership).toBe(true)
+  })
+
   it('旧账号迟到的企业目录不能覆盖当前登录账号', async () => {
     let resolveOld!: (isMember: boolean | null) => void
     enterpriseApi.hasEnterpriseMembership.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve }))

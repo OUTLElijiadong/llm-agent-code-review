@@ -111,10 +111,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   /** 服务端成员目录决定账号能否访问公开论坛；本地空间选择不参与授权。 */
-  async function refreshEnterpriseMembership(): Promise<boolean | null> {
+  async function refreshEnterpriseMembership(force = false): Promise<boolean | null> {
     const requestedIdentity = identityStamp
     const requestedToken = identityToken
     if (!requestedIdentity || !requestedToken) return false
+    if (force) {
+      // Discard both cached and in-flight results before sensitive navigation.
+      membershipRevision += 1
+      membershipIdentity = null
+      membershipRequestIdentity = null
+      membershipRequest = null
+      hasEnterpriseMembership.value = null
+    }
     if (membershipIdentity === requestedIdentity && hasEnterpriseMembership.value !== null) {
       return hasEnterpriseMembership.value
     }
