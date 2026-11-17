@@ -23,6 +23,7 @@ import {
 } from '@/api/adminCopilot'
 import { isAgentMeshResponseDeferred, cancelAgentResponseRun, getAgentResponseSession, getAgentResponseSessionMessages, type AgentResponseSession, type AgentResponseImageAsset } from '@/api/agentResponses'
 import { AgentSessionHistoryWindow } from '@/utils/agentSessionHistory'
+import { isAdminSharedRoute } from '@/utils/adminSharedLayout'
 import {
   acknowledgeAgentMeshMessage,
   archiveAgentMeshSession,
@@ -170,7 +171,7 @@ const adminHeaderTriggerSlot = shallowRef<HTMLElement | null>(null)
 let adminHeaderTriggerObserver: MutationObserver | undefined
 const currentPath = computed(() => router?.currentRoute?.value?.path || window.location.pathname)
 const shouldUseAdminHeaderTrigger = computed(() => (
-  currentPath.value.startsWith('/admin') || currentPath.value === '/support'
+  currentPath.value.startsWith('/admin') || isAdminSharedRoute(currentPath.value)
 ))
 const useAdminHeaderTrigger = computed(() => (
   shouldUseAdminHeaderTrigger.value && adminHeaderTriggerSlot.value !== null

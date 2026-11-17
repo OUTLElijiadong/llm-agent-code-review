@@ -6,12 +6,15 @@ import AppHeader from './AppHeader.vue'
 import ProactivePageGuide from '@/components/ai/ProactivePageGuide.vue'
 import XiaolingGreeter from '@/components/ai/XiaolingGreeter.vue'
 import { useUserStore } from '@/stores/user'
+import { isAdminSharedRoute } from '@/utils/adminSharedLayout'
 
 const sidebarVisible = ref(false)
 const AdminLayout = defineAsyncComponent(() => import('@/components/admin/AdminLayout.vue'))
 const route = useRoute()
 const userStore = useUserStore()
-const useAdminSupportLayout = computed(() => route.path === '/support' && userStore.isAdmin())
+const useAdminSharedLayout = computed(() => (
+  isAdminSharedRoute(route.path) && userStore.isAdmin()
+))
 
 /**
  * 打开或关闭移动端侧边导航
@@ -39,7 +42,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', closeSidebarOnEscape
 </script>
 
 <template>
-  <AdminLayout v-if="useAdminSupportLayout" />
+  <AdminLayout v-if="useAdminSharedLayout" />
   <div v-else class="app-layout">
     <AppSidebar :mobile-open="sidebarVisible" @close="closeSidebar" />
     <transition name="sidebar-mask-fade">
