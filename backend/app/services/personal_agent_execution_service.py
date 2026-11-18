@@ -1,4 +1,4 @@
-"""A single private, billable, non-retrying personal Agent text request."""
+"""Gated, billable, non-retrying text execution for personal and published Agents."""
 
 from __future__ import annotations
 

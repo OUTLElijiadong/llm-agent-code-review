@@ -1,4 +1,4 @@
-"""Private personal Agent management and gated single-text execution; publication is unavailable."""
+"""Owner-scoped personal Agent management and gated single-text execution."""
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import Field
